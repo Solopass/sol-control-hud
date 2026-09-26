@@ -41,7 +41,7 @@ def play_alert_sound(sound_type: int | None = None) -> None:
 SETTINGS_FILE = DATA_DIR / "ticker-settings.json"
 LOCK_FILE = DATA_DIR / "ticker.lock"
 TRIGGER_FILE = DATA_DIR / "ticker-activate.trigger"
-STARTUP_PATH = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "SOL Ticker HUD.lnk"
+STARTUP_PATH = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup" / "SOL Control HUD.lnk"
 HUD_WEB_URL = "http://127.0.0.1:7900"
 WINDOW_TITLE = "SOL Ticker HUD"
 
@@ -149,9 +149,9 @@ def set_startup(enable: bool) -> bool:
             shell = win32com.client.Dispatch("WScript.Shell")
             sc = shell.CreateShortcut(str(STARTUP_PATH))
             sc.TargetPath = str(ROOT / ".venv" / "Scripts" / "pythonw.exe")
-            sc.Arguments = "-m sol_control_hud.views.ticker"
+            sc.Arguments = "-m sol_control_hud"   # the whole app (it opens your saved views)
             sc.WorkingDirectory = str(ROOT)
-            sc.Description = "SOL Ticker HUD - Taskbar Ambient Status"
+            sc.Description = "SOL Control HUD: taskbar ticker + dashboard"
             sc.IconLocation = "shell32.dll, 238"
             sc.Save()
             return True
