@@ -4,155 +4,141 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SOL Control HUD</title>
-<style>
-  :root { --bg:#070b14; --panel:#0e1524; --line:#1c2940; --text:#d7e3f4; --dim:#7f93b0; --ok:#3ddc97; --warn:#f5b54a; --bad:#ff5d73; --accent:#5ab8ff; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 "Segoe UI", system-ui, sans-serif; }
-  header { display:flex; align-items:baseline; gap:12px; padding:14px 20px; border-bottom:1px solid var(--line); }
-  header h1 { margin:0; font-size:18px; letter-spacing:.12em; }
-  header .age { color:var(--dim); font-size:12px; margin-left:auto; }
-  header button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:4px 12px; font:12px "Segoe UI", sans-serif; cursor:pointer; }
-  header button:hover { border-color:var(--accent); }
-  main { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px; padding:16px 20px; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
-  .card h2 { margin:0 0 10px; font-size:12px; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; display:flex; justify-content:space-between; }
-  .big { font-size:26px; font-weight:600; }
-  .row { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
-  .row span:first-child { color:var(--dim); }
-  .bar { height:6px; background:#1a2438; border-radius:3px; overflow:hidden; margin:6px 0 2px; }
-  .bar i { display:block; height:100%; background:var(--accent); }
-  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); } .dim { color:var(--dim); }
-  .pill { font-size:11px; padding:1px 8px; border-radius:10px; border:1px solid currentColor; }
-  ul { margin:4px 0 0; padding-left:18px; }
-  #banner { display:none; margin:14px 20px 0; padding:12px 16px; border-radius:10px; border:1px solid var(--bad); background:#2a0f17; }
-  #banner b { color:var(--bad); }
-  .stack { display:flex; height:12px; border-radius:4px; overflow:hidden; background:#1a2438; margin:8px 0 6px; }
-  .stack i { display:block; height:100%; }
-  .legend { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--dim); }
-  .legend span::before { content:""; display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; background:var(--c); }
-</style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header><h1>SOL CONTROL HUD</h1><span class="dim">dashboard</span><span class="age" id="age">connecting…</span><button id="tickerBtn" hidden>…</button></header>
-<div id="banner"></div>
-<main id="grid"></main>
-<script>
-const $ = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstChild; };
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const pill = (up, yes = 'UP', no = 'DOWN') => `<span class="pill ${up ? 'ok' : 'bad'}">${up ? yes : no}</span>`;
-const bar = (pct, cls = '') => `<div class="bar"><i class="${cls}" style="width:${Math.max(0, Math.min(100, pct || 0))}%"></i></div>`;
-const row = (k, v) => `<div class="row"><span>${esc(k)}</span><span>${v}</span></div>`;
+<div class="backdrop" aria-hidden="true"><i></i><i></i><i></i></div>
 
-function cards(s) {
-  const out = [];
-  const g = s.gpu || {};
-  out.push(g.available
-    ? `<section class="card"><h2>GPU <span class="dim">${esc(g.name)}</span></h2>
-        <div class="big">${g.load_percent}%</div>${bar(g.load_percent)}
-        <div class="dim" style="font-size:12px">${Object.entries(g.engines || {}).map(([k, v]) => `${esc(k)} ${v}%`).join(' · ') || 'idle'}</div>
-        ${row('VRAM', `${g.vram_used_gb} / ${g.vram_total_gb ?? '?'} GB`)}${bar(100 * g.vram_used_gb / (g.vram_total_gb || 16))}</section>`
-    : `<section class="card"><h2>GPU</h2><div class="warn">unavailable</div><div class="dim">${esc(g.error)}</div></section>`);
+<header>
+  <div class="brand"><span class="live" id="live"></span>SOL <b>CONTROL</b> HUD</div>
+  <div class="mode" id="mode">…</div>
+  <div class="headline" id="headline"></div>
+  <span class="age" id="age">connecting…</span>
+  <select id="theme" title="Theme (the ticker uses the same one)"></select>
+  <button id="tickerBtn" hidden>…</button>
+</header>
 
-  const v = s.vram || {};
-  out.push(vramCard(v));
+<div class="alerts" id="alerts"></div>
 
-  const o = s.ollama || {};
-  const loaded = (o.loaded || []).map(m => `<li>${esc(m.name)} <span class="dim">${m.vram_gb}/${m.size_gb} GB · Ollama says ${m.gpu_percent}% GPU · ctx ${m.context ?? '?'}</span></li>`).join('');
-  const win = v.available && v.ai.dedicated_gb > 0.5
-    ? row('Windows view', `<span class="${v.evicted ? 'bad' : 'ok'}">${v.ai.dedicated_gb} GB on card · ${v.ai.shared_gb} GB in RAM</span>`) : '';
-  out.push(`<section class="card"><h2>Ollama-API translator <span class="dim">:11434</span> ${pill(o.up)}</h2>
-    ${o.up ? row('version', esc(o.version)) + row('loaded models', (o.loaded || []).length) + (loaded ? `<ul>${loaded}</ul>` + win : '<div class="dim">no model loaded (VRAM free)</div>') : '<div class="dim">engine not running</div>'}</section>`);
+<section class="away" id="away" hidden>
+  <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+    <circle class="track" cx="60" cy="60" r="52"/>
+    <circle class="fill" id="awayRing" cx="60" cy="60" r="52"/>
+  </svg>
+  <div class="away-pct" id="awayPct">–</div>
+  <div class="away-text">
+    <div class="away-title">AWAY MODE <span id="awayWho"></span></div>
+    <div class="away-line" id="awayLine">Getting ready…</div>
+    <div class="away-sub" id="awaySub"></div>
+    <div class="away-queue" id="awayQueue"></div>
+  </div>
+  <button class="danger" id="stopAi">Stop AI work</button>
+</section>
 
-  const ls = s.llama_swap || {};
-  out.push(`<section class="card"><h2>AI router <span class="dim">:11440</span> ${pill(ls.up, 'UP', 'OFF')}</h2>
-    ${ls.up ? ((ls.running || []).map(r => row(r.model, esc(r.state))).join('') || '<div class="dim">idle</div>') : '<div class="dim">not started (planned)</div>'}</section>`);
+<main class="grid">
+  <article class="card" id="c-gpu">
+    <h2>GPU <span class="dim" id="gpuName"></span></h2>
+    <div class="hero"><span class="big" id="gpuLoad">–</span><span class="unit">%</span>
+      <div class="temps" id="gpuTemps"></div></div>
+    <div class="engines" id="gpuEngines"></div>
+    <canvas class="chart" id="chGpu" data-series="gpu,temp" data-max="100,110"></canvas>
+    <div class="legend"><span style="--c:var(--cyan)">load</span><span style="--c:var(--amber)">temp °C</span><span class="dim" id="gpuFan"></span></div>
+  </article>
 
-  const m = s.memory || {};
-  out.push(`<section class="card"><h2>RAM</h2><div class="big">${m.used_gb ?? '?'} <span class="dim" style="font-size:14px">/ ${m.total_gb ?? '?'} GB</span></div>${bar(m.percent)}</section>`);
+  <article class="card" id="c-vram">
+    <h2>VRAM <span class="pill" id="vramVerdict">…</span></h2>
+    <div class="hero"><span class="big" id="vramUsed">–</span><span class="unit" id="vramTotal">/ – GB</span></div>
+    <div class="stack" id="vramStack"></div>
+    <div class="legend" id="vramLegend"></div>
+    <div class="note" id="vramNote"></div>
+    <canvas class="chart" id="chVram" data-series="vram" data-max="16"></canvas>
+  </article>
 
-  const w = s.wsl || {};
-  const failed = w.failed_units;
-  out.push(`<section class="card"><h2>WSL ${pill(w.state === 'Running', 'RUNNING', (w.state || '?').toUpperCase())}</h2>
-    ${row('distro', esc(w.distro))}
-    ${w.state === 'Running' ? row('failed units', failed == null ? '<span class="warn">?</span>' : failed.length ? `<span class="bad">${failed.length}</span>` : '<span class="ok">0</span>') : '<div class="dim">stopped (not started by HUD)</div>'}</section>`);
+  <article class="card" id="c-ai" data-open="AI">
+    <h2>Local AI <span class="dim">:11440</span></h2>
+    <div class="model" id="aiModel"><span class="orb"></span><div><div class="model-name" id="aiName">–</div><div class="dim" id="aiState"></div></div></div>
+    <div class="list" id="aiModels"></div>
+    <div class="row"><span>GPU lock</span><b id="aiLock">–</b></div>
+  </article>
 
-  const d = s.disks || [];
-  out.push(`<section class="card"><h2>Disks</h2>${d.map(x => x.error ? row(x.drive + ':', '<span class="warn">n/a</span>') : row(x.drive + ':', `${x.free_gb} GB free`) + bar(x.percent, x.percent > 90 ? 'bad' : '')).join('')}</section>`);
+  <article class="card wide" id="c-chains" data-open="RUN">
+    <h2>Chains <button class="mini" data-act="open" data-target="RUN">open folder</button></h2>
+    <div class="seg" id="runSeg"></div>
+    <div class="pipeline" id="pipeline" hidden></div>
+    <div class="bar" id="itemsBar" hidden><i></i></div>
+    <div class="cols">
+      <div><h3>Waiting</h3><div class="list" id="chPending"></div></div>
+      <div><h3>Scheduled</h3><div class="list" id="chSched"></div></div>
+    </div>
+  </article>
 
-  const b = s.backups || {};
-  out.push(`<section class="card"><h2>WSL backup</h2>${b.latest
-    ? row('latest', esc(b.latest)) + row('age', `<span class="${b.stale ? 'bad' : 'ok'}">${b.age_hours} h</span>`)
-    : '<div class="bad">no backup found</div>'}</section>`);
+  <article class="card" id="c-awayq" data-open="NIGHT">
+    <h2>Away &amp; queue</h2>
+    <div class="list" id="queueList"></div>
+    <div class="seg small" id="nightSeg"></div>
+    <div class="buttons">
+      <button data-act="away-sleep" data-confirm="Start Away now? The screens go black, the queue and Away chains run, then the PC sleeps.">AI Away + Sleep</button>
+      <button class="ghost" data-act="open" data-target="NIGHT">last review</button>
+    </div>
+  </article>
 
-  const st = s.stability || {};
-  const cls = (n) => n ? 'bad' : 'ok';
-  out.push(`<section class="card"><h2>Stability <span class="dim">since baseline</span></h2>${st.available
-    ? row('WHEA hardware errors', `<span class="${cls(st.whea)}">${st.whea}</span>`) + row('unexpected reboots', `<span class="${cls(st.unexpected_reboots)}">${st.unexpected_reboots}</span>`) + row('GPU driver resets', `<span class="${cls(st.gpu_driver_resets)}">${st.gpu_driver_resets}</span>`)
-    : '<div class="warn">unavailable</div>'}</section>`);
-  return out;
-}
+  <article class="card" id="c-system">
+    <h2>Memory · CPU · Network</h2>
+    <div class="trio">
+      <div><div class="dim">RAM</div><span class="mid" id="ramUsed">–</span><span class="unit" id="ramTotal"></span></div>
+      <div><div class="dim">CPU</div><span class="mid" id="cpuPct">–</span><span class="unit">%</span></div>
+      <div><div class="dim">↓ / ↑</div><span class="mid small" id="netRate">–</span></div>
+    </div>
+    <div class="bar" id="ramBar"><i></i></div>
+    <canvas class="chart" id="chSys" data-series="ram,cpu" data-max="96,100"></canvas>
+    <div class="legend"><span style="--c:var(--green)">RAM GB</span><span style="--c:var(--cyan)">CPU %</span></div>
+    <canvas class="chart short" id="chNet" data-series="down,up" data-max="auto"></canvas>
+    <div class="legend"><span style="--c:var(--cyan)">down KB/s</span><span style="--c:var(--amber)">up KB/s</span></div>
+  </article>
 
-const VERDICT = { OK: ['ok', 'MODEL OK'], FITS: ['ok', 'FITS'], TIGHT: ['warn', 'TIGHT'], WONT_FIT: ['bad', "WON'T FIT"], EVICTED: ['bad', 'EVICTED'], UNKNOWN: ['warn', '?'] };
+  <article class="card" id="c-disks" data-open="DISK">
+    <h2>Disks <span class="dim">▼ used up · ▲ freed (last hour)</span></h2>
+    <div id="diskList"></div>
+  </article>
 
-function vramCard(v) {
-  if (!v.available) return `<section class="card"><h2>VRAM budget</h2><div class="warn">unavailable</div><div class="dim">${esc(v.error)}</div></section>`;
-  const card = v.card_gb || 16;
-  const desktop = (v.top_consumers || []).filter(t => t.name === 'dwm').reduce((a, t) => a + t.gb, 0);
-  const other = Math.max(0, v.others_gb - desktop);
-  const model = v.ai.dedicated_gb;
-  const free = Math.max(0, card - v.others_gb - model);
-  const seg = (gb, c) => `<i style="width:${100 * gb / card}%;background:${c}"></i>`;
-  const [cls, label] = VERDICT[v.verdict] || ['warn', v.verdict];
-  const count = (v.ai.models || []).length;
-  const modelLabel = count > 1 ? `${count} models (combined)` : 'model';
-  const top = (v.top_consumers || []).slice(0, 5).map(t => row(t.label, `≈ ${t.gb} GB`)).join('');
-  const need = v.need || {};  // was an undefined variable: the whole page failed whenever no model was loaded
-  const sub = model > 0.5
-    ? `${v.spare_gb} GB spare with ${count > 1 ? count + ' models' : 'the model'} loaded`
-    : need.gb ? `${esc(need.model)} needs ~${need.gb} GB <span class="dim">(${need.source}, ctx ${need.ctx})</span> · ${v.room_gb} GB free of other programs` : '';
-  return `<section class="card"><h2>VRAM budget <span class="pill ${cls}">${label}</span></h2>
-    <div class="stack">${seg(model, v.evicted ? 'var(--bad)' : 'var(--accent)')}${seg(desktop, '#8a6cff')}${seg(other, 'var(--warn)')}${seg(free, '#24324c')}</div>
-    <div class="legend"><span style="--c:${v.evicted ? 'var(--bad)' : 'var(--accent)'}">${modelLabel} ${model}</span><span style="--c:#8a6cff">desktop ${desktop.toFixed(2)}</span><span style="--c:var(--warn)">other apps ${other.toFixed(2)}</span><span style="--c:#24324c">free ${free.toFixed(2)} GB</span></div>
-    <div style="margin:8px 0 4px">${sub}</div>${top}</section>`;
-}
+  <article class="card" id="c-stab" data-open="SYS">
+    <h2>Stability &amp; backups</h2>
+    <div class="seg" id="sysSeg"></div>
+    <div class="row"><span>Crash events since review</span><b id="crashCount">–</b></div>
+    <div class="row"><span>Reviewed until</span><span id="ackUntil">–</span></div>
+    <div class="row"><span>WSL</span><span id="wslState">–</span></div>
+    <div class="note clamp" id="ackNote"></div>
+  </article>
 
-function banner(v) {
-  const el = document.getElementById('banner');
-  if (!v || !v.available || !(v.evicted || v.verdict === 'WONT_FIT')) { el.style.display = 'none'; return; }
-  const free = (v.suggest_free || []).map(t => `${esc(t.label)} ≈ ${t.gb} GB`).join(', ') || 'close other GPU-heavy apps';
-  el.innerHTML = v.evicted
-    ? `<b>Model partly in system RAM (${v.ai.shared_gb} GB)</b> — expect 2–5× slower. Free VRAM: ${free}. Then reload the model (<code>tools\\sol-llm.ps1 restart</code>).`
-    : `<b>${esc(v.need.model)} won't fit right now</b> — needs ~${v.need.gb} GB, ${v.room_gb} GB free of other programs. Free: ${free}.`;
-  el.style.display = 'block';
-}
+  <article class="card" id="c-svc">
+    <h2>Services</h2>
+    <div class="svc" id="svcList"></div>
+  </article>
 
-let last = 0;
-async function refresh() {
-  try {
-    const r = await fetch('/api/status', { cache: 'no-store' });
-    const s = await r.json();
-    const grid = document.getElementById('grid');
-    grid.replaceChildren(...cards(s).map($));
-    banner(s.vram);
-    last = Date.now();
-  } catch (e) {
-    document.getElementById('age').innerHTML = '<span class="bad">HUD backend unreachable</span>';
-  }
-}
-setInterval(() => { if (last) document.getElementById('age').textContent = `updated ${Math.round((Date.now() - last) / 1000)}s ago`; }, 1000);
-// the hub (python -m sol_control_hud) runs the ticker in the same process: show / hide it from here
-async function views(change) {
-  try {
-    const r = await fetch('/api/views', change ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) } : { cache: 'no-store' });
-    const v = await r.json(); const b = document.getElementById('tickerBtn');
-    const on = change && 'ticker' in change ? change.ticker : v.ticker;
-    b.hidden = false; b.textContent = on ? 'Hide ticker' : 'Show ticker'; b.onclick = () => views({ ticker: !on });
-  } catch (e) { /* the old standalone server has no /api/views */ }
-}
-views();
-// a background tab asks for nothing (and the hub then slows down its own collecting)
-refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 2000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); views(); } });
-</script>
+  <article class="card" id="c-work" data-open="GIT">
+    <h2>Workspace</h2>
+    <div class="note-ring">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><circle class="track" cx="32" cy="32" r="27"/><circle class="fill" id="noteRing" cx="32" cy="32" r="27"/></svg>
+      <div><div class="mid" id="noteWords">–</div><div class="dim" id="noteSub">daily note</div></div>
+      <button class="mini" data-act="open" data-target="NOTE">open note</button>
+    </div>
+    <div class="seg" id="gitSeg"></div>
+    <div class="chips" id="gitRepos"></div>
+    <div class="media" id="media" hidden><span class="eq"><i></i><i></i><i></i><i></i></span><span id="mediaText"></span></div>
+  </article>
+
+  <article class="card wide" id="c-activity">
+    <h2>Activity</h2>
+    <ol class="feed" id="feed"></ol>
+  </article>
+</main>
+
+<footer>
+  <span style="--c:var(--red)">problem / getting worse</span><span style="--c:var(--amber)">worth a look</span>
+  <span style="--c:var(--green)">good / getting better</span><span style="--c:var(--cyan)">working now</span>
+  <span style="--c:var(--muted)">idle</span>
+  <span class="dim" id="foot"></span>
+</footer>
+<script src="/static/app.js"></script>
 </body>
 </html>

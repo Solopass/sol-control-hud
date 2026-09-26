@@ -42,8 +42,8 @@ def build_collectors(sampler: gpu.GpuSampler, guard: vram.GuardLoop) -> dict[str
         "memory": Cached(system.memory, 2),
         "disks": Cached(system.disks, 30),
         "backups": Cached(system.backups, 60),
-        "wsl": Cached(system.wsl, 10),
-        "stability": Cached(system.stability, 60),
+        "wsl": Cached(system.wsl, 60),                # starts wsl.exe: once a minute is plenty
+        "stability": Cached(system.stability, 300),   # a PowerShell event query: every 5 min, like the ticker
     }
 
 

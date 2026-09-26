@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from sol_control_hud import hub
 from sol_control_hud.data.snapshot import Snapshot
 
+OURS = {"X-SOL-Control": "1"}
+
 
 def test_which_views_start():
     saved = {"ticker": True, "dashboard_at_start": False}
@@ -55,9 +57,9 @@ def test_dashboard_gets_the_tickers_data_and_can_switch_views(the_hub):
     assert any(sl["tag"] == "ALERT" for sl in s["slides"]) and s["views"]["ticker"] is True
     json.dumps(s)                                                            # all plain JSON
     assert the_hub.last_web > 0                                              # counts as someone looking
-    r = c.post("/api/views", json={"ticker": False}).json()
+    r = c.post("/api/views", json={"ticker": False}, headers=OURS).json()
     assert r["queued"] and the_hub.cmds.get_nowait() == "hide_ticker"
-    c.post("/api/views", json={"dashboard_at_start": True})
+    c.post("/api/views", json={"dashboard_at_start": True}, headers=OURS)
     assert the_hub.cmds.get_nowait() == ("dashboard_at_start", True)
     assert c.get("/").status_code == 200
 

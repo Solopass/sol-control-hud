@@ -25,6 +25,9 @@ import threading
 import time
 import traceback
 import webbrowser
+from pathlib import Path
+
+from fastapi import Request   # module level: annotations are strings here, FastAPI resolves them from globals
 
 from .data.collectors import engines, vram
 from .data.snapshot import TickerCollector, attention, format_multiline_rows, format_slides
@@ -131,6 +134,8 @@ class Hub:
         self.last_web = -1e9
         self.pace = ACTIVE_PACE
         self.ticker = self.server = self.tray = self.root = None
+        from .views.web.feed import History
+        self.history = History()
 
     # ---- callable from any thread (the tray thread, the web server, the ticker's Tk callbacks)
     def show_ticker(self) -> None:
@@ -148,7 +153,33 @@ class Hub:
     def views(self) -> dict:
         t = self.ticker
         return {"hub": True, "ticker": bool(t and not t.user_hidden), "pace_s": self.pace,
-                "dashboard_at_start": bool(self.settings["dashboard_at_start"])}
+                "dashboard_at_start": bool(self.settings["dashboard_at_start"]),
+                "theme": getattr(t, "theme_name", None)}       # one theme for both views
+
+    OPEN_TARGETS = ("AI", "RUN", "NOTE", "GIT", "SYS", "DISK", "NET", "MEDIA", "NIGHT", "HW")
+
+    def do_action(self, action: str, target: str = "") -> dict:
+        """The dashboard's buttons. Machine changes go through the same safe paths as the ticker and the Away panel."""
+        import subprocess
+        llm = Path(r"D:\AI\Cache\llm")
+        if action == "stop_ai":
+            state = json.loads((llm / "state.json").read_text(encoding="utf-8")) if (llm / "state.json").exists() else {}
+            if state.get("mode") != "away":
+                return {"ok": False, "why": "Away isn't running"}
+            (llm / "away-stop.flag").write_text(time.strftime("%Y-%m-%dT%H:%M:%S"), encoding="utf-8")
+            return {"ok": True, "why": "stopping: the job goes back in the queue"}
+        if action in ("away", "away-sleep"):
+            script = Path(r"D:\OBVLT\tools\sol-llm.ps1")
+            subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), action],
+                             creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return {"ok": True, "why": f"starting {action}"}
+        if action == "open" and target in self.OPEN_TARGETS:
+            self.cmds.put(("open", target))       # the ticker's own targets (folders, the daily note, reports)
+            return {"ok": True}
+        if action == "theme" and target:
+            self.cmds.put(("theme", target))
+            return {"ok": True}
+        return {"ok": False, "why": f"unknown action {action!r}"}
 
     # ---- setup
     def run(self) -> None:
@@ -180,18 +211,68 @@ class Hub:
         self.server = uvicorn.Server(uvicorn.Config(self.build_app(), host="127.0.0.1", port=self.port, log_level="warning"))
         threading.Thread(target=self._serve, name="web", daemon=True).start()
 
-    def build_app(self):
-        """The dashboard's web app: the old /api/status (cards) plus /api/snapshot and /api/views, on this hub's data."""
-        from fastapi import Body, Request
+    def dashboard_payload(self) -> dict:
+        """Everything the dashboard shows, in one message (pushed every 2 s over /api/stream)."""
+        c = self.collectors
+        return {**snapshot_payload(self.collector, self.views()), "gpu": c["gpu"].get(), "vram_guard": c["vram"].get(),
+                "router": c["llama_swap"].get(), "wsl": c["wsl"].get(), "stability": c["stability"].get(),
+                "away": c["away"].get(), "chains": c["chains"].get(), "activity": c["activity"].get(),
+                "point": self.history.latest(), "server_time": time.time()}
 
-        from .views.web.app import build_collectors, create_app
-        app = create_app(collectors=build_collectors(self.collector._sampler, self.guard))
+    def build_app(self):
+        """The dashboard's web app on this hub's data: the page + /static, /api/stream (pushed), /api/snapshot,
+        /api/history, /api/meta, /api/views and /api/action (POST: our page only), /api/status (the old cards)."""
+        import asyncio
+
+        from fastapi import Body
+        from fastapi.responses import JSONResponse, StreamingResponse
+        from fastapi.staticfiles import StaticFiles
+
+        from .views.web import feed
+        from .views.web.app import STATIC, Cached, build_collectors, create_app
+        self.collectors = build_collectors(self.collector._sampler, self.guard)
+        self.collectors.update({"away": Cached(feed.away_info, 1.5), "chains": Cached(lambda: feed._read_json(feed.LLM_DIR / "chains.json"), 1.5),
+                                "activity": Cached(feed.activity, 5)})
+        app = create_app(collectors=self.collectors)
+        app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
         @app.middleware("http")
-        async def seen(request: Request, call_next):
+        async def guard_and_seen(request: Request, call_next):
+            if request.method == "POST":
+                # only this page may change things: a custom header forces a CORS preflight (which nothing here
+                # answers), and a browser's Origin must be this server. Other web pages can't press these buttons.
+                origin = request.headers.get("origin")
+                if request.headers.get("x-sol-control") != "1" or (origin and origin not in (
+                        self.url, f"http://localhost:{self.port}")):
+                    return JSONResponse({"error": "not allowed"}, status_code=403)
             if request.url.path.startswith("/api/"):
                 self.last_web = time.monotonic()      # someone has the dashboard open: keep the 2 s pace
             return await call_next(request)
+
+        @app.get("/api/stream")
+        async def stream(request: Request):
+            async def events():
+                while not await request.is_disconnected():
+                    self.last_web = time.monotonic()  # an open stream = a dashboard on screen (hidden tabs close it)
+                    payload = await asyncio.to_thread(self.dashboard_payload)
+                    yield f"data: {json.dumps(payload, default=str, separators=(',', ':'))}\n\n"
+                    await asyncio.sleep(ACTIVE_PACE)
+            return StreamingResponse(events(), media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+        @app.get("/api/history")
+        def history() -> dict:
+            return self.history.export()
+
+        @app.get("/api/meta")
+        def meta() -> dict:
+            from .views.ticker import THEMES
+            theme = getattr(self.ticker, "theme_name", "cyber-cyan")
+            return {"themes": THEMES, "theme": theme, "port": self.port, "pid": os.getpid()}
+
+        @app.post("/api/action")
+        def action(body: dict = Body(default={})) -> dict:
+            return self.do_action(str(body.get("action", "")), str(body.get("target", "")))
 
         @app.get("/api/snapshot")
         def snapshot() -> dict:
@@ -254,6 +335,13 @@ class Hub:
                 elif name == "dashboard_at_start":
                     self.settings["dashboard_at_start"] = arg
                     save_settings(self.settings)
+                elif name == "open":
+                    if arg == "NIGHT":
+                        self.ticker.open_night_summary()
+                    else:
+                        self.ticker._open_slide_target(arg)
+                elif name == "theme":
+                    self.ticker.set_theme(arg)         # one theme for both views
                 elif name == "exit":
                     self._shutdown(arg)
                     return
@@ -272,6 +360,7 @@ class Hub:
                 self.collector.set_pace(pace)
                 log(f"pace {pace:.0f} s ({'someone is looking' if pace == ACTIVE_PACE else 'nobody is looking'})")
             self.guard.stop_if_idle()
+            self.history.add(self.collector.get_snapshot())
             if self.tray:
                 alerts = attention(self.collector.get_snapshot())
                 self.tray.set_tooltip("SOL Control HUD: " + (alerts[0][1] if alerts else "all fine"))
