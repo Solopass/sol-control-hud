@@ -131,6 +131,7 @@ function render(p) {
   tb.onclick = async () => { tb.textContent = '…'; await post('/api/views', { ticker: !p.views.ticker }); };
   $('foot').textContent = `pace ${p.views.pace_s}s · ${s.gpu_name || ''}`;
   const ls = $('loginStart'); if (!ls._busy) ls.checked = !!p.views.start_at_login;
+  const no = $('notifyOn'); if (!no._busy) no.checked = p.views.notify !== false;
 
   renderAlerts(p.attention || []);
   renderAway(p);
@@ -356,6 +357,11 @@ document.addEventListener('click', async (e) => {
 $('stopAi').onclick = async () => {
   if (!confirm('Stop the Away work now? The running job goes back in the queue (finished work is kept).')) return;
   const r = await post('/api/action', { action: 'stop_ai' }); toast(r.why || 'stopping');
+};
+$('notifyOn').onchange = async (e) => {
+  const box = e.target; box._busy = true;
+  const r = await post('/api/action', { action: 'notify', target: box.checked ? 'on' : 'off' });
+  box.checked = !!r.notify; box._busy = false; if (r.why) toast(r.why);
 };
 $('loginStart').onchange = async (e) => {
   const box = e.target; box._busy = true;

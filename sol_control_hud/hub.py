@@ -39,7 +39,7 @@ LOG_FILE = DATA_DIR / "hub.log"
 # "I'm running" marker for tools\sol-llm-watch.ps1: present + its pid gone = the app died -> the watcher restarts it.
 # A clean exit (tray / ticker / dashboard Exit) removes it, so what you close stays closed.
 RUNNING_FILE = DATA_DIR / "app-running.json"
-DEFAULTS = {"ticker": True, "dashboard_at_start": False, "port": 7900}
+DEFAULTS = {"ticker": True, "dashboard_at_start": False, "port": 7900, "notify": None}   # notify: see notify.DEFAULTS
 ACTIVE_PACE, IDLE_PACE = 2.0, 10.0
 WEB_ACTIVE_S = 30.0          # a dashboard request within this long counts as "someone is looking"
 GUARD_IDLE_S = 300.0         # stop the web-only VRAM guard thread after this long without a dashboard request
@@ -161,6 +161,8 @@ class Hub:
         self.pace = ACTIVE_PACE
         self.ticker = self.server = self.tray = self.root = None
         self._login = False          # the Startup entry exists (read at start, changed through do_action)
+        self.notifier = None
+        self._prev_snap = None
         from .views.web.feed import History
         self.history = History()
 
@@ -182,7 +184,8 @@ class Hub:
         return {"hub": True, "ticker": bool(t and not t.user_hidden), "pace_s": self.pace,
                 "dashboard_at_start": bool(self.settings["dashboard_at_start"]),
                 "theme": getattr(t, "theme_name", None),       # one theme for both views
-                "start_at_login": self._login}
+                "start_at_login": self._login,
+                "notify": bool((self.settings.get("notify") or {}).get("enabled", True))}
 
     OPEN_TARGETS = ("AI", "RUN", "NOTE", "GIT", "SYS", "DISK", "NET", "MEDIA", "NIGHT", "HW")
 
@@ -207,6 +210,18 @@ class Hub:
         if action == "theme" and target:
             self.cmds.put(("theme", target))
             return {"ok": True}
+        if action == "notify" and target in ("on", "off", "test"):
+            if target == "test":
+                return {"ok": self.notify_now("SOL Control HUD", "Notifications work. You'll see Away results, chain failures, "
+                                              "crashes, disks filling up and VRAM spills here."), "why": "test notification sent"}
+            if not isinstance(self.settings.get("notify"), dict):
+                from . import notify
+                self.settings["notify"] = json.loads(json.dumps(notify.DEFAULTS))
+            self.settings["notify"]["enabled"] = target == "on"
+            if self.notifier:
+                self.notifier.settings = self.settings["notify"]
+            save_settings(self.settings)
+            return {"ok": True, "why": f"notifications {target}", "notify": target == "on"}
         if action == "login_start" and target in ("on", "off"):
             self._login = start_at_login(target == "on")
             log(f"start at login: {'on' if self._login else 'off'}")
@@ -235,6 +250,7 @@ class Hub:
         except Exception:  # noqa: BLE001 - reading a shortcut must never stop the app
             self._login = False
         write_running_marker()
+        self._start_notifier()
         log(f"start (pid {os.getpid()}, dashboard {self.url}, ticker {'on' if self.start_ticker else 'hidden'}, "
             f"start at login {'on' if self._login else 'off'})")
         self.root.after(250, self._pump)
@@ -243,6 +259,20 @@ class Hub:
             self.root.mainloop()
         finally:
             log("mainloop ended")
+
+    def _start_notifier(self) -> None:
+        from . import notify
+        from .data.snapshot import night_summary
+        if not isinstance(self.settings.get("notify"), dict):
+            self.settings["notify"] = json.loads(json.dumps(notify.DEFAULTS))
+        llm = Path(r"D:\AI\Cache\llm")
+        self.notifier = notify.Notifier(self.settings["notify"], llm / "away.jsonl", llm / "chains.log",
+                                        session_fn=night_summary)
+
+    def notify_now(self, title: str, text: str, level: str = "info") -> bool:
+        ok = bool(self.tray and self.tray.notify(title, text, level))
+        log(f"notice ({level}): {title}: {text[:120]}{'' if ok else ' [not shown: no tray]'}")
+        return ok
 
     def _start_web(self) -> None:
         import uvicorn
@@ -357,12 +387,16 @@ class Hub:
                      lambda: self.cmds.put(("dashboard_at_start", not self.settings["dashboard_at_start"])),
                      bool(self.settings["dashboard_at_start"])),
                     ("Start at login", lambda: self.do_action("login_start", "off" if self._login else "on"), self._login),
+                    ("Notifications", lambda: self.do_action("notify", "off" if self.views()["notify"] else "on"),
+                     self.views()["notify"]),
+                    ("Send a test notification", lambda: self.do_action("notify", "test"), False),
                     None,
                     ("Exit SOL Control HUD", lambda: self.exit("tray Exit"), False)]
         # click: show the ticker if it's hidden, else open the dashboard
         self.tray = Tray("SOL Control HUD", menu,
                          on_click=lambda: (self.open_dashboard() if self.ticker and not self.ticker.user_hidden
-                                           else self.show_ticker()))
+                                           else self.show_ticker()),
+                         on_notice_click=self.open_dashboard)
         if not self.tray.start():
             log("tray icon could not be created")
 
@@ -404,7 +438,13 @@ class Hub:
                 self.collector.set_pace(pace)
                 log(f"pace {pace:.0f} s ({'someone is looking' if pace == ACTIVE_PACE else 'nobody is looking'})")
             self.guard.stop_if_idle()
-            self.history.add(self.collector.get_snapshot())
+            snap = self.collector.get_snapshot()
+            self.history.add(snap)
+            if self.notifier and snap.sampled_at:
+                busy = bool(t and t._is_hidden_for_fullscreen) or (snap.ai_mode == "off" and str(snap.ai_reason or "").startswith("game"))
+                for n in self.notifier.check(self._prev_snap, snap, busy):
+                    self.notify_now(n.title, n.text, n.level)
+                self._prev_snap = snap
             if self.tray:
                 alerts = attention(self.collector.get_snapshot())
                 self.tray.set_tooltip("SOL Control HUD: " + (alerts[0][1] if alerts else "all fine"))

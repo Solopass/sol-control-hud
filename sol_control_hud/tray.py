@@ -16,7 +16,9 @@ WM_NULL, WM_DESTROY, WM_CLOSE, WM_USER = 0x0000, 0x0002, 0x0010, 0x0400
 WM_TRAY = WM_USER + 20
 WM_LBUTTONUP, WM_RBUTTONUP = 0x0202, 0x0205
 NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
-NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
+NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO = 0x1, 0x2, 0x4, 0x10
+NIIF = {"info": 0x1, "warning": 0x2, "error": 0x3}          # the icon Windows shows next to a notification
+NIN_BALLOONUSERCLICK = WM_USER + 5                          # the user clicked the notification
 MF_STRING, MF_CHECKED, MF_GRAYED, MF_SEPARATOR = 0x0, 0x8, 0x1, 0x800
 TPM_RIGHTBUTTON, TPM_RETURNCMD, TPM_NONOTIFY = 0x2, 0x100, 0x80
 
@@ -58,8 +60,9 @@ MenuItem = tuple[str, Callable[[], None], bool] | None
 
 class Tray:
     def __init__(self, tooltip: str, menu: Callable[[], list[MenuItem]], on_click: Callable[[], None] | None = None,
-                 icon: tuple[str, int] = ("shell32.dll", 238)):
+                 icon: tuple[str, int] = ("shell32.dll", 238), on_notice_click: Callable[[], None] | None = None):
         self.tooltip, self.menu, self.on_click, self.icon_src = tooltip, menu, on_click, icon
+        self.on_notice_click = on_notice_click
         self.hwnd = None
         self._ready = threading.Event()
         self._thread = threading.Thread(target=self._run, name="tray", daemon=True)
@@ -79,6 +82,12 @@ class Tray:
         if self.hwnd:
             self._notify(NIM_MODIFY)
 
+    def notify(self, title: str, text: str, level: str = "info") -> bool:
+        """A Windows notification from this tray icon (Windows 11 shows it like any app's; Focus/Do not disturb applies)."""
+        if not self.hwnd:
+            return False
+        return self._notify(NIM_MODIFY, info=(title[:63], text[:255] or " ", NIIF.get(level, 0x1)))
+
     # ---- window thread
     def _run(self) -> None:
         hinst = k32.GetModuleHandleW(None)
@@ -96,13 +105,16 @@ class Tray:
             u32.TranslateMessage(ctypes.byref(msg))
             u32.DispatchMessageW(ctypes.byref(msg))
 
-    def _notify(self, action: int) -> None:
+    def _notify(self, action: int, info: tuple[str, str, int] | None = None) -> bool:
         nid = NOTIFYICONDATAW()
         nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
         nid.hWnd, nid.uID = self.hwnd, 1
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage, nid.hIcon, nid.szTip = WM_TRAY, self._hicon, self.tooltip[:127]
-        sh32.Shell_NotifyIconW(action, ctypes.byref(nid))
+        if info:
+            nid.uFlags |= NIF_INFO
+            nid.szInfoTitle, nid.szInfo, nid.dwInfoFlags = info
+        return bool(sh32.Shell_NotifyIconW(action, ctypes.byref(nid)))
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         if msg == WM_TRAY:
@@ -111,6 +123,8 @@ class Tray:
                 self._show_menu()
             elif event == WM_LBUTTONUP and self.on_click:
                 self._safe(self.on_click)
+            elif event == NIN_BALLOONUSERCLICK and self.on_notice_click:
+                self._safe(self.on_notice_click)
             return 0
         if msg == getattr(self, "_taskbar_created", -1):   # Explorer restarted: the icon is gone, add it again
             self._notify(NIM_ADD)
