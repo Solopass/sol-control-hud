@@ -31,7 +31,7 @@ def test_status_contains_every_collector_and_survives_a_broken_one():
 def test_index_served():
     client = TestClient(create_app(collectors={}))
     r = client.get("/")
-    assert r.status_code == 200 and "SOL HUD" in r.text
+    assert r.status_code == 200 and "SOL Control HUD" in r.text
 
 
 def test_cached_respects_ttl():

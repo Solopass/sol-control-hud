@@ -1,3 +1,2 @@
-﻿# SOL HUD (M1). Opens only on this PC: http://127.0.0.1:7900
-& "$PSScriptRoot\.venv\Scripts\python.exe" -m sol_control_hud.views.web.app
-
+﻿# SOL Control HUD in this console (for debugging; normally use sol-control.ps1).
+& "$PSScriptRoot\.venv\Scripts\python.exe" -m sol_control_hud @args

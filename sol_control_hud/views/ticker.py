@@ -636,9 +636,13 @@ def is_foreground_fullscreen() -> bool:
 
 
 class TickerApp:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, collector: TickerCollector | None = None, hub=None):
+        """collector/hub: given when the SOL Control HUD hub runs this view (one collector shared with the dashboard;
+        ✕ then hides the ticker into the tray instead of quitting). Alone (python -m ...views.ticker) it owns both."""
         self.root = root
-        self.collector = TickerCollector()
+        self.hub = hub
+        self.user_hidden = False            # hidden by you (hub: ✕ / tray), not by the fullscreen auto-hide
+        self.collector = collector or TickerCollector()
         self.collector.start()
 
         # State & Settings
@@ -711,7 +715,8 @@ class TickerApp:
 
     def _keep_on_top(self) -> None:
         try:
-            if (not self._is_hidden_for_fullscreen and getattr(self, "hwnd", None) and covered_by_taskbar(self.hwnd)
+            if (not self._is_hidden_for_fullscreen and not self.user_hidden and getattr(self, "hwnd", None)
+                    and covered_by_taskbar(self.hwnd)
                     and not is_foreground_fullscreen()):
                 raise_topmost(self.hwnd)
                 self._raises = getattr(self, "_raises", 0) + 1
@@ -1320,6 +1325,10 @@ class TickerApp:
         menu.add_command(label=mode_text, command=self.toggle_mode)
         menu.add_command(label=dock_text, command=self.toggle_dock)
         menu.add_command(label="Next Slide (Space)", command=self._manual_next_slide)
+        if self.hub:
+            menu.add_separator()
+            menu.add_command(label="🌐 Open dashboard (browser)", command=self.hub.open_dashboard)
+            menu.add_command(label="Hide ticker (stays in the tray)", command=self.hub.hide_ticker)
         menu.add_separator()
 
         # Quick Actions submenu
@@ -1332,7 +1341,7 @@ class TickerApp:
                                      command=lambda: self.switch_ai_mode("away-sleep"))
         actions_menu.add_command(label="📝 Open Daily Note (Obsidian)", command=lambda: self._open_slide_target("NOTE"))
         actions_menu.add_command(label="📁 Open Workspace Folder", command=lambda: self._open_slide_target("GIT"))
-        actions_menu.add_command(label="🌐 Open Web HUD (:7900)", command=self.open_web_hud)
+        actions_menu.add_command(label="🌐 Open dashboard (:7900)", command=self.open_web_hud)
         actions_menu.add_command(label="🔄 Refresh Telemetry Now", command=self.refresh_data_now)
         crashes = self.latest_snap.unexpected_reboots + self.latest_snap.gpu_resets
         if crashes > 0:
@@ -1456,7 +1465,7 @@ class TickerApp:
         menu.add_command(label="Edit Settings File (JSON)", command=self.open_settings_file)
         menu.add_command(label="Reset Position", command=self._reset_position)
         menu.add_separator()
-        menu.add_command(label="Exit", command=lambda: self.quit("menu Exit"))
+        menu.add_command(label="Exit SOL Control HUD" if self.hub else "Exit", command=lambda: self.quit("menu Exit"))
         menu.tk_popup(event.x_root, event.y_root)
 
     def set_opacity(self, val: float) -> None:
@@ -1583,6 +1592,8 @@ class TickerApp:
             self._apply_geometry()
 
     def _check_auto_hide(self) -> bool:
+        if self.user_hidden:
+            return True                    # you hid it: the fullscreen logic must not bring it back
         if not self.auto_hide_fullscreen:
             if self._is_hidden_for_fullscreen:
                 self._is_hidden_for_fullscreen = False
@@ -1811,6 +1822,9 @@ class TickerApp:
                     self.row_tooltips[i].set_text(f"{r['title']}: {full_row}")
 
     def open_web_hud(self) -> None:
+        if self.hub:                       # the hub serves the dashboard itself: just open it
+            self.hub.open_dashboard()
+            return
         open_script = ROOT / "open-hud.ps1"
         if not self.latest_snap.services.get("HUD", False) and open_script.exists():
             import subprocess
@@ -1819,7 +1833,24 @@ class TickerApp:
         else:
             webbrowser.open(HUD_WEB_URL)
 
+    def set_user_hidden(self, hidden: bool) -> None:
+        """Hide or show the ticker window (the hub's ✕ / tray / dashboard button). The fullscreen auto-hide stays
+        separate: it never brings back a ticker you hid."""
+        self.user_hidden = hidden
+        if hidden:
+            self.root.withdraw()
+        elif not self._is_hidden_for_fullscreen:
+            self.root.deiconify()
+            self._apply_geometry()
+            self._render()
+
     def quit(self, why: str = "closed") -> None:
+        if self.hub:
+            if why == "✕ button":          # ✕ hides it; the hub keeps running in the tray (and serves the dashboard)
+                self.hub.hide_ticker()
+            else:
+                self.hub.exit(why)
+            return
         log_event(f"exit: {why}")
         if self._pulse_timer is not None:
             try:

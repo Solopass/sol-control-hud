@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOL HUD</title>
+<title>SOL Control HUD</title>
 <style>
   :root { --bg:#070b14; --panel:#0e1524; --line:#1c2940; --text:#d7e3f4; --dim:#7f93b0; --ok:#3ddc97; --warn:#f5b54a; --bad:#ff5d73; --accent:#5ab8ff; }
   * { box-sizing: border-box; }
@@ -11,6 +11,8 @@
   header { display:flex; align-items:baseline; gap:12px; padding:14px 20px; border-bottom:1px solid var(--line); }
   header h1 { margin:0; font-size:18px; letter-spacing:.12em; }
   header .age { color:var(--dim); font-size:12px; margin-left:auto; }
+  header button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px; padding:4px 12px; font:12px "Segoe UI", sans-serif; cursor:pointer; }
+  header button:hover { border-color:var(--accent); }
   main { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px; padding:16px 20px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
   .card h2 { margin:0 0 10px; font-size:12px; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; display:flex; justify-content:space-between; }
@@ -31,7 +33,7 @@
 </style>
 </head>
 <body>
-<header><h1>SOL HUD</h1><span class="dim">status</span><span class="age" id="age">connecting…</span></header>
+<header><h1>SOL CONTROL HUD</h1><span class="dim">dashboard</span><span class="age" id="age">connecting…</span><button id="tickerBtn" hidden>…</button></header>
 <div id="banner"></div>
 <main id="grid"></main>
 <script>
@@ -138,7 +140,19 @@ async function refresh() {
   }
 }
 setInterval(() => { if (last) document.getElementById('age').textContent = `updated ${Math.round((Date.now() - last) / 1000)}s ago`; }, 1000);
-refresh(); setInterval(refresh, 2000);
+// the hub (python -m sol_control_hud) runs the ticker in the same process: show / hide it from here
+async function views(change) {
+  try {
+    const r = await fetch('/api/views', change ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) } : { cache: 'no-store' });
+    const v = await r.json(); const b = document.getElementById('tickerBtn');
+    const on = change && 'ticker' in change ? change.ticker : v.ticker;
+    b.hidden = false; b.textContent = on ? 'Hide ticker' : 'Show ticker'; b.onclick = () => views({ ticker: !on });
+  } catch (e) { /* the old standalone server has no /api/views */ }
+}
+views();
+// a background tab asks for nothing (and the hub then slows down its own collecting)
+refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 2000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); views(); } });
 </script>
 </body>
 </html>
