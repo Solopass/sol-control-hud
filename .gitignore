@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+# settings, logs and the run history (SQLite): machine state, never in git
+data/

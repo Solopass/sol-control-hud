@@ -1,0 +1,47 @@
+# SOL Control HUD
+
+One app for the SOL workstation (a Windows 11 PC that runs local AI models on an RX 9070 XT): a **taskbar ticker** and a
+**web dashboard** as two views of one data core, plus the machinery they report on: **prompt chains** (notes that run
+as local-LLM pipelines) and **Away mode** (the PC works unattended behind a black screen with progress).
+
+Continues [sol-hud](https://github.com/Solopass/sol-hud) (tag `final-2026-09`), which built the parts separately.
+
+## Status
+**Phase 1 of `D:\OBVLT\plans\SOL_UNIFIED_APP_PLAN.md` (2026-09-26): the code moved here unchanged in behavior;
+all 208 tests pass.** The live machine still runs everything from sol-hud until the switch-over (phase 4). Next: one
+process with one collector feeding both views (phase 2), then a new animated dashboard (phase 3).
+
+## Layout
+| Folder | What |
+|---|---|
+| `sol_control_hud/data/` | the data core: collectors (GPU performance counters, AMD sensors, VRAM eviction guard, RAM, disks, backups, crash counts, media) and `snapshot.py` (what it means: alerts first, colors by meaning, trends, Away progress) |
+| `sol_control_hud/views/ticker.py` | the taskbar ticker (Tk): rotating slides, alerts first, docks in the taskbar |
+| `sol_control_hud/views/web/` | the web dashboard (FastAPI on 127.0.0.1:7900 + one page) |
+| `sol_control_hud/away/` | the Away screen (black screens, progress, Enter to come back) and its corner panel |
+| `sol_control_hud/chains/` | prompt chains: the runner, chain notes, the chain daemon (schedules, file watches, lanes that take turns on one GPU), drafting chains from a description |
+| `sol_control_hud/doctor.py` | health checks used by the morning briefing |
+| `sol_control_hud/paths.py` | where the app keeps its files (`data/`, override with `SOL_CONTROL_DATA`) |
+
+## Run (from this folder)
+```powershell
+.\sol-ticker.ps1                                          # the ticker
+.\open-hud.ps1                                            # the web dashboard (http://127.0.0.1:7900)
+.\.venv\Scripts\python.exe -m sol_control_hud.chains      # chains: note, run, chain, daemon, forge, check, runs, show
+.\.venv\Scripts\pythonw.exe -m sol_control_hud.away       # the Away screen (started by tools\sol-llm.ps1)
+.\.venv\Scripts\python.exe -m sol_control_hud.doctor --json
+.\.venv\Scripts\python.exe -m pytest -q tests
+```
+Setup: `uv venv --python "C:\Program Files\Python314\python.exe" .venv` then
+`uv pip install --python .venv\Scripts\python.exe -r requirements.txt`.
+
+## Rules the code keeps
+- Servers bind 127.0.0.1 only. Nothing polls a model directly (`/slots` counts as use and keeps it loaded).
+- No new process per poll; git with `--no-optional-locks`; Win32 handles passed as `wintypes.HWND`.
+- One color legend everywhere: red = problem or getting worse, amber = worth a look, green = good or better,
+  cyan = working now, grey = idle.
+
+## Project history
+solar-station (WSL HUD, retired 2026-09-13) → sol-hud (2026-09-13 → 09-26: dashboard, VRAM guard, chains, Away mode,
+ticker) → **sol-control-hud** (one app, one data core, two views).
+
+License: PolyForm Noncommercial 1.0.0 (see LICENSE.md, COMMERCIAL.md).
