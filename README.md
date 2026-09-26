@@ -7,9 +7,9 @@ as local-LLM pipelines) and **Away mode** (the PC works unattended behind a blac
 Continues [sol-hud](https://github.com/Solopass/sol-hud) (tag `final-2026-09`), which built the parts separately.
 
 ## Status
-**Phase 1 of `D:\OBVLT\plans\SOL_UNIFIED_APP_PLAN.md` (2026-09-26): the code moved here unchanged in behavior;
-all 208 tests pass.** The live machine still runs everything from sol-hud until the switch-over (phase 4). Next: one
-process with one collector feeding both views (phase 2), then a new animated dashboard (phase 3).
+**Live since 2026-09-26** (`D:\OBVLT\plans\SOL_UNIFIED_APP_PLAN.md` phases 0-4): one process (`python -m sol_control_hud`) with one
+collector feeding the taskbar ticker and the dashboard, plus the tray icon; the OBVLT tools run the chain runner, the
+Away screen and the doctor from here. Next: `D:\OBVLT\plans\SOL_CONTROL_HUD_NEXT_PLAN.md`.
 
 ## Layout
 | Folder | What |
@@ -33,6 +33,11 @@ process with one collector feeding both views (phase 2), then a new animated das
 ```
 Setup: `uv venv --python "C:\Program Files\Python314\python.exe" .venv` then
 `uv pip install --python .venv\Scripts\python.exe -r requirements.txt`.
+
+## Staying up
+- **Start at login** (on/off: tray menu, the ticker's right-click menu, or the dashboard footer): a normal Windows Startup entry, `SOL Control HUD.lnk`.
+- **Back after a crash:** while it runs the app keeps `data\app-running.json`; if that process dies without Exit, `D:\OBVLT\tools\sol-llm-watch.ps1` starts it again within ~10 s (at most 3 times in 10 min, then it stops and the morning briefing says so). Exit removes the file, so what you close stays closed.
+- Tests use a temporary data folder (`tests\conftest.py`): `data\` here is the live machine's state.
 
 ## Rules the code keeps
 - Servers bind 127.0.0.1 only. Nothing polls a model directly (`/slots` counts as use and keeps it loaded).

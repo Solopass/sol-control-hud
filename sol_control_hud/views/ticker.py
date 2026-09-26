@@ -1458,7 +1458,7 @@ class TickerApp:
 
         # Startup toggle
         st_state = "ON" if is_startup_enabled() else "OFF"
-        menu.add_command(label=f"Start with Windows: {st_state}", command=self.toggle_startup_menu)
+        menu.add_command(label=f"Start at login: {st_state}", command=self.toggle_startup_menu)
 
         menu.add_separator()
         menu.add_command(label="Open SOL HUD Web (:7900)", command=self.open_web_hud)
@@ -1626,6 +1626,9 @@ class TickerApp:
             pass
 
     def toggle_startup_menu(self) -> None:
+        if self.hub:                       # one place for it (the tray and the dashboard show the same switch)
+            self.hub.do_action("login_start", "off" if is_startup_enabled() else "on")
+            return
         new_state = not is_startup_enabled()
         set_startup(new_state)
 

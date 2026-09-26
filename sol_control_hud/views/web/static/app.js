@@ -130,6 +130,7 @@ function render(p) {
   const tb = $('tickerBtn'); tb.hidden = false; tb.textContent = p.views.ticker ? 'Hide ticker' : 'Show ticker';
   tb.onclick = async () => { tb.textContent = '…'; await post('/api/views', { ticker: !p.views.ticker }); };
   $('foot').textContent = `pace ${p.views.pace_s}s · ${s.gpu_name || ''}`;
+  const ls = $('loginStart'); if (!ls._busy) ls.checked = !!p.views.start_at_login;
 
   renderAlerts(p.attention || []);
   renderAway(p);
@@ -355,6 +356,11 @@ document.addEventListener('click', async (e) => {
 $('stopAi').onclick = async () => {
   if (!confirm('Stop the Away work now? The running job goes back in the queue (finished work is kept).')) return;
   const r = await post('/api/action', { action: 'stop_ai' }); toast(r.why || 'stopping');
+};
+$('loginStart').onchange = async (e) => {
+  const box = e.target; box._busy = true;
+  const r = await post('/api/action', { action: 'login_start', target: box.checked ? 'on' : 'off' });
+  box.checked = !!r.start_at_login; box._busy = false; if (r.why) toast(r.why);
 };
 $('theme').onchange = (e) => { applyTheme(e.target.value); post('/api/action', { action: 'theme', target: e.target.value }); };
 

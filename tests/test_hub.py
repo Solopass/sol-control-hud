@@ -106,3 +106,25 @@ def test_second_start_asks_the_running_one(monkeypatch):
     assert sent == [("http://127.0.0.1:7911/api/views", {"dashboard": True})]
     hub.tell_running_hub(7911, None)
     assert sent[-1][1] == {"ticker": True}
+
+
+def test_running_marker_is_written_and_cleared(tmp_path):
+    m = tmp_path / "app-running.json"
+    hub.write_running_marker(m)
+    data = json.loads(m.read_text())
+    assert data["pid"] == __import__("os").getpid() and data["started"]
+    hub.clear_running_marker(m)
+    assert not m.exists()
+    hub.clear_running_marker(m)                                   # already gone: fine
+
+
+def test_start_at_login_switch(the_hub, monkeypatch):
+    state = {"on": False}
+    monkeypatch.setattr(hub, "start_at_login", lambda on=None: state.update(on=on) or on if on is not None else state["on"])
+    r = the_hub.do_action("login_start", "on")
+    assert r["ok"] and r["start_at_login"] is True and the_hub.views()["start_at_login"] is True
+    r = the_hub.do_action("login_start", "off")
+    assert r["start_at_login"] is False
+    assert the_hub.do_action("login_start", "maybe")["ok"] is False
+    c = TestClient(the_hub.build_app())
+    assert c.post("/api/action", json={"action": "login_start", "target": "on"}).status_code == 403   # our page only

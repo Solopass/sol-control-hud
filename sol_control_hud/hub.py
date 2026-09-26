@@ -36,6 +36,9 @@ from .paths import DATA_DIR
 SETTINGS_FILE = DATA_DIR / "hub-settings.json"
 LOCK_FILE = DATA_DIR / "hub.lock"
 LOG_FILE = DATA_DIR / "hub.log"
+# "I'm running" marker for tools\sol-llm-watch.ps1: present + its pid gone = the app died -> the watcher restarts it.
+# A clean exit (tray / ticker / dashboard Exit) removes it, so what you close stays closed.
+RUNNING_FILE = DATA_DIR / "app-running.json"
 DEFAULTS = {"ticker": True, "dashboard_at_start": False, "port": 7900}
 ACTIVE_PACE, IDLE_PACE = 2.0, 10.0
 WEB_ACTIVE_S = 30.0          # a dashboard request within this long counts as "someone is looking"
@@ -49,6 +52,29 @@ def log(msg: str) -> None:
             f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}\n")
     except OSError:
         pass
+
+
+def write_running_marker(path=None) -> None:
+    path = path or RUNNING_FILE
+    try:
+        path.write_text(json.dumps({"pid": os.getpid(), "started": time.strftime("%Y-%m-%dT%H:%M:%S")}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def clear_running_marker(path=None) -> None:
+    try:
+        (path or RUNNING_FILE).unlink()
+    except OSError:
+        pass
+
+
+def start_at_login(on: bool | None = None) -> bool:
+    """The Windows Startup entry 'SOL Control HUD' (Task Manager lists it under startup apps). on=None: just read it."""
+    from .views.ticker import is_startup_enabled, set_startup
+    if on is not None:
+        set_startup(on)
+    return is_startup_enabled()
 
 
 def load_settings() -> dict:
@@ -134,6 +160,7 @@ class Hub:
         self.last_web = -1e9
         self.pace = ACTIVE_PACE
         self.ticker = self.server = self.tray = self.root = None
+        self._login = False          # the Startup entry exists (read at start, changed through do_action)
         from .views.web.feed import History
         self.history = History()
 
@@ -154,7 +181,8 @@ class Hub:
         t = self.ticker
         return {"hub": True, "ticker": bool(t and not t.user_hidden), "pace_s": self.pace,
                 "dashboard_at_start": bool(self.settings["dashboard_at_start"]),
-                "theme": getattr(t, "theme_name", None)}       # one theme for both views
+                "theme": getattr(t, "theme_name", None),       # one theme for both views
+                "start_at_login": self._login}
 
     OPEN_TARGETS = ("AI", "RUN", "NOTE", "GIT", "SYS", "DISK", "NET", "MEDIA", "NIGHT", "HW")
 
@@ -179,6 +207,10 @@ class Hub:
         if action == "theme" and target:
             self.cmds.put(("theme", target))
             return {"ok": True}
+        if action == "login_start" and target in ("on", "off"):
+            self._login = start_at_login(target == "on")
+            log(f"start at login: {'on' if self._login else 'off'}")
+            return {"ok": True, "why": f"start at login: {'on' if self._login else 'off'}", "start_at_login": self._login}
         return {"ok": False, "why": f"unknown action {action!r}"}
 
     # ---- setup
@@ -198,7 +230,13 @@ class Hub:
         self._start_tray()
         if self.start_dashboard:
             self.open_dashboard()
-        log(f"start (pid {os.getpid()}, dashboard {self.url}, ticker {'on' if self.start_ticker else 'hidden'})")
+        try:
+            self._login = start_at_login()
+        except Exception:  # noqa: BLE001 - reading a shortcut must never stop the app
+            self._login = False
+        write_running_marker()
+        log(f"start (pid {os.getpid()}, dashboard {self.url}, ticker {'on' if self.start_ticker else 'hidden'}, "
+            f"start at login {'on' if self._login else 'off'})")
         self.root.after(250, self._pump)
         self.root.after(2000, self._tick)
         try:
@@ -318,6 +356,7 @@ class Hub:
                     ("Open the dashboard when SOL starts",
                      lambda: self.cmds.put(("dashboard_at_start", not self.settings["dashboard_at_start"])),
                      bool(self.settings["dashboard_at_start"])),
+                    ("Start at login", lambda: self.do_action("login_start", "off" if self._login else "on"), self._login),
                     None,
                     ("Exit SOL Control HUD", lambda: self.exit("tray Exit"), False)]
         # click: show the ticker if it's hidden, else open the dashboard
@@ -374,6 +413,7 @@ class Hub:
         self.root.after(2000, self._tick)
 
     def _shutdown(self, why: str) -> None:
+        clear_running_marker()                 # a clean exit: the watcher must not bring it back
         log(f"exit: {why}")
         for step in (lambda: self.tray and self.tray.stop(), lambda: setattr(self.server, "should_exit", True),
                      self.collector.stop, self.guard.stop, self.ticker._save_settings, self.root.destroy):
