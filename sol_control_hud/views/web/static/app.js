@@ -370,6 +370,89 @@ $('loginStart').onchange = async (e) => {
 };
 $('theme').onchange = (e) => { applyTheme(e.target.value); post('/api/action', { action: 'theme', target: e.target.value }); };
 
+// ---------- phase C: ask it overnight, chain controls, the reader
+function md(text) {
+  // a small Markdown renderer for answers and chain results: everything is escaped first, then a few safe tags added
+  const src = String(text || '').replace(/^\ufeff?---\r?\n[\s\S]*?\r?\n---\s*\r?\n/, '');
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>').replace(/(^|[\s(])_([^_\n]+)_(?=[\s.,;:!?)]|$)/g, '$1<i>$2</i>').replace(/\[([^\]]+)\]\([^)]+\)/g, '<u>$1</u>');
+  const out = []; let list = null, code = null, para = [];
+  const flush = () => { if (para.length) { out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; } if (list) { out.push(`</${list}>`); list = null; } };
+  for (const line of src.split(/\r?\n/)) {
+    if (code !== null) { if (/^\s*(```|~~~)/.test(line)) { out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`); code = null; } else code.push(line); continue; }
+    if (/^\s*(```|~~~)/.test(line)) { flush(); code = []; continue; }
+    let m;
+    if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flush(); const n = Math.min(3, m[1].length); out.push(`<h${n}>${inline(m[2])}</h${n}>`); continue; }
+    if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { flush(); out.push('<hr>'); continue; }
+    if ((m = line.match(/^\s*>\s?(.*)$/))) { flush(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); continue; }
+    if ((m = line.match(/^\s*([-*+]|\d+[.)])\s+(.*)$/))) {
+      const kind = /\d/.test(m[1]) ? 'ol' : 'ul';
+      if (para.length) { out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; }
+      if (list !== kind) { if (list) out.push(`</${list}>`); out.push(`<${kind}>`); list = kind; }
+      out.push(`<li>${inline(m[2])}</li>`); continue;
+    }
+    if (!line.trim()) { flush(); continue; }
+    if (list) { out.push(`</${list}>`); list = null; }
+    para.push(line);
+  }
+  if (code !== null) out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
+  flush();
+  return out.join('');
+}
+function openReader(title, text) {
+  $('modalTitle').textContent = title; $('modalBody').innerHTML = md(text); $('modal').hidden = false; $('modalBody').scrollTop = 0;
+}
+$('modalClose').onclick = () => { $('modal').hidden = true; };
+$('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') $('modal').hidden = true; });
+addEventListener('keydown', (e) => { if (e.key === 'Escape') $('modal').hidden = true; });
+
+const OPS = { queued: ['cancel'], running: ['cancel'], waiting: ['cancel'], paused: ['run', 'resume'], cancel: [], };
+const OP_LABEL = { run: 'Run now', pause: 'Pause', resume: 'Resume', cancel: 'Cancel' };
+let control = null;
+async function loadControl() {
+  if (document.hidden) return;
+  try { control = await (await fetch('/api/control', { cache: 'no-store' })).json(); } catch (e) { return; }
+  const sel = $('askModel');
+  if (!sel.options.length) sel.innerHTML = control.models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+  setHTML($('askList'), control.asks.length ? control.asks.map((a) => `<div class="item"><span>${esc(a.title)} <span class="dim">· ${esc(a.model)}</span></span>` +
+    `<span>${a.state === 'running' ? '<span style="color:var(--cyan)">running</span>' : `waiting<button class="mini ghost" data-remove="${esc(a.job)}">remove</button>`}</span></div>`).join('')
+    : '<div class="empty">nothing waiting</div>');
+  setHTML($('answerList'), control.answers.length ? control.answers.map((a) => `<div class="item link" data-answer="${esc(a.file)}">` +
+    `<span><b>${esc(a.title)}</b> <span class="dim">· ${esc(when(a.time))}${a.model ? ' · ' + esc(a.model) : ''}</span></span><span class="pv">${esc(a.preview)}</span></div>`).join('')
+    : '<div class="empty">no answers yet</div>');
+  setHTML($('chainList'), control.chains.map((c) => {
+    const ops = OPS[c.status] || ['run', 'pause'];
+    const meta = [c.schedule && `⏱ ${c.schedule}`, c.watch && 'watches a folder', c.model].filter(Boolean).join(' · ');
+    return `<div class="crow"><span>${esc(c.name)}</span><span class="status ${esc(c.status)}">${esc(c.status)}</span>` +
+      `<span class="meta" title="${esc(meta)}">${esc(meta)}</span><span class="acts">` +
+      ops.map((o) => `<button class="mini" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o]}</button>`).join('') +
+      (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>';
+  }).join('') || '<div class="empty">no chain notes in 1Notebook\\Chains</div>');
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-chain],[data-remove],[data-answer],[data-result]');
+  if (!t) return;
+  e.stopPropagation();
+  if (t.dataset.confirm && !confirm(t.dataset.confirm)) return;
+  let r = null;
+  if (t.dataset.chain) r = await post('/api/action', { action: 'chain', target: t.dataset.chain, op: t.dataset.op });
+  else if (t.dataset.remove) r = await post('/api/action', { action: 'ask_remove', target: t.dataset.remove });
+  else if (t.dataset.answer) { const a = await (await fetch(`/api/answer?file=${encodeURIComponent(t.dataset.answer)}`)).json(); if (a.ok) openReader(t.dataset.answer.replace(/\.md$/, ''), a.text); else toast(a.why); return; }
+  else if (t.dataset.result) { const a = await (await fetch(`/api/chain-result?name=${encodeURIComponent(t.dataset.result)}`)).json(); if (a.ok) openReader(`${t.dataset.result}: latest result`, a.text); else toast(a.why); return; }
+  if (r?.why) toast(r.why);
+  loadControl();
+}, true);
+$('askForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
+  const files = $('askFiles').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const r = await post('/api/action', { action: 'ask', title: $('askTitle').value, question: $('askQuestion').value, files, model: $('askModel').value });
+  btn.disabled = false; toast(r.why || (r.ok ? 'queued' : 'failed'));
+  if (r.ok) { $('askTitle').value = ''; $('askQuestion').value = ''; $('askFiles').value = ''; }
+  loadControl();
+};
+setInterval(loadControl, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadControl(); });
 (async function start() {
   try {
     const meta = await (await fetch('/api/meta', { cache: 'no-store' })).json();

@@ -70,6 +70,24 @@
       <div><h3>Waiting</h3><div class="list" id="chPending"></div></div>
       <div><h3>Scheduled</h3><div class="list" id="chSched"></div></div>
     </div>
+    <h3>All chains</h3>
+    <div class="chainlist" id="chainList"><div class="empty">loading…</div></div>
+  </article>
+
+  <article class="card wide" id="c-ask">
+    <h2>Ask it overnight <span class="dim">runs in the next Away session · answer in 1Notebook\Answers</span></h2>
+    <form class="ask" id="askForm" autocomplete="off">
+      <input id="askTitle" maxlength="60" placeholder="Title (optional)">
+      <textarea id="askQuestion" rows="3" placeholder="Your question or task for the big model…" required></textarea>
+      <details><summary>Add files (optional)</summary>
+        <textarea id="askFiles" rows="2" placeholder="One path per line, e.g. D:\OBVLT\plans\SOL_CONTROL_HUD_NEXT_PLAN.md (the same folders chains may read)"></textarea>
+      </details>
+      <div class="askrow"><select id="askModel"></select><button type="submit">Queue for tonight</button></div>
+    </form>
+    <div class="cols">
+      <div><h3>Waiting</h3><div class="list" id="askList"></div></div>
+      <div><h3>Answers (last 7 days)</h3><div class="list" id="answerList"></div></div>
+    </div>
   </article>
 
   <article class="card" id="c-awayq" data-open="NIGHT">
@@ -141,6 +159,7 @@
   <label class="toggle" title="Start SOL Control HUD when you log in to Windows (Startup apps)"><input type="checkbox" id="loginStart"> Start at login</label>
   <span class="dim" id="foot"></span>
 </footer>
+<div class="modal" id="modal" hidden><div class="sheet"><header><b id="modalTitle"></b><button id="modalClose" class="ghost">Close</button></header><div class="md" id="modalBody"></div></div></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

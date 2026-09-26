@@ -189,7 +189,7 @@ class Hub:
 
     OPEN_TARGETS = ("AI", "RUN", "NOTE", "GIT", "SYS", "DISK", "NET", "MEDIA", "NIGHT", "HW")
 
-    def do_action(self, action: str, target: str = "") -> dict:
+    def do_action(self, action: str, target: str = "", body: dict | None = None) -> dict:
         """The dashboard's buttons. Machine changes go through the same safe paths as the ticker and the Away panel."""
         import subprocess
         llm = Path(r"D:\AI\Cache\llm")
@@ -210,6 +210,24 @@ class Hub:
         if action == "theme" and target:
             self.cmds.put(("theme", target))
             return {"ok": True}
+        if action in ("ask", "ask_remove", "chain"):
+            from . import control
+            b = body or {}
+            try:
+                if action == "ask":
+                    files = b.get("files") or []
+                    r = control.queue_ask(str(b.get("title", "")), str(b.get("question", "")),
+                                          [str(x) for x in files] if isinstance(files, list) else [], str(b.get("model") or "sol-away"))
+                    log(f"asked overnight: {r['job']}")
+                    return {"ok": True, "why": f"queued: {r['job'][4:]} (it runs in the next Away session)", **r}
+                if action == "ask_remove":
+                    control.remove_ask(target)
+                    return {"ok": True, "why": "removed from the queue"}
+                status = control.chain_op(target, str(b.get("op", "")))
+                log(f"chain {target}: status {status} (dashboard)")
+                return {"ok": True, "why": f"{target}: {status}", "status": status}
+            except control.ControlError as e:
+                return {"ok": False, "why": str(e)}
         if action == "notify" and target in ("on", "off", "test"):
             if target == "test":
                 return {"ok": self.notify_now("SOL Control HUD", "Notifications work. You'll see Away results, chain failures, "
@@ -345,7 +363,29 @@ class Hub:
 
         @app.post("/api/action")
         def action(body: dict = Body(default={})) -> dict:
-            return self.do_action(str(body.get("action", "")), str(body.get("target", "")))
+            return self.do_action(str(body.get("action", "")), str(body.get("target", "")), body)
+
+        @app.get("/api/control")
+        def control_state() -> dict:
+            from . import control
+            return {"models": control.away_models(), "asks": control.list_asks(), "answers": control.list_answers(),
+                    "chains": control.list_chains()}
+
+        @app.get("/api/answer")
+        def answer(file: str = "") -> dict:
+            from . import control
+            try:
+                return {"ok": True, "text": control.read_answer(file)}
+            except control.ControlError as e:
+                return {"ok": False, "why": str(e)}
+
+        @app.get("/api/chain-result")
+        def chain_result(name: str = "") -> dict:
+            from . import control
+            try:
+                return {"ok": True, "text": control.chain_result(name)}
+            except control.ControlError as e:
+                return {"ok": False, "why": str(e)}
 
         @app.get("/api/snapshot")
         def snapshot() -> dict:
