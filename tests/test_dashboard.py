@@ -125,3 +125,9 @@ def test_stream_takes_no_parameters(app_hub):
     h, c = app_hub
     route = next(r for r in c.app.routes if getattr(r, "path", "") == "/api/stream")
     assert not route.dependant.query_params and not route.dependant.body_params
+
+
+def test_page_files_are_revalidated(app_hub):
+    h, c = app_hub
+    assert c.get("/static/app.js").headers["cache-control"] == "no-cache"
+    assert c.get("/").headers["cache-control"] == "no-store"

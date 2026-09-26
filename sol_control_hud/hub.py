@@ -247,7 +247,12 @@ class Hub:
                     return JSONResponse({"error": "not allowed"}, status_code=403)
             if request.url.path.startswith("/api/"):
                 self.last_web = time.monotonic()      # someone has the dashboard open: keep the 2 s pace
-            return await call_next(request)
+            response = await call_next(request)
+            if request.url.path.startswith("/static/"):
+                # revalidate every time (cheap: 304 if unchanged): after an update the browser must not keep an old
+                # app.js (09-25 lesson with the old HUD's page)
+                response.headers["Cache-Control"] = "no-cache"
+            return response
 
         @app.get("/api/stream")
         async def stream(request: Request):
