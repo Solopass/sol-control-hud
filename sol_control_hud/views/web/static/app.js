@@ -279,10 +279,25 @@ function renderAi(p) {
   $('aiState').textContent = { generating: 'generating ⚡', loaded: 'loaded in VRAM, answers at once',
     sleeping: 'sleeping: out of VRAM, wakes in a few seconds', unloaded: 'nothing loaded', loading: 'loading…',
     offline: 'router down' }[state] || state;
-  const models = p.router?.running || [];
-  const tint = { loaded: 'var(--green)', sleeping: 'var(--cyan)', loading: 'var(--amber)' };
-  setHTML($('aiModels'), models.map((m) => `<div class="item"><span>${esc(m.model)}</span><span style="color:${tint[m.state] || 'var(--dim)'}">${esc(m.state)}</span></div>`).join('')
-    || `<div class="empty">${p.router?.up === false ? 'router not answering' : ''}</div>`);
+  // model controls: state, what it is, where its memory is (VRAM / spilled into RAM / process RAM), load / unload
+  const mode = p.snapshot.ai_mode, locked = mode === 'away' ? 'Away is running: Stop AI work first' : mode === 'off' ? 'the local AI is off' : '';
+  const pill = { loaded: 'done', sleeping: 'queued', loading: 'waiting', unloaded: 'paused' };
+  const card = s.vram_total_gb || 16;
+  const rowsHtml = (p.models || []).map((m) => {
+    const up = ['loaded', 'sleeping', 'loading'].includes(m.state), pending = pendingModels.get(m.id) === m.state;
+    const v = m.vram_gb || 0, sp = m.spilled_gb || 0;
+    const mem = up && (v || sp || m.ram_gb) ? `<div class="mem"><div class="membar"><i style="width:${(v / card) * 100}%;background:var(--green)"></i><i style="width:${(sp / card) * 100}%;background:${sp >= 0.3 ? 'var(--red)' : 'var(--amber)'}"></i></div>` +
+      `VRAM ${v.toFixed(1)} GB${sp >= 0.05 ? ` · <span style="color:${sp >= 0.3 ? 'var(--red)' : 'var(--amber)'}">spilled ${sp.toFixed(1)} GB</span>` : ''}${m.ram_gb != null ? ` · RAM ${m.ram_gb.toFixed(1)} GB` : ''}</div>` : '';
+    const btn = m.fixed ? '<span class="dim small">always on</span>'
+      : `<button class="mini${up ? ' ghost' : ''}" data-model="${esc(m.id)}" data-op="${up ? 'unload' : 'load'}"${locked ? ` disabled title="${esc(locked)}"` : ''}>${up ? 'Unload' : 'Load'}</button>`;
+    return `<div class="mrow${pending ? ' pending' : ''}"><div class="mhead"><b>${esc(m.id)}</b><span class="status ${pill[m.state] || 'paused'}">${esc(m.state)}</span></div>` +
+      `<div class="acts">${btn}</div><div class="about" title="${esc(m.about)}">${esc(m.about)}</div>${mem}</div>`;
+  }).join('');
+  setHTML($('aiModels'), rowsHtml || `<div class="empty">${p.router?.up === false ? 'the router is not answering' : 'no models'}</div>`);
+  for (const [id, st] of [...pendingModels]) if (!(p.models || []).some((m) => m.id === id && m.state === st)) pendingModels.delete(id);
+  const pw = $('aiPower'); pw.dataset.power = mode === 'off' ? 'on' : 'off'; pw.textContent = mode === 'off' ? 'Turn AI on' : 'Turn AI off';
+  pw.disabled = mode === 'away'; pw.title = mode === 'away' ? 'Away is running: Stop AI work first' : '';
+  $('aiHint').textContent = locked;
   const lock = $('aiLock'); lock.textContent = s.gpu_locked ? 'held (a job is using the GPU)' : 'free'; lock.style.color = s.gpu_locked ? 'var(--amber)' : 'var(--dim)';
 }
 
@@ -441,7 +456,25 @@ async function loadControl() {
       (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>';
   }).join('') || '<div class="empty">no chain notes in 1Notebook\\Chains</div>');
 }
+const pendingModels = new Map();   // model -> the state it had when you pressed its button (shown as "…" until it changes)
 document.addEventListener('click', async (e) => {
+  const t = e.target.closest('[data-model],[data-models],[data-power]');
+  if (!t || t.disabled) return;
+  e.stopPropagation();
+  if (t.dataset.confirm && !confirm(t.dataset.confirm)) return;
+  let r;
+  if (t.dataset.model) {
+    const cur = (payload?.models || []).find((m) => m.id === t.dataset.model);
+    if (cur) pendingModels.set(cur.id, cur.state);
+    r = await post('/api/action', { action: 'model', target: t.dataset.model, op: t.dataset.op });
+  } else if (t.dataset.models) r = await post('/api/action', { action: 'models_unload_all' });
+  else {
+    if (t.dataset.power === 'off' && !confirm('Turn the local AI off? Every model unloads and nothing loads until you turn it on again (chains and asks wait).')) return;
+    r = await post('/api/action', { action: 'ai_power', target: t.dataset.power });
+  }
+  if (r?.why) toast(r.why);
+  if (r && !r.ok && t.dataset.model) pendingModels.delete(t.dataset.model);
+}, true);document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-chain],[data-remove],[data-answer],[data-result]');
   if (!t) return;
   e.stopPropagation();

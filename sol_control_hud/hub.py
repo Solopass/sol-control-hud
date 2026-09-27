@@ -230,6 +230,23 @@ class Hub:
         if action == "theme" and target:
             self.cmds.put(("theme", target))
             return {"ok": True}
+        if action in ("model", "models_unload_all", "ai_power"):
+            from . import models_ctl
+            try:
+                router = self.collectors["llama_swap"].get() if hasattr(self, "collectors") else {}
+                running = (router or {}).get("running") or []
+                if action == "model":
+                    why = models_ctl.model_op(target, str((body or {}).get("op", "")), [m.get("model") for m in running])
+                elif action == "models_unload_all":
+                    why = models_ctl.unload_all([m.get("model") for m in running if m.get("state") in ("loaded", "sleeping", "loading")])
+                else:
+                    why = models_ctl.ai_power(target == "on")
+                if hasattr(self, "collectors"):
+                    self.collectors["llama_swap"].value = None     # ask the router again on the next update
+                log(f"models: {action} {target} {(body or {}).get('op', '')}".strip())
+                return {"ok": True, "why": why}
+            except models_ctl.ModelError as e:
+                return {"ok": False, "why": str(e)}
         if action in ("ask", "ask_remove", "chain"):
             from . import control
             b = body or {}
@@ -331,7 +348,15 @@ class Hub:
         return {**p, "gpu": c["gpu"].get(), "vram_guard": c["vram"].get(),
                 "router": c["llama_swap"].get(), "wsl": c["wsl"].get(), "stability": c["stability"].get(),
                 "away": c["away"].get(), "chains": c["chains"].get(), "activity": c["activity"].get(),
-                "point": self.history.latest()}
+                "point": self.history.latest(), "models": self._model_rows()}
+
+    def _model_rows(self) -> list[dict]:
+        from .models_ctl import rows
+        c = self.collectors
+        try:
+            return rows(c["llama_swap"].get(), c["gpu"].get(), c["model_procs"].get(), c["model_desc"].get())
+        except Exception:  # noqa: BLE001 - a display nicety
+            return []
 
     def build_app(self):
         """The dashboard's web app on this hub's data: the page + /static, /api/stream (pushed), /api/snapshot,
@@ -345,6 +370,9 @@ class Hub:
         from .views.web import feed
         from .views.web.app import STATIC, Cached, build_collectors, create_app
         self.collectors = build_collectors(self.collector._sampler, self.guard)
+        from . import models_ctl
+        self.collectors.update({"model_procs": Cached(models_ctl.model_processes, 5),
+                                "model_desc": Cached(models_ctl.descriptions, 60)})
         self.collectors.update({"away": Cached(feed.away_info, 1.5), "chains": Cached(lambda: feed._read_json(feed.LLM_DIR / "chains.json"), 1.5),
                                 "activity": Cached(feed.activity, 5)})
         app = create_app(collectors=self.collectors)
