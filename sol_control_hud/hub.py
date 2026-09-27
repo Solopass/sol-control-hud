@@ -550,7 +550,7 @@ def tell_running_hub(port: int, show: str | None) -> bool:
     """Starting it again: ask the running copy to show what was asked for (default: the ticker)."""
     import httpx
     body = {"ticker": True} if show in (None, "ticker", "both") else {}
-    if show in ("dashboard", "both"):
+    if show in ("dashboard", "both", "open-dashboard"):
         body["dashboard"] = True
     try:
         return httpx.post(f"http://127.0.0.1:{port}/api/views", json=body, timeout=3).status_code == 200
@@ -561,6 +561,8 @@ def tell_running_hub(port: int, show: str | None) -> bool:
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="python -m sol_control_hud")
     p.add_argument("--show", choices=["ticker", "dashboard", "both", "tray"], help="which views to show this time")
+    p.add_argument("--open-dashboard", action="store_true",
+                   help="open the dashboard on top of your saved views (the Desktop shortcut 'SOL Dashboard')")
     args = p.parse_args(argv)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if sys.stdout is None or sys.stderr is None:   # pythonw: uvicorn/print would crash on a None stream
@@ -573,7 +575,7 @@ def main(argv: list[str] | None = None) -> None:
         lock.seek(0)
         msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
-        ok = tell_running_hub(port_of(settings), args.show)
+        ok = tell_running_hub(port_of(settings), "open-dashboard" if args.open_dashboard else args.show)
         log(f"already running: asked it to show {args.show or 'ticker'} ({'ok' if ok else 'no answer'})")
         return
     try:   # the attached-desktop and DPI setup the ticker needs, before the first Tk window
@@ -584,4 +586,6 @@ def main(argv: list[str] | None = None) -> None:
     except Exception:  # noqa: BLE001
         pass
     show_ticker, show_dashboard = views_for(args.show, settings)
+    if args.open_dashboard:
+        show_dashboard = True          # your saved ticker choice stays as it was
     Hub(settings, show_ticker, show_dashboard).run()

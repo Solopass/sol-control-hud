@@ -129,3 +129,13 @@ def test_start_at_login_switch(the_hub, monkeypatch):
     assert the_hub.do_action("login_start", "maybe")["ok"] is False
     c = TestClient(the_hub.build_app())
     assert c.post("/api/action", json={"action": "login_start", "target": "on"}).status_code == 403   # our page only
+
+
+def test_dashboard_shortcut_opens_the_page_without_touching_the_ticker(monkeypatch):
+    sent = []
+
+    class R:
+        status_code = 200
+    monkeypatch.setattr("httpx.post", lambda url, json, timeout: sent.append(json) or R())
+    hub.tell_running_hub(7900, "open-dashboard")
+    assert sent == [{"dashboard": True}]                       # no "ticker" key: a hidden ticker stays hidden
