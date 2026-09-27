@@ -163,6 +163,7 @@ class Hub:
         self._login = False          # the Startup entry exists (read at start, changed through do_action)
         self.notifier = None
         self._prev_snap = None
+        self.metrics = None
         from .views.web.feed import History
         self.history = History()
 
@@ -269,6 +270,12 @@ class Hub:
             self._login = False
         write_running_marker()
         self._start_notifier()
+        try:
+            from .metrics import Metrics
+            llm = Path(r"D:\AI\Cache\llm")
+            self.metrics = Metrics(DATA_DIR / "metrics.sqlite", llm / "away.jsonl", llm / "chains.log")
+        except Exception as e:  # noqa: BLE001 - history is a nicety; the app runs without it
+            log(f"metrics off: {type(e).__name__}: {e}")
         log(f"start (pid {os.getpid()}, dashboard {self.url}, ticker {'on' if self.start_ticker else 'hidden'}, "
             f"start at login {'on' if self._login else 'off'})")
         self.root.after(250, self._pump)
@@ -352,8 +359,16 @@ class Hub:
                                      headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
         @app.get("/api/history")
-        def history() -> dict:
+        def history(range: str = "1h") -> dict:   # noqa: A002 - the query parameter's name
+            if range in ("24h", "7d"):
+                from .metrics import series
+                return series(DATA_DIR / "metrics.sqlite", 24 if range == "24h" else 168)
             return self.history.export()
+
+        @app.get("/api/week")
+        def week_summary() -> dict:
+            from .metrics import week
+            return week(DATA_DIR / "metrics.sqlite")
 
         @app.get("/api/meta")
         def meta() -> dict:
@@ -480,6 +495,9 @@ class Hub:
             self.guard.stop_if_idle()
             snap = self.collector.get_snapshot()
             self.history.add(snap)
+            if self.metrics:
+                self.metrics.add(snap)
+                self.metrics.read_logs()
             if self.notifier and snap.sampled_at:
                 busy = bool(t and t._is_hidden_for_fullscreen) or (snap.ai_mode == "off" and str(snap.ai_reason or "").startswith("game"))
                 for n in self.notifier.check(self._prev_snap, snap, busy):
@@ -496,6 +514,7 @@ class Hub:
         clear_running_marker()                 # a clean exit: the watcher must not bring it back
         log(f"exit: {why}")
         for step in (lambda: self.tray and self.tray.stop(), lambda: setattr(self.server, "should_exit", True),
+                     lambda: self.metrics and self.metrics.close(),
                      self.collector.stop, self.guard.stop, self.ticker._save_settings, self.root.destroy):
             try:
                 step()

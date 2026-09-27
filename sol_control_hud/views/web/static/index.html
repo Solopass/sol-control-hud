@@ -13,6 +13,7 @@
   <div class="brand"><span class="live" id="live"></span>SOL <b>CONTROL</b> HUD</div>
   <div class="mode" id="mode">…</div>
   <div class="headline" id="headline"></div>
+  <div class="range" id="range" title="Chart range"><button data-range="1h" class="on">1 h</button><button data-range="24h">24 h</button><button data-range="7d">7 d</button></div>
   <span class="age" id="age">connecting…</span>
   <select id="theme" title="Theme (the ticker uses the same one)"></select>
   <button id="tickerBtn" hidden>…</button>
@@ -145,6 +146,11 @@
     <div class="media" id="media" hidden><span class="eq"><i></i><i></i><i></i><i></i></span><span id="mediaText"></span></div>
   </article>
 
+  <article class="card" id="c-week">
+    <h2>This week <span class="dim" id="weekCover"></span></h2>
+    <div class="stats" id="weekStats"></div>
+    <div class="note" id="weekDisks"></div>
+  </article>
   <article class="card wide" id="c-activity">
     <h2>Activity</h2>
     <ol class="feed" id="feed"></ol>

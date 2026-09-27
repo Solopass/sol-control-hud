@@ -244,3 +244,12 @@ footer .toggle input { accent-color:var(--cyan); cursor:pointer; }
 .md blockquote { margin:8px 0; padding:4px 12px; border-left:3px solid var(--cyan); color:var(--muted); }
 .md hr { border:none; border-top:1px solid var(--line); margin:14px 0; }
 .md ul, .md ol { padding-left:22px; }
+
+/* phase D: chart range + this week */
+.range { display:flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+.range button { border:none; border-radius:0; background:transparent; padding:4px 10px; color:var(--dim); }
+.range button.on { background:var(--badge); color:var(--cyan); }
+.stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+.stats div { background:var(--badge); border-radius:9px; padding:8px 10px; }
+.stats b { display:block; font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; }
+.stats span { color:var(--dim); font-size:11px; }

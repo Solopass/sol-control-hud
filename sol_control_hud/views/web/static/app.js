@@ -12,6 +12,8 @@ const slide = (p, tag) => (p.slides || []).find((s) => s.tag === tag);
 const REDUCE = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const CARD_FOR = { SYS: 'c-stab', HW: 'c-gpu', DISK: 'c-disks', RUN: 'c-chains', AI: 'c-ai', NIGHT: 'c-awayq', GIT: 'c-work', NOTE: 'c-work' };
 const hist = { t: [], gpu: [], vram: [], ram: [], cpu: [], temp: [], hotspot: [], down: [], up: [] };
+let range = '1h';
+const SPAN = { '1h': 3600, '24h': 86400, '7d': 604800 };
 let last = 0, es = null, themes = {}, themeName = null, payload = null, seenFeed = new Set(), firstFeed = true;
 
 // ---------- small helpers
@@ -76,7 +78,7 @@ function drawChart(cv) {
   g.strokeStyle = css('--line'); g.lineWidth = 1; g.setLineDash([2, 4]);
   for (const f of [0.25, 0.5, 0.75]) { g.beginPath(); g.moveTo(0, h * f); g.lineTo(w, h * f); g.stroke(); }
   g.setLineDash([]);
-  const now = Date.now() / 1000, t0 = now - 3600, ts = hist.t;
+  const span = SPAN[range], now = Date.now() / 1000, t0 = now - span, ts = hist.t;
   if (ts.length < 2) { g.fillStyle = css('--dim'); g.font = '11px Segoe UI'; g.fillText('collecting the last hour…', 6, h / 2); return; }
   names.forEach((name, si) => {
     const ys = hist[name]; let max = parseFloat(maxes[si] ?? maxes[0]);
@@ -87,19 +89,19 @@ function drawChart(cv) {
     g.beginPath(); let started = false, lastX = 0;
     for (let i = 0; i < ts.length; i++) {
       if (ys[i] == null || ts[i] < t0) continue;
-      const x = ((ts[i] - t0) / 3600) * w, y = h - 2 - Math.min(1, ys[i] / max) * (h - 6);
+      const x = ((ts[i] - t0) / span) * w, y = h - 2 - Math.min(1, ys[i] / max) * (h - 6);
       if (!started) { g.moveTo(x, y); started = true; } else g.lineTo(x, y);
       lastX = x;
     }
     if (!started) return;
     g.strokeStyle = color; g.lineWidth = 1.6; g.lineJoin = 'round'; g.stroke();
     if (si === 0) {   // the first series gets a soft area fill
-      g.lineTo(lastX, h); g.lineTo(((ts.find((t) => t >= t0) - t0) / 3600) * w, h); g.closePath();
+      g.lineTo(lastX, h); g.lineTo(((ts.find((t) => t >= t0) - t0) / span) * w, h); g.closePath();
       const grad = g.createLinearGradient(0, 0, 0, h); grad.addColorStop(0, color + '55'); grad.addColorStop(1, color + '00');
       g.fillStyle = grad; g.fill();
     }
   });
-  g.fillStyle = css('--dim'); g.font = '10px Segoe UI'; g.fillText('60 min', 4, h - 4); g.fillText('now', w - 22, h - 4);
+  g.fillStyle = css('--dim'); g.font = '10px Segoe UI'; g.fillText({ '1h': '60 min', '24h': '24 h', '7d': '7 days' }[range], 4, h - 4); g.fillText('now', w - 22, h - 4);
 }
 let drawQueued = false;
 function drawCharts() {
@@ -107,13 +109,14 @@ function drawCharts() {
   requestAnimationFrame(() => { drawQueued = false; document.querySelectorAll('canvas.chart').forEach(drawChart); });
 }
 function addPoint(p) {
+  if (range !== '1h') return;          // the 24 h / 7 d charts come from the minute history (reloaded every minute)
   if (!p || (hist.t.length && p.t <= hist.t[hist.t.length - 1])) return;
   for (const k of Object.keys(hist)) hist[k].push(p[k] ?? null);
   const cut = p.t - 3600;
   while (hist.t.length && hist.t[0] < cut) for (const k of Object.keys(hist)) hist[k].shift();
 }
 async function loadHistory() {
-  try { const h = await (await fetch('/api/history', { cache: 'no-store' })).json(); for (const k of Object.keys(hist)) hist[k] = h[k] || []; drawCharts(); } catch (e) { /* the stream fills it */ }
+  try { const h = await (await fetch(`/api/history?range=${range}`, { cache: 'no-store' })).json(); for (const k of Object.keys(hist)) hist[k] = h[k] || []; drawCharts(); } catch (e) { /* the stream fills it */ }
 }
 
 // ---------- render one pushed message
@@ -453,6 +456,32 @@ $('askForm').onsubmit = async (e) => {
 };
 setInterval(loadControl, 15000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) loadControl(); });
+// ---------- phase D: chart range + this week
+document.querySelectorAll('#range button').forEach((b) => b.onclick = () => {
+  range = b.dataset.range;
+  document.querySelectorAll('#range button').forEach((x) => x.classList.toggle('on', x === b));
+  loadHistory();
+});
+setInterval(() => { if (range !== '1h' && !document.hidden) loadHistory(); }, 60000);
+async function loadWeek() {
+  if (document.hidden) return;
+  let w; try { w = await (await fetch('/api/week', { cache: 'no-store' })).json(); } catch (e) { return; }
+  const chains = Object.entries(w.chains || {}).map(([k, n]) => `${n} ${k}`).join(', ') || 'none';
+  const stat = (v, label, color) => `<div><b style="color:${color || 'var(--text)'}">${v ?? '–'}</b><span>${label}</span></div>`;
+  setHTML($('weekStats'), [
+    stat(w.away_hours, `Away hours (${w.away_runs} runs)`, 'var(--cyan)'),
+    stat(w.jobs_done, 'jobs done', 'var(--green)'),
+    stat(w.jobs_failed, 'jobs failed', w.jobs_failed ? 'var(--red)' : 'var(--dim)'),
+    stat(w.crashes, 'crash events', w.crashes ? 'var(--red)' : 'var(--green)'),
+    stat(w.hotspot_max != null ? `${Math.round(w.hotspot_max)}°` : null, 'hottest hotspot', w.hotspot_max >= 95 ? 'var(--red)' : 'var(--text)'),
+    stat(w.vram_max != null ? `${w.vram_max} GB` : null, 'peak VRAM'),
+  ].join(''));
+  const disks = Object.entries(w.disks || {}).map(([d, g]) => `<span style="color:${g <= -5 ? 'var(--red)' : g >= 5 ? 'var(--green)' : 'var(--dim)'}">${esc(d)}: ${g > 0 ? '+' : ''}${g} GB</span>`).join(' · ');
+  setHTML($('weekDisks'), `Chains: ${esc(chains)}${disks ? ' · Disks: ' + disks : ''}`);
+  $('weekCover').textContent = w.covered_hours < 24 * w.days ? `from ${w.covered_hours} h of history so far` : `last ${w.days} days`;
+}
+setInterval(loadWeek, 300000);
+
 (async function start() {
   try {
     const meta = await (await fetch('/api/meta', { cache: 'no-store' })).json();
@@ -461,5 +490,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) load
     applyTheme(meta.theme);
   } catch (e) { /* default colors */ }
   await loadHistory();
+  loadControl();
+  loadWeek();
   if (!document.hidden) connect();
 })();
