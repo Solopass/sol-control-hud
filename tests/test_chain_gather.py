@@ -126,6 +126,38 @@ def test_hide_collapses_boring_answers():
     assert cn.join_items({"items": ["x"], "outputs": ["No issues."], "hide": "No issues"}) == "_(1 more: No issues.)_"
 
 
+def test_group_items_splits_big_groups_into_parts():
+    items = [{"name": f"a: f{i}", "repo": "a"} for i in range(3)] + [{"name": "b: g", "repo": "b"}, {"name": "b: h", "repo": "b"}]
+    outs = ["x" * 3000, "y" * 3000, "No issues.", "- bug in g", "no issues"]
+    got = cn.group_items({"items": items, "outputs": outs, "key": "repo", "hide": "No issues", "chunk_tokens": 1000})
+    assert [g["name"] for g in got] == ["a (1/2)", "a (2/2)", "b"]                     # 4000 chars a part
+    assert got[0]["text"].startswith("### a: f0\nxxx") and "yyy" not in got[0]["text"]
+    assert got[1]["text"].endswith("_(1 more: No issues.)_") and got[1]["part"] == 2 and got[1]["parts"] == 2
+    assert got[2] == {"name": "b", "repo": "b", "part": 1, "parts": 1, "files": 1,
+                      "text": "### b: g\n- bug in g\n\n_(1 more: No issues.)_"}
+
+
+def test_review_with_a_per_project_step(env):
+    chains, store, tmp = env
+    make_repo(tmp, "proj")
+    p = chains / "Code review.md"
+    grouped = REVIEW.replace("## Top issues", "## Per project\nfor each part in {{Per file}} grouped by repo:\n"
+                                              "Sum up {{part.name}}:\n{{part.text}}\n\n## Top issues")
+    grouped = grouped.replace("Top issues from: {{Per file}}", "Top issues from: {{Per project}}")
+    p.write_text(grouped.replace("{{ws}}", str(tmp / "ws")), encoding="utf-8")
+    doc = cn.to_workflow(cn.load_chain(p))
+    assert [s for s in doc["steps"] if s["id"] == "per_project__items"][0]["tool"] == "group_items"
+    client = Scripted(["- bug: f() changed its return value", "proj: one bug in app.py", "1. proj/app.py"])
+    rid = run(p, store, client)
+    assert store.run(rid)["status"] == "succeeded"
+    assert "Sum up proj:" in client.calls[1]["prompt"] and "- bug: f() changed" in client.calls[1]["prompt"]
+    assert "### proj\nproj: one bug in app.py" in client.calls[2]["prompt"]
+    with pytest.raises(cn.ChainError, match="needs an earlier `for each` step"):
+        p.write_text(REVIEW.replace("{{ws}}", str(tmp / "ws")).replace(
+            "## Top issues\n", "## Top issues\nfor each part in {{Changes}} grouped by repo:\n"), encoding="utf-8")
+        cn.to_workflow(cn.load_chain(p))
+
+
 @pytest.mark.parametrize("body, msg", [
     ("## A\ngather: the internet\n", "don't understand `gather: the internet`"),
     ("## A\ngather: commits in D:\\x\nSummarize it.\n", "only collects"),

@@ -81,6 +81,8 @@ _G_FILES = re.compile(r"^files in (.+?) matching (.+?)(?: changed in the last (\
 _G_COMMITS = re.compile(r"^commits in (.+?)(?: for the last (\d+) days?)?$", re.I)
 _G_CHANGES = re.compile(r"^changes in (.+?) since (?:the )?last review$", re.I)
 _REF = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+_GROUPED = re.compile(r"^(.+?)\s+grouped by ([a-z_]\w*)$", re.I)
+GROUP_TOKENS = 16000   # one part of a `grouped by` loop: leaves room in a 32k model for the prompt and the answer
 
 
 class ChainError(ValueError):
@@ -239,6 +241,9 @@ def load_chain(path: str | Path) -> Chain:
                 if var in ("inputs", "steps", "previous"):
                     raise ChainError(f"{where}: `for each {var}` - pick another name (e.g. item)")
                 step.loop = {"kind": "lines", "var": var, "source": fl.group(2).strip()}
+                gm = _GROUPED.match(step.loop["source"])
+                if gm:  # `for each part in {{Per file}} grouped by repo:` - an earlier loop's answers, per repo, in parts
+                    step.loop.update(source=gm.group(1).strip(), group=gm.group(2).lower())
         step.prompt = "\n".join(rest).strip()
         if step.gather:
             if step.prompt or step.loop or step.settings or step.checks:
@@ -352,6 +357,17 @@ def to_workflow(chain: Chain) -> dict:
                 "folder": _translate(s.loop["folder"], chain, idx, where), "glob": s.loop["glob"], "recursive": True,
                 "chunk_tokens": CHUNK_TOKENS, "since_days": s.loop["days"]}})
             source = f"{{{{ steps.{s.id}__files.output }}}}"
+        elif s.loop and s.loop.get("group"):
+            src = _translate(s.loop["source"], chain, idx, where, raw=True)
+            m = re.fullmatch(r"\{\{ steps\.(\w+)\.output \}\}", src)
+            prev = next((c for c in steps if m and c["id"] == m.group(1) and c.get("for_each")), None)
+            if prev is None:
+                raise ChainError(f"{where}: `grouped by` needs an earlier `for each` step, e.g. `for each part in {{{{Per file}}}} grouped by repo:`")
+            src_step = next(c for c in chain.steps if c.id == prev["id"])
+            steps.append({"id": f"{s.id}__items", "tool": "group_items", "args": {
+                "items": prev["for_each"]["items"], "outputs": src, "key": s.loop["group"],
+                "hide": src_step.settings.get("hide", ""), "chunk_tokens": GROUP_TOKENS}})
+            source = f"{{{{ steps.{s.id}__items.output }}}}"
         elif s.loop:
             src = _translate(s.loop["source"], chain, idx, where, raw=True)
             if not re.fullmatch(r"\{\{ [\w.]+ \}\}", src):
@@ -438,7 +454,42 @@ def join_items(args: dict, ctx=None) -> str:
     return text
 
 
-TOOLS ={"to_list": to_list, "join_items": join_items, **gather_tools.TOOLS}
+def group_items(args: dict, ctx=None) -> list[dict]:
+    """An earlier loop's answers grouped by one field of its items (e.g. repo), each group cut into parts of at most
+    `chunk_tokens` (~4 characters a token), so a later loop can read a big group in pieces.
+    -> [{"name": "omni-tools (1/3)", "<key>": "omni-tools", "part": 1, "parts": 3, "files": 52, "text": "### …"}]"""
+    items, outputs, hide = args.get("items") or [], args.get("outputs") or [], str(args.get("hide") or "")
+    key, limit = str(args["key"]), int(args.get("chunk_tokens") or GROUP_TOKENS) * 4
+    groups: dict[str, dict] = {}
+    for item, out in zip(items, outputs):
+        g = str(item.get(key, "?") if isinstance(item, dict) else "?")
+        entry = groups.setdefault(g, {"sections": [], "hidden": 0})
+        if _hidden(out, hide):
+            entry["hidden"] += 1
+        else:
+            entry["sections"].append(f"### {_label(item)}\n{_as_text(out)}")
+    result = []
+    for g, entry in groups.items():
+        parts: list[list[str]] = [[]]
+        size = 0
+        for sec in entry["sections"]:
+            sec = sec if len(sec) <= limit else sec[:limit - 20] + "\n_(cut: too long)_"
+            if parts[-1] and size + len(sec) > limit:
+                parts.append([])
+                size = 0
+            parts[-1].append(sec)
+            size += len(sec) + 2
+        for n, secs in enumerate(parts, 1):
+            text = "\n\n".join(secs)
+            if entry["hidden"] and n == len(parts):
+                note = f"_({entry['hidden']} more: {hide.strip().rstrip('.')}.)_"
+                text = f"{text}\n\n{note}" if text else note
+            name = g if len(parts) == 1 else f"{g} ({n}/{len(parts)})"
+            result.append({"name": name, key: g, "part": n, "parts": len(parts), "files": len(secs), "text": text})
+    return result
+
+
+TOOLS = {"to_list": to_list, "join_items": join_items, "group_items": group_items, **gather_tools.TOOLS}
 
 
 # ---------------------------------------------------------------- the chain note's own status line
