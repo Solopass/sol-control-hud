@@ -332,7 +332,16 @@ function renderFeed(items) {
 function connect() {
   if (es) return;
   es = new EventSource('/api/stream');
-  es.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+  let current = null;   // the first message has everything; the next ones only what changed (patch: parts, snap: fields)
+  es.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.full) current = d.full;
+      else if (current) { Object.assign(current, d.patch || {}); if (d.snap) current.snapshot = { ...current.snapshot, ...d.snap }; }
+      else return;
+      render(current);
+    } catch (err) { console.error(err); }
+  };
   es.onerror = () => { $('live').classList.remove('on'); };
 }
 function disconnect() { if (es) { es.close(); es = null; } }

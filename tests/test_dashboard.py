@@ -67,7 +67,8 @@ def test_the_pushed_message_has_everything_the_page_draws(app_hub):
     h, c = app_hub
     h.history.add(h.collector.snap)
     p = h.dashboard_payload()
-    for key in ("snapshot", "attention", "slides", "rows", "views", "gpu", "vram_guard", "router", "wsl", "stability",
+    assert "rows" not in p                                                  # unused by the page: not sent
+    for key in ("snapshot", "attention", "slides", "views", "gpu", "vram_guard", "router", "wsl", "stability",
                 "away", "chains", "activity", "point"):
         assert key in p, key
     assert p["views"]["theme"] == "nordic-frost" and p["point"]["gpu"] == 40.0
@@ -131,3 +132,15 @@ def test_page_files_are_revalidated(app_hub):
     h, c = app_hub
     assert c.get("/static/app.js").headers["cache-control"] == "no-cache"
     assert c.get("/").headers["cache-control"] == "no-store"
+
+
+def test_stream_sends_everything_once_then_only_changes():
+    from sol_control_hud.hub import stream_message
+    p1 = {"snapshot": {"gpu_load": 10.0, "ai_model": "sol-fast", "sampled_at": 1.0}, "views": {"ticker": True}, "chains": {"a": 1}}
+    msg, st = stream_message(None, p1)
+    assert msg == {"full": p1}
+    p2 = {"snapshot": {"gpu_load": 12.0, "ai_model": "sol-fast", "sampled_at": 3.0}, "views": {"ticker": True}, "chains": {"a": 2}}
+    msg, st = stream_message(st, p2)
+    assert msg == {"patch": {"chains": {"a": 2}}, "snap": {"gpu_load": 12.0, "sampled_at": 3.0}}   # not ai_model, not views
+    msg, st = stream_message(st, p2)
+    assert msg == {}                                                        # nothing changed: an empty heartbeat

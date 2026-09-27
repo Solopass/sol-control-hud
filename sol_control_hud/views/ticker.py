@@ -152,7 +152,7 @@ def set_startup(enable: bool) -> bool:
             sc.Arguments = "-m sol_control_hud"   # the whole app (it opens your saved views)
             sc.WorkingDirectory = str(ROOT)
             sc.Description = "SOL Control HUD: taskbar ticker + dashboard"
-            sc.IconLocation = "shell32.dll, 238"
+            sc.IconLocation = str(ROOT / "sol_control_hud" / "assets" / "sol.ico")
             sc.Save()
             return True
         except Exception:

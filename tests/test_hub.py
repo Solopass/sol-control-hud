@@ -68,8 +68,9 @@ def test_web_guard_starts_on_first_use_and_stops_when_idle(monkeypatch):
     started, stopped = [], []
 
     class FakeLoop:
-        def __init__(self, *a):
+        def __init__(self, *a, **k):
             self.latest = {"available": True}
+            assert k.get("interval") == 4.0          # the web guard's pace
 
         def start(self):
             started.append(1)

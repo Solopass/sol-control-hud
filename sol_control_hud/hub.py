@@ -120,6 +120,25 @@ def snapshot_payload(collector, views: dict) -> dict:
             "rows": format_multiline_rows(s), "views": views}
 
 
+def stream_message(prev: dict | None, payload: dict) -> tuple[dict, dict]:
+    """What to push this tick: everything the first time ({"full": ...}), then only what changed: top-level parts in
+    "patch", single snapshot fields in "snap" (the snapshot changes a few fields a tick, not all ~70).
+    Returns (message, state to pass back next time)."""
+    dump = lambda v: json.dumps(v, default=str, sort_keys=True, separators=(",", ":"))  # noqa: E731
+    snap = payload.get("snapshot") or {}
+    state = {"parts": {k: dump(v) for k, v in payload.items() if k != "snapshot"}, "snap": {k: dump(v) for k, v in snap.items()}}
+    if not prev:
+        return {"full": payload}, state
+    msg = {}
+    patch = {k: payload[k] for k, d in state["parts"].items() if prev["parts"].get(k) != d}
+    fields = {k: snap[k] for k, d in state["snap"].items() if prev["snap"].get(k) != d}
+    if patch:
+        msg["patch"] = patch
+    if fields:
+        msg["snap"] = fields
+    return msg, state
+
+
 class LazyGuard:
     """The web dashboard's VRAM guard loop, started on first use and stopped when nobody has looked for a while."""
 
@@ -132,7 +151,7 @@ class LazyGuard:
         with self._lock:
             self.last_used = time.monotonic()
             if self.loop is None:
-                self.loop = vram.GuardLoop(vram.VramGuard(), self.sampler, engines.ollama)
+                self.loop = vram.GuardLoop(vram.VramGuard(), self.sampler, engines.ollama, interval=4.0)   # a verdict every 4 s is plenty
                 self.loop.start()
                 return {"available": False, "error": "starting"}
             return self.loop.latest
@@ -307,10 +326,12 @@ class Hub:
     def dashboard_payload(self) -> dict:
         """Everything the dashboard shows, in one message (pushed every 2 s over /api/stream)."""
         c = self.collectors
-        return {**snapshot_payload(self.collector, self.views()), "gpu": c["gpu"].get(), "vram_guard": c["vram"].get(),
+        p = snapshot_payload(self.collector, self.views())
+        p.pop("rows", None)                           # the ticker's multi-line rows: the page doesn't use them
+        return {**p, "gpu": c["gpu"].get(), "vram_guard": c["vram"].get(),
                 "router": c["llama_swap"].get(), "wsl": c["wsl"].get(), "stability": c["stability"].get(),
                 "away": c["away"].get(), "chains": c["chains"].get(), "activity": c["activity"].get(),
-                "point": self.history.latest(), "server_time": time.time()}
+                "point": self.history.latest()}
 
     def build_app(self):
         """The dashboard's web app on this hub's data: the page + /static, /api/stream (pushed), /api/snapshot,
@@ -350,10 +371,12 @@ class Hub:
         @app.get("/api/stream")
         async def stream(request: Request):
             async def events():
+                state = None
                 while not await request.is_disconnected():
                     self.last_web = time.monotonic()  # an open stream = a dashboard on screen (hidden tabs close it)
                     payload = await asyncio.to_thread(self.dashboard_payload)
-                    yield f"data: {json.dumps(payload, default=str, separators=(',', ':'))}\n\n"
+                    msg, state = stream_message(state, payload)   # after the first message: only what changed
+                    yield f"data: {json.dumps(msg, default=str, separators=(',', ':'))}\n\n"
                     await asyncio.sleep(ACTIVE_PACE)
             return StreamingResponse(events(), media_type="text/event-stream",
                                      headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})

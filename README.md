@@ -39,6 +39,10 @@ Setup: `uv venv --python "C:\Program Files\Python314\python.exe" .venv` then
 - **Back after a crash:** while it runs the app keeps `data\app-running.json`; if that process dies without Exit, `D:\OBVLT\tools\sol-llm-watch.ps1` starts it again within ~10 s (at most 3 times in 10 min, then it stops and the morning briefing says so). Exit removes the file, so what you close stays closed.
 - Tests use a temporary data folder (`tests\conftest.py`): `data\` here is the live machine's state.
 
+## Working on it
+- **Every commit runs the tests** (`.githooks/pre-commit`; enable in a fresh clone with `git config core.hooksPath .githooks`). Skip once only on purpose: `git commit --no-verify`.
+- Icon: `scripts\make_icon.py` draws `sol_control_hud\assets\sol.ico` and the dashboard's `sol.svg`.
+
 ## Rules the code keeps
 - Servers bind 127.0.0.1 only. Nothing polls a model directly (`/slots` counts as use and keeps it loaded).
 - No new process per poll; git with `--no-optional-locks`; Win32 handles passed as `wintypes.HWND`.

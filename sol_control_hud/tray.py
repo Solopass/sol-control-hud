@@ -96,7 +96,7 @@ class Tray:
         u32.RegisterClassW(ctypes.byref(wc))
         self._taskbar_created = u32.RegisterWindowMessageW("TaskbarCreated")
         self.hwnd = u32.CreateWindowExW(0, wc.lpszClassName, "SOL Control HUD tray", 0, 0, 0, 0, 0, None, None, hinst, None)
-        self._hicon = sh32.ExtractIconW(hinst, self.icon_src[0], self.icon_src[1]) or u32.LoadIconW(None, 32512)
+        self._hicon = self._load_icon(hinst)
         if self.hwnd:
             self._notify(NIM_ADD)
         self._ready.set()
@@ -104,6 +104,19 @@ class Tray:
         while u32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             u32.TranslateMessage(ctypes.byref(msg))
             u32.DispatchMessageW(ctypes.byref(msg))
+
+    def _load_icon(self, hinst):
+        """The app's own icon (assets\sol.ico at the tray size), else the given shell32 icon, else Windows' default."""
+        from pathlib import Path
+        ico = Path(__file__).resolve().parent / "assets" / "sol.ico"
+        if ico.exists():
+            u32.LoadImageW.restype = wintypes.HANDLE
+            u32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT]
+            size = u32.GetSystemMetrics(49)                     # SM_CXSMICON: the tray's icon size at this DPI
+            h = u32.LoadImageW(None, str(ico), 1, size, size, 0x10)   # IMAGE_ICON, LR_LOADFROMFILE
+            if h:
+                return h
+        return sh32.ExtractIconW(hinst, self.icon_src[0], self.icon_src[1]) or u32.LoadIconW(None, 32512)
 
     def _notify(self, action: int, info: tuple[str, str, int] | None = None) -> bool:
         nid = NOTIFYICONDATAW()
