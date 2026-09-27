@@ -71,3 +71,9 @@ def test_through_the_dashboard(tmp_path, monkeypatch):
     monkeypatch.setattr(mc, "_mode", lambda: "away")
     r = c.post("/api/action", json={"action": "model", "target": "sol-fast", "op": "unload"}, headers={"X-SOL-Control": "1"}).json()
     assert r["ok"] is False and "Away is running" in r["why"]
+
+
+def test_vram_budget_probe_reads_the_card():
+    from sol_control_hud.data.collectors.budget import vram_budget
+    b = vram_budget()
+    assert b["available"] and b["vram_gb"] > 8 and 0 < b["budget_gb"] <= b["vram_gb"] + 0.5
