@@ -101,3 +101,38 @@ def test_topmost_is_passed_as_a_real_handle(monkeypatch):
     ticker.raise_topmost(12345)
     after = calls[0][1]
     assert isinstance(after, wintypes.HWND) and after.value in (-1, 2 ** 64 - 1)
+
+
+def test_docked_width_ends_before_the_taskbar_icons():
+    assert ticker.dock_width(218, 490, 772, 260) == 490                  # fits today: 218 + 490 < 772 - 8
+    assert ticker.dock_width(300, 490, 772, 260) == 464                  # more pinned apps: shrink to end 8 px before
+    assert ticker.dock_width(600, 490, 772, 260) == 260                  # never below the readable minimum
+    assert ticker.dock_width(900, 490, 772, 260) == 490                  # sitting right of the icons: untouched
+    assert ticker.dock_width(218, 490, None, 260) == 490                 # unknown (the lookup failed): untouched
+
+
+def test_scale_follows_the_monitor():
+    dpis = {(0, 0): 96, (100, 100): 96, (100, -1500): 144}              # main 100 %, the 4K above it at 150 %
+    fake = lambda x, y: dpis.get((x, y), 96)                             # noqa: E731
+    assert ticker.dpi_factor(100, 100, dpi=fake) == 1.0
+    assert ticker.dpi_factor(100, -1500, dpi=fake) == 1.5
+
+
+def test_model_menu_comes_from_the_router():
+    fetch = lambda: {"up": True, "running": [{"model": "sol-away-27b", "state": "loaded"}, {"model": "sol-fast", "state": "unloaded"}]}  # noqa: E731
+    items = ticker.router_models(fetch)
+    assert items[0] == ("sol-away-27b", "loaded", "sol-away-27b") and items[1][2].startswith("sol-fast (Gemma")
+    assert [m for m, _, _ in ticker.router_models(lambda: {"up": False})] == [m for m, _ in ticker.AI_MODELS]   # fallback
+
+
+def test_ticker_fonts_rescale_together():
+    import tkinter as tk
+    root = tk.Tk(); root.withdraw()
+    try:
+        app = ticker.TickerApp(root)
+        base = {k: f.cget("size") for k, f in app._fonts.items()}
+        assert len(base) >= 5 and app._apply_dpi(1.5)
+        assert all(app._fonts[k].cget("size") == max(1, round(k[0] * 1.5)) for k in base)
+        assert not app._apply_dpi(1.5)                                   # same scale again: nothing to do
+    finally:
+        root.destroy()

@@ -205,6 +205,72 @@ AI_MODELS: list[tuple[str, str]] = [
     ("sol-long", "sol-long (gpt-oss-20b · 65k Context)"),
 ]
 
+_START_PS = (
+    "Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes; "
+    "$A = [System.Windows.Automation.AutomationElement]; $S = [System.Windows.Automation.TreeScope]; "
+    "$tray = $A::RootElement.FindFirst($S::Children, (New-Object System.Windows.Automation.PropertyCondition($A::ClassNameProperty, 'Shell_TrayWnd'))); "
+    "if ($tray) { $b = $tray.FindFirst($S::Descendants, (New-Object System.Windows.Automation.PropertyCondition($A::AutomationIdProperty, 'StartButton'))); "
+    "if ($b) { 'start ' + [int]$b.Current.BoundingRectangle.Left } }")
+
+
+def start_button_left(timeout: float = 10.0) -> int | None:
+    """Where the Windows 11 taskbar's Start button (the first of the centered icons) begins, in screen pixels.
+    Windows 11 draws its taskbar in XAML, so the buttons aren't windows: UI Automation is the supported way to ask.
+    One short hidden PowerShell (~0.3 s); the ticker asks at start, when you dock it, and every 10 minutes."""
+    import subprocess
+    try:
+        out = subprocess.run(["powershell.exe", "-NoProfile", "-Command", _START_PS], capture_output=True, text=True,
+                             timeout=timeout, creationflags=0x08000000).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        if line.startswith("start "):
+            try:
+                return int(line.split()[1])
+            except ValueError:
+                return None
+    return None
+
+
+def dock_width(x: int, w: int, start_left: int | None, min_w: int, margin: int = 8) -> int:
+    """Width for a docked ticker at x so it ends `margin` px before the taskbar icons (never below min_w)."""
+    if start_left is None or x >= start_left:
+        return w                          # unknown, or the ticker sits right of the icons: leave it
+    return max(min_w, min(w, start_left - margin - x))
+
+
+def monitor_dpi(x: int, y: int) -> int:
+    try:
+        hmon = ctypes.windll.user32.MonitorFromPoint(wintypes.POINT(x, y), 2)
+        dx, dy = wintypes.UINT(), wintypes.UINT()
+        if ctypes.windll.shcore.GetDpiForMonitor(hmon, 0, ctypes.byref(dx), ctypes.byref(dy)) == 0:
+            return int(dx.value)
+    except Exception:  # noqa: BLE001
+        pass
+    return 96
+
+
+def dpi_factor(x: int, y: int, dpi=monitor_dpi) -> float:
+    """How much bigger to draw at (x, y) than on the main monitor (Tk sized its fonts for the main one at start)."""
+    return round(dpi(x, y) / max(1, dpi(0, 0)), 3)
+
+
+def router_models(fetch=None) -> list[tuple[str, str, str]]:
+    """(id, state, label) for the model menu: what the router serves right now (Desk models, or the Away models during
+    Away) from GET :11440/models, which the router answers itself (never /slots: that wakes and keeps a model).
+    Known models keep their descriptions; the fixed list is only the fallback when the router doesn't answer."""
+    if fetch is None:
+        from ..data.collectors.engines import llama_swap as fetch
+    try:
+        running = (fetch() or {}).get("running") or []
+    except Exception:  # noqa: BLE001
+        running = []
+    labels = dict(AI_MODELS)
+    if not running:
+        return [(m, "", label) for m, label in AI_MODELS]
+    return [(r["model"], r.get("state") or "", labels.get(r["model"], r["model"])) for r in running if r.get("model")]
+
+
 CHAINS_DIR = Path(os.environ.get("SOL_CHAINS", r"D:\OBVLT\1Notebook\Chains"))
 
 
@@ -682,7 +748,11 @@ class TickerApp:
             self.font_scale = DEFAULT_FONT_SCALE
         scale_info = FONT_SCALES[self.font_scale]
 
-        # Fonts
+        # Fonts (named, so a move to a monitor with another scale rescales them all: _apply_dpi)
+        self._dpi = 1.0
+        self._fonts: dict[tuple[int, str], tkfont.Font] = {}
+        self._start_left: int | None = None      # where the taskbar icons begin (docked width limit)
+        self._start_left_new = False
         self.font_single = tkfont.Font(family="Segoe UI", size=int(scale_info["font_single"]))
         self.font_row = tkfont.Font(family="Segoe UI", size=int(scale_info["font_row"]))
 
@@ -712,6 +782,8 @@ class TickerApp:
         self.root.after(350, self._check_activation_trigger)
         # Stay above the taskbar (it's topmost too and wins every time you click it)
         self.root.after(1000, self._keep_on_top)
+        # Where the taskbar icons begin (a docked ticker ends before them), then every 10 minutes
+        self.root.after(3000, self._refresh_start_left)
 
     def _keep_on_top(self) -> None:
         try:
@@ -725,6 +797,36 @@ class TickerApp:
         except Exception:
             pass
         self.root.after(500, self._keep_on_top)   # cheap check (no redraw unless covered), so it can run twice a second
+
+    def _font(self, size: int, weight: str = "normal") -> tkfont.Font:
+        key = (size, weight)
+        if key not in self._fonts:
+            self._fonts[key] = tkfont.Font(family="Segoe UI", size=max(1, round(size * self._dpi)), weight=weight)
+        return self._fonts[key]
+
+    def _apply_dpi(self, factor: float) -> bool:
+        """Scale every font to the monitor the ticker is on (the 4K one runs at 150 % next to a 100 % main screen)."""
+        if abs(factor - self._dpi) < 0.01:
+            return False
+        self._dpi = factor
+        for (size, _), font in self._fonts.items():
+            font.configure(size=max(1, round(size * factor)))
+        info = FONT_SCALES.get(self.font_scale, FONT_SCALES[DEFAULT_FONT_SCALE])
+        self.font_single.configure(size=max(1, round(int(info["font_single"]) * factor)))
+        self.font_row.configure(size=max(1, round(int(info["font_row"]) * factor)))
+        for w in [getattr(self, "single_text", None), *(v for _, v in getattr(self, "row_widgets", []))]:
+            if w is not None:
+                w.configure(height=w._font.metrics("linespace") + 2)
+        return True
+
+    def _refresh_start_left(self, again: bool = True) -> None:
+        """Ask (in the background) where the taskbar icons begin; the poll loop picks it up. Every 10 min."""
+        def work():
+            self._start_left = start_button_left()
+            self._start_left_new = True
+        threading.Thread(target=work, name="taskbar-gap", daemon=True).start()
+        if again:
+            self.root.after(600_000, self._refresh_start_left)
 
     def get_theme(self) -> dict[str, str]:
         """Returns the dictionary for the currently selected color theme."""
@@ -896,9 +998,12 @@ class TickerApp:
 
     def _apply_geometry(self, initial: bool = False) -> None:
         scale_info = FONT_SCALES.get(self.font_scale, FONT_SCALES[DEFAULT_FONT_SCALE])
-        w = int(scale_info["width"])
-        single_h = int(scale_info["single_h"])
-        multi_h = int(scale_info["multi_h"])
+        probe_x = int(self.settings.get("x") or 0) if initial else self.root.winfo_x()
+        probe_y = int(self.settings.get("y") or 0) if initial else self.root.winfo_y()
+        self._apply_dpi(dpi_factor(probe_x + 40, probe_y + 10) if (probe_x or probe_y) else 1.0)
+        w = int(int(scale_info["width"]) * self._dpi)
+        single_h = int(int(scale_info["single_h"]) * self._dpi)
+        multi_h = int(int(scale_info["multi_h"]) * self._dpi)
         h = single_h if self.mode == "single" else multi_h
 
         (left, top, right, bottom), screen_w, screen_h = get_screen_and_work_area()
@@ -940,6 +1045,8 @@ class TickerApp:
                 if y + h > bottom:
                     y = bottom - h
 
+        if self.docked and self.mode == "single":
+            w = dock_width(x, w, self._start_left, int(260 * self._dpi))   # end before the taskbar icons
         x, y = self._clamp(x, y, w, h)
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
@@ -968,7 +1075,7 @@ class TickerApp:
         # Tag badge
         self.tag_label = tk.Label(
             self.single_frame, text="HW", bg=t["badge_bg"], fg=t["accent_primary"],
-            font=("Segoe UI", 8, "bold"), padx=6, pady=2, cursor="hand2"
+            font=self._font(8, "bold"), padx=6, pady=2, cursor="hand2"
         )
         self.tag_label.pack(side=tk.LEFT, padx=(6, 8), pady=4)
         self.tag_tooltip = Tooltip(self.tag_label)
@@ -982,7 +1089,7 @@ class TickerApp:
         # Slide indicator dots
         self.dots_label = tk.Label(
             self.single_frame, text="● ○ ○ ○", bg=t["bg"], fg=t["text_dim"],
-            font=("Segoe UI", 7), padx=4, cursor="hand2"
+            font=self._font(7), padx=4, cursor="hand2"
         )
         self.dots_label.pack(side=tk.LEFT, padx=4)
         self.dots_tooltip = Tooltip(self.dots_label)
@@ -991,7 +1098,7 @@ class TickerApp:
         # Toggle to multiline button
         self.btn_expand = tk.Label(
             self.single_frame, text="⊞", bg=t["bg"], fg=t["text_muted"],
-            font=("Segoe UI", 10), padx=4, cursor="hand2"
+            font=self._font(10), padx=4, cursor="hand2"
         )
         self.btn_expand.pack(side=tk.LEFT, padx=(2, 4))
         self.btn_expand.bind("<Button-1>", lambda e: self.toggle_mode())
@@ -999,7 +1106,7 @@ class TickerApp:
         # Close button
         self.btn_close_single = tk.Label(
             self.single_frame, text="✕", bg=t["bg"], fg=t["text_dim"],
-            font=("Segoe UI", 8), padx=6, cursor="hand2"
+            font=self._font(8), padx=6, cursor="hand2"
         )
         self.btn_close_single.pack(side=tk.RIGHT, padx=(0, 4))
         self.btn_close_single.bind("<Button-1>", lambda e: self.quit("✕ button"))
@@ -1013,19 +1120,19 @@ class TickerApp:
 
         self.title_label = tk.Label(
             self.header_frame, text="SOL WORKSTATION", bg=t["bg"], fg=t["text_muted"],
-            font=("Segoe UI", 8, "bold")
+            font=self._font(8, "bold")
         )
         self.title_label.pack(side=tk.LEFT)
 
         self.status_dot = tk.Label(
             self.header_frame, text="●", bg=t["bg"], fg=t["accent_green"],
-            font=("Segoe UI", 7)
+            font=self._font(7)
         )
         self.status_dot.pack(side=tk.LEFT, padx=(4, 6))
 
         self.mode_badge = tk.Label(
             self.header_frame, text="[DESK]", bg=t["bg"], fg=t["accent_primary"],
-            font=("Segoe UI", 7, "bold"), cursor="hand2"
+            font=self._font(7, "bold"), cursor="hand2"
         )
         self.mode_badge.pack(side=tk.LEFT)
         self.mode_badge_tooltip = Tooltip(self.mode_badge)
@@ -1034,7 +1141,7 @@ class TickerApp:
         # Crash warning (unexpected reboots / GPU driver resets since the baseline or the last acknowledgement)
         self.crash_badge = tk.Label(
             self.header_frame, text="", bg=t["bg"], fg=t["accent_red"],
-            font=("Segoe UI", 7, "bold")
+            font=self._font(7, "bold")
         )
         self.crash_badge.pack(side=tk.LEFT, padx=(6, 0))
         self.crash_tooltip = Tooltip(self.crash_badge)
@@ -1042,21 +1149,21 @@ class TickerApp:
         # Header controls
         self.btn_close_multi = tk.Label(
             self.header_frame, text="✕", bg=t["bg"], fg=t["text_dim"],
-            font=("Segoe UI", 8), padx=4, cursor="hand2"
+            font=self._font(8), padx=4, cursor="hand2"
         )
         self.btn_close_multi.pack(side=tk.RIGHT)
         self.btn_close_multi.bind("<Button-1>", lambda e: self.quit("✕ button"))
 
         self.btn_collapse = tk.Label(
             self.header_frame, text="⊟", bg=t["bg"], fg=t["text_muted"],
-            font=("Segoe UI", 10), padx=6, cursor="hand2"
+            font=self._font(10), padx=6, cursor="hand2"
         )
         self.btn_collapse.pack(side=tk.RIGHT)
         self.btn_collapse.bind("<Button-1>", lambda e: self.toggle_mode())
 
         self.btn_web = tk.Label(
             self.header_frame, text="↗ Web HUD", bg=t["bg"], fg=t["accent_primary"],
-            font=("Segoe UI", 8), padx=6, cursor="hand2"
+            font=self._font(8), padx=6, cursor="hand2"
         )
         self.btn_web.pack(side=tk.RIGHT, padx=4)
         self.btn_web.bind("<Button-1>", lambda e: self.open_web_hud())
@@ -1073,7 +1180,7 @@ class TickerApp:
             rf.pack(fill=tk.X, pady=1)
 
             lbl_title = tk.Label(
-                rf, text="", bg=t["bg"], fg=t["text_dim"], font=("Segoe UI", 7, "bold"),
+                rf, text="", bg=t["bg"], fg=t["text_dim"], font=self._font(7, "bold"),
                 width=10, anchor="w", cursor="hand2"
             )
             lbl_title.pack(side=tk.LEFT)
@@ -1143,6 +1250,8 @@ class TickerApp:
         x, y = self._clamp(self.root.winfo_x(), self.root.winfo_y(), w, h)
         if (x, y) != (self.root.winfo_x(), self.root.winfo_y()):
             self.root.geometry(f"+{x}+{y}")
+        if abs(dpi_factor(x + w // 2, y + h // 2) - self._dpi) >= 0.01:
+            self._apply_geometry()         # dropped on a monitor with another scale (the 4K one): redraw at its size
         self._save_settings()
 
     def _open_slide_target(self, tag: str) -> None:
@@ -1351,11 +1460,10 @@ class TickerApp:
 
         # Local AI Model submenu
         ai_model_menu = tk.Menu(menu, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
-        cur_ai_model = self.latest_snap.ai_model or ""
-        for m_id, m_label in AI_MODELS:
-            mark = "✓ " if m_id == cur_ai_model else "   "
+        for m_id, state, label in router_models():
+            mark = "✓ " if state in ("loaded", "loading") else "   "
             ai_model_menu.add_command(
-                label=f"{mark}{m_label}",
+                label=f"{mark}{label}" + (f"  ·  {state}" if state and state not in ("loaded", "unloaded") else ""),
                 command=lambda mid=m_id: self.switch_ai_model(mid),
             )
         ai_model_menu.add_separator()
@@ -1634,6 +1742,8 @@ class TickerApp:
 
     def toggle_dock(self) -> None:
         self.docked = not self.docked
+        if self.docked:
+            self._refresh_start_left(again=False)
         self.settings["docked"] = self.docked
         self._apply_geometry()
         self._save_settings()
@@ -1703,6 +1813,10 @@ class TickerApp:
         self.root.after(int(self.interval * 1000 * hold), self._auto_rotate_slide)
 
     def _poll_collector(self) -> None:
+        if self._start_left_new:           # the taskbar answer arrived (background thread): fit a docked ticker to it
+            self._start_left_new = False
+            if self.docked and not self.user_hidden and not self._is_hidden_for_fullscreen:
+                self._apply_geometry()
         self._on_data_tick()
         is_hidden = self._check_auto_hide()
         poll_ms = 4000 if is_hidden else 2000
@@ -1749,7 +1863,11 @@ class TickerApp:
         scale_info = FONT_SCALES.get(self.font_scale, FONT_SCALES[DEFAULT_FONT_SCALE])
         self.single_text.configure(bg=t["bg"], fg=t["text_main"])
         segs = slide.get("segments") or [(full_text, None)]
-        self.single_text.set_segments([(txt, self._tc(c)) for txt, c in segs], int(scale_info["max_single_px"]))
+        # the text room scales with the monitor and shrinks when a docked ticker is narrowed to fit the taskbar gap
+        full_w = int(int(scale_info["width"]) * self._dpi)
+        cur_w = self.root.winfo_width() if self.root.winfo_width() > 1 else full_w
+        room = int(int(scale_info["max_single_px"]) * self._dpi) - max(0, full_w - cur_w)
+        self.single_text.set_segments([(txt, self._tc(c)) for txt, c in segs], max(80, room))
 
         detail = slide.get("detail", "")
         tip_content = f"{slide['tag']}: {full_text}\n{detail}" if detail else f"{slide['tag']}: {full_text}"
@@ -1820,7 +1938,7 @@ class TickerApp:
                     segs += [(f"{k}: ", t["text_dim"]), (str(v), self._tc(c))]
                 full_row = "  ·  ".join(parts)
                 lbl_v.configure(bg=t["bg"], fg=t["text_main"])
-                lbl_v.set_segments(segs, int(scale_info["max_row_px"]))
+                lbl_v.set_segments(segs, int(int(scale_info["max_row_px"]) * self._dpi))
                 if i < len(self.row_tooltips):
                     self.row_tooltips[i].set_text(f"{r['title']}: {full_row}")
 

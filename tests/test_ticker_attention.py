@@ -1,5 +1,7 @@
 """Ticker: what needs you first, trend colors, chain waits + schedule, the last Away session (2026-09-26)."""
 import json
+import os
+import time
 from datetime import datetime
 
 from sol_control_hud.data import snapshot as td
@@ -136,3 +138,36 @@ def test_router_port_is_not_probed_twice(monkeypatch):
     monkeypatch.setattr(td, "wsl_running", lambda: False)
     out = td.probe_services(router_up=False)
     assert out["Router"] is False and 11440 not in asked and set(asked) == {11443, 7900}
+
+
+def test_short_trends_and_their_colors(tmp_path, monkeypatch):
+    assert td.rise([(0, 5.0), (300, 6.5), (590, 7.2)], now=600, window=600) == 2.2      # latest minus the lowest
+    assert td.rise([(0, 5.0)], now=10, window=600) is None                              # one sample: no trend yet
+    assert td.rise([(0, 9.0), (500, 5.0), (590, 6.0)], now=600, window=50) is None      # only one inside 50 s
+    hw = lambda s: dict((t.split(" ")[0], c) for t, c in slide(s, "HW")["segments"] if t.strip() and c != MUTED)  # noqa: E731
+    base = {**OK, "vram_used_gb": 9.0, "vram_total_gb": 16.0, "gpu_temp": 62, "ai_mode": "desk"}
+    assert hw(Snapshot(**base))["VRAM"] == TEXT
+    assert hw(Snapshot(**{**base, "vram_rise_gb": 1.4}))["VRAM"] == AMBER                # growing at the desk
+    assert hw(Snapshot(**{**base, "vram_rise_gb": 1.4, "ai_mode": "away"}))["VRAM"] == TEXT   # Away loads models: normal
+    assert hw(Snapshot(**{**base, "temp_rise_c": 12}))["GPU"] == AMBER
+
+
+def test_old_uncommitted_work_turns_red(tmp_path):
+    repo = tmp_path / "repo"; repo.mkdir()
+    old, new = repo / "old.py", repo / "new.py"
+    old.write_text("x"); new.write_text("y")
+    now = time.time()
+    os.utime(old, (now - 5 * 86400, now - 5 * 86400))
+    assert td.dirty_age_days(repo, " M old.py\n?? new.py\n D gone.py\n", now=now) == 5.0
+    git = lambda days: slide(Snapshot(git_dirty_count=1, git_dirty_repos=["media-api"], git_total_repos=13,  # noqa: E731
+                                      git_dirty_days={"media-api": days}, **OK), "GIT")
+    assert git(5.0)["text"].endswith("oldest 5 days") and dict(git(5.0)["segments"])[git(5.0)["text"].split("  ·  ")[0]] == RED
+    assert dict(git(1.0)["segments"])["1 repos dirty (media-api)"] == AMBER
+
+
+def test_daily_note_reminder_after_eight(monkeypatch):
+    note = lambda: dict(slide(Snapshot(note_exists=True, note_words=40, **OK), "NOTE")["segments"])["Today: 40 words"]  # noqa: E731
+    monkeypatch.setattr(td.time, "localtime", lambda *a: time.struct_time((2026, 9, 26, 21, 0, 0, 5, 269, 0)))
+    assert note() == AMBER
+    monkeypatch.setattr(td.time, "localtime", lambda *a: time.struct_time((2026, 9, 26, 14, 0, 0, 5, 269, 0)))
+    assert note() == TEXT
