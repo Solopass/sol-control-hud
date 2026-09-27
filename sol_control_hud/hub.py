@@ -345,7 +345,7 @@ class Hub:
         c = self.collectors
         p = snapshot_payload(self.collector, self.views())
         p.pop("rows", None)                           # the ticker's multi-line rows: the page doesn't use them
-        return {**p, "gpu": c["gpu"].get(), "vram_guard": c["vram"].get(),
+        return {**p, "cpu": c["cpu"].get(), "gpu": c["gpu"].get(), "vram_guard": c["vram"].get(),
                 "router": c["llama_swap"].get(), "wsl": c["wsl"].get(), "stability": c["stability"].get(),
                 "away": c["away"].get(), "chains": c["chains"].get(), "activity": c["activity"].get(),
                 "point": self.history.latest(), "models": self._model_rows()}
@@ -371,7 +371,9 @@ class Hub:
         from .views.web.app import STATIC, Cached, build_collectors, create_app
         self.collectors = build_collectors(self.collector._sampler, self.guard)
         from . import models_ctl
-        self.collectors.update({"model_procs": Cached(models_ctl.model_processes, 5),
+        from .data.collectors import cpu
+        self.collectors.update({"cpu": Cached(cpu.sample, 1.5),    # per-core load + clock for the CPU · GPU card
+                                "model_procs": Cached(models_ctl.model_processes, 5),
                                 "model_desc": Cached(models_ctl.descriptions, 60)})
         self.collectors.update({"away": Cached(feed.away_info, 1.5), "chains": Cached(lambda: feed._read_json(feed.LLM_DIR / "chains.json"), 1.5),
                                 "activity": Cached(feed.activity, 5)})

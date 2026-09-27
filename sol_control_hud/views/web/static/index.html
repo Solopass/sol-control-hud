@@ -38,7 +38,15 @@
 </section>
 
 <main class="grid">
-  <article class="card" id="c-gpu">
+  <article class="card tall" id="c-gpu">
+    <h2>CPU <span class="dim" id="cpuName"></span></h2>
+    <div class="hero"><span class="big" id="cpuLoad">–</span><span class="unit">%</span>
+      <div class="temps" id="cpuClock"></div></div>
+    <div class="engines" id="cpuEngines"></div>
+    <div class="cores" id="cpuCores" title="Load per core: P-cores first, then E-cores"></div>
+    <canvas class="chart" id="chCpu" data-series="cpu" data-max="100"></canvas>
+    <div class="legend"><span style="--c:var(--cyan)">load</span><span class="dim" id="cpuSplit"></span></div>
+    <div class="split-line" aria-hidden="true"></div>
     <h2>GPU <span class="dim" id="gpuName"></span></h2>
     <div class="hero"><span class="big" id="gpuLoad">–</span><span class="unit">%</span>
       <div class="temps" id="gpuTemps"></div></div>
@@ -104,15 +112,15 @@
   </article>
 
   <article class="card" id="c-system">
-    <h2>Memory · CPU · Network</h2>
+    <h2>Memory · Network</h2>
     <div class="trio">
       <div><div class="dim">RAM</div><span class="mid" id="ramUsed">–</span><span class="unit" id="ramTotal"></span></div>
-      <div><div class="dim">CPU</div><span class="mid" id="cpuPct">–</span><span class="unit">%</span></div>
+      <div><div class="dim">RAM used</div><span class="mid" id="ramPct">–</span><span class="unit">%</span></div>
       <div><div class="dim">↓ / ↑</div><span class="mid small" id="netRate">–</span></div>
     </div>
     <div class="bar" id="ramBar"><i></i></div>
-    <canvas class="chart" id="chSys" data-series="ram,cpu" data-max="96,100"></canvas>
-    <div class="legend"><span style="--c:var(--green)">RAM GB</span><span style="--c:var(--cyan)">CPU %</span></div>
+    <canvas class="chart" id="chSys" data-series="ram" data-max="96"></canvas>
+    <div class="legend"><span style="--c:var(--green)">RAM GB</span></div>
     <canvas class="chart short" id="chNet" data-series="down,up" data-max="auto"></canvas>
     <div class="legend"><span style="--c:var(--cyan)">down KB/s</span><span style="--c:var(--amber)">up KB/s</span></div>
   </article>

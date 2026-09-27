@@ -139,6 +139,38 @@ function render(p) {
   renderAlerts(p.attention || []);
   renderAway(p);
 
+  // CPU (top half of the CPU · GPU card): same layout as the GPU half below it
+  const c = p.cpu || {};
+  $('cpuName').textContent = c.name ? c.name.replace(/\(R\)|\(TM\)|Intel|Core/g, '').replace(/\s+/g, ' ').trim() : '';
+  tween($('cpuLoad'), c.load ?? s.cpu_percent, 0);
+  const boost = c.clock_ghz && c.base_ghz ? c.clock_ghz / c.base_ghz : 0;
+  setHTML($('cpuClock'), c.clock_ghz == null ? '' :
+    `<span>clock <b style="color:${boost >= 1.4 ? 'var(--cyan)' : 'var(--text)'}">${c.clock_ghz.toFixed(2)} GHz</b></span>` +
+    (c.base_ghz ? `<span class="dim">base ${c.base_ghz}</span>` : ''));
+  const cbox = $('cpuEngines');
+  const crow = [['P-cores', c.p_load], ['E-cores', c.e_load], [c.busiest ? `busiest ${c.busiest.name}` : 'busiest', c.busiest?.load]]
+    .filter(([, v]) => v != null);
+  const cnames = crow.map(([n]) => n).join('|');
+  if (cbox._names !== cnames) {
+    cbox._names = cnames;
+    cbox.innerHTML = crow.map(([n]) => `<span class="dim">${esc(n)}</span><div class="bar"><i></i></div><span class="v"></span>`).join('');
+  }
+  crow.forEach(([, v], i) => {
+    setBar(cbox.querySelectorAll('.bar')[i], v / 100, v >= 90 ? 'var(--amber)' : 'var(--cyan)');
+    cbox.querySelectorAll('.v')[i].textContent = `${v.toFixed(0)}%`;
+  });
+  // one cell per core, brighter = busier (P-cores wider: they carry two threads each)
+  const cores = c.cores || [], cc2 = $('cpuCores');
+  if (cc2.children.length !== cores.length) {
+    cc2.innerHTML = cores.map((_, i) => `<i class="${i < (c.p_cores || 0) ? 'p' : 'e'}"></i>`).join('');
+  }
+  cores.forEach((v, i) => {
+    const el = cc2.children[i];
+    el.style.setProperty('--l', Math.min(1, v / 100).toFixed(2));
+    el.title = `${i < c.p_cores ? `P${i}` : `E${i - c.p_cores}`}: ${v.toFixed(0)}%`;
+  });
+  $('cpuSplit').textContent = c.p_cores ? `${c.p_cores} P + ${c.e_cores} E cores · ${c.threads} threads` : '';
+
   // GPU
   $('gpuName').textContent = s.gpu_name || (p.gpu?.available === false ? 'unavailable' : '');
   tween($('gpuLoad'), s.gpu_load, 0);
@@ -173,7 +205,7 @@ function render(p) {
   tween($('ramUsed'), s.ram_used_gb, 1); $('ramTotal').textContent = ` / ${Math.round(s.ram_total_gb)} GB`;
   const rp = s.ram_percent;
   setBar($('ramBar'), rp / 100, rp >= 92 ? 'var(--red)' : rp >= 85 ? 'var(--amber)' : 'var(--green)');
-  tween($('cpuPct'), s.cpu_percent, 0);
+  tween($('ramPct'), rp, 0);
   const rate = (kb) => kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB/s` : `${kb.toFixed(0)} KB/s`;
   $('netRate').textContent = `${rate(s.net_down_kb)} / ${rate(s.net_up_kb)}`;
 
