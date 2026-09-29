@@ -29,6 +29,7 @@ from pathlib import Path
 
 from fastapi import Request   # module level: annotations are strings here, FastAPI resolves them from globals
 
+from . import heal, models_ctl
 from .data.collectors import engines, vram
 from .data.snapshot import TickerCollector, attention, format_multiline_rows, format_slides
 from .paths import DATA_DIR
@@ -291,6 +292,9 @@ class Hub:
         self.collector = TickerCollector()
         self.collector.start()
         self.guard = LazyGuard(self.collector._sampler)
+        self._heal_state = heal.HealState()          # auto-heal a model that spilled into system RAM (heal.py)
+        self._last_big_vram_change = time.monotonic()
+        self._prev_others_gb = None
         self._start_web()
         self.root = tk.Tk()
         self.root.report_callback_exception = lambda t, v, tb: log("error: " + "".join(traceback.format_exception(t, v, tb)))
@@ -556,12 +560,52 @@ class Hub:
                 for n in self.notifier.check(self._prev_snap, snap, busy):
                     self.notify_now(n.title, n.text, n.level)
                 self._prev_snap = snap
+            self._maybe_heal(snap)
             if self.tray:
                 alerts = attention(self.collector.get_snapshot())
                 self.tray.set_tooltip("SOL Control HUD: " + (alerts[0][1] if alerts else "all fine"))
         except Exception as e:  # noqa: BLE001
             log(f"tick error: {type(e).__name__}: {e}")
         self.root.after(2000, self._tick)
+
+    def _maybe_heal(self, snap) -> None:
+        """A model that spilled into system RAM never gets back on its own: reload it (heal.py, VRAM plan step 4).
+        Desk only - in Away a job owns the GPU, and `off` means nothing should load."""
+        g = getattr(snap, "vram_guard", None) or {}
+        if not g.get("available") or snap.ai_mode != "desk":
+            return
+        others = g.get("others_gb")
+        if others is not None:
+            if self._prev_others_gb is not None and abs(others - self._prev_others_gb) > 1.0:
+                self._last_big_vram_change = time.monotonic()
+            self._prev_others_gb = others
+        ai = g.get("ai") or {}
+        models = [m for m in (ai.get("models") or []) if m]
+        model = models[0] if len(models) == 1 else None      # two loaded: leave it alone, we'd guess wrong
+        size_gb = (ai.get("dedicated_gb") or 0) + (ai.get("shared_gb") or 0)
+        gpu = getattr(snap, "gpu", None) or {}
+        decision = heal.decide(
+            self._heal_state, now=time.monotonic(), evicted=bool(g.get("evicted")), model=model,
+            busy=(gpu.get("load_percent") or 0) > 25,        # generating: a reload would kill the answer
+            fits=(g.get("room_gb") or 0) >= size_gb + 0.5,   # room for the whole model, else it spills again
+            settled_s=time.monotonic() - self._last_big_vram_change)
+        if decision.heal:
+            log(f"heal: {decision.why}")
+            log("heal: " + heal.heal(self._heal_state, model, self._reload_model,
+                                     now=time.monotonic(), notify=lambda t, m: self.notify_now(t, m, "info")))
+
+    def _reload_model(self, name: str) -> None:
+        """Unload, wait for the card to give the memory back, load again. Both halves are models_ctl's own path."""
+        served = [m.get("model") or m.get("id") for m in (engines.llama_swap().get("running") or [])] or [name]
+        models_ctl.model_op(name, "unload", served)
+
+        def _load_again() -> None:
+            time.sleep(6)
+            try:
+                models_ctl.model_op(name, "load", served)
+            except Exception as e:  # noqa: BLE001 - reported by the guard on the next tick
+                log(f"heal: loading {name} again failed: {type(e).__name__}: {e}")
+        threading.Thread(target=_load_again, name="heal-load", daemon=True).start()
 
     def _shutdown(self, why: str) -> None:
         clear_running_marker()                 # a clean exit: the watcher must not bring it back
