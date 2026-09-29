@@ -3,5 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.log
-# settings, logs and the run history (SQLite): machine state, never in git
-data/
+# settings, logs and the run history (SQLite): machine state, never in git.
+# Leading slash = the repo-root data/ only: plain `data/` also swallowed sol_control_hud/data/ (the collectors,
+# ~2.5k lines of source), which was untracked and would have been lost with the drive (found 2026-09-29).
+/data/
