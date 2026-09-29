@@ -1,3 +1,4 @@
+import json
 import time
 
 from fastapi.testclient import TestClient
@@ -211,3 +212,14 @@ def test_sampler_picks_up_a_process_that_starts_later(monkeypatch):
     finally:
         s.stop()
     assert seen_before and seen_after
+
+
+def test_learned_sizes_are_written_atomically(tmp_path):
+    """A crash mid-write must not leave half a JSON file: write to .tmp, then rename (Code review chain, 2026-09-29)."""
+    path = tmp_path / "needs.json"
+    store = vram.NeedStore(path)
+    store.learn("sol-fast", 32768, 7.9)
+    assert json.loads(path.read_text(encoding="utf-8")) == {"sol-fast@32768": 7.9}
+    assert not list(tmp_path.glob("*.tmp")), "the temporary file must be renamed, not left behind"
+    store.learn("sol-smart", 32768, 12.2)          # a second write replaces the file, still valid JSON
+    assert len(json.loads(path.read_text(encoding="utf-8"))) == 2

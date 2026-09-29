@@ -7,6 +7,7 @@ See D:\\OBVLT\\plans\\LOCAL_AI_SPEED_FIX.md and HUD_VRAM_GUARD_PLAN.md."""
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from ...paths import DATA_DIR
@@ -62,7 +63,11 @@ class NeedStore:
         if self.path:
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
-                self.path.write_text(json.dumps(self.learned, indent=1, sort_keys=True), encoding="utf-8")
+                # write beside it and rename: a crash or power loss mid-write would otherwise leave half a JSON file
+                # and the learned model sizes would be gone (found by the Code review chain, 2026-09-29)
+                tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+                tmp.write_text(json.dumps(self.learned, indent=1, sort_keys=True), encoding="utf-8")
+                os.replace(tmp, self.path)
             except OSError:
                 pass
 
