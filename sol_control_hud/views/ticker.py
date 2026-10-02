@@ -735,6 +735,20 @@ class TickerApp:
         self.slides: list[dict] = []
         self.multiline_rows: list[dict] = []
         self.latest_snap = Snapshot()
+        self._is_peeking = False
+        self._peek_mode = "single"
+        self._peek_cancel_timer = None
+
+        # Apply custom collector intervals from settings
+        if hasattr(self.collector, "set_intervals"):
+            self.collector.set_intervals(
+                stability=self.settings.get("stability_interval"),
+                system=self.settings.get("scan_interval"),
+                git=self.settings.get("scan_interval"),
+                monitor_self=self.settings.get("monitor_self", True),
+            )
+        if hasattr(self.collector, "set_pace"):
+            self.collector.set_pace(float(self.settings.get("poll_pace", 2.0)))
 
         # Drag tracking
         self._drag_x = 0
@@ -881,15 +895,69 @@ class TickerApp:
         pulse_col = self.get_theme()["accent_amber"] if model_id == "unload" else self.get_theme()["accent_primary"]
         self.trigger_alert(pulse_col, "model_switch")
 
-    def launch_chain(self, chain_path: Path) -> None:
-        """Queues a prompt chain for execution by the chain runner daemon."""
+    def launch_chain(self, chain_path: Path, mode: str = "desk") -> None:
+        """Queues a prompt chain for execution by the chain runner daemon (in Desk mode or scheduled for Away)."""
         try:
             from ..chains.chain_note import set_chain_status
-            set_chain_status(chain_path, "queued")
+            if mode == "away":
+                set_chain_status(chain_path, "queued", schedule="on away")
+            else:
+                set_chain_status(chain_path, "queued")
         except Exception:
             pass
         self.trigger_alert(self.get_theme()["accent_green"], "chain_queued")
         self.root.after(300, self._on_data_tick)
+
+    def open_crash_inspector(self) -> None:
+        """Opens the 1-click Crash Inspector dialog."""
+        from .crash_dialog import CrashInspectorDialog
+        crashes = self.latest_snap.unexpected_reboots + self.latest_snap.gpu_resets
+        CrashInspectorDialog(
+            parent=self.root,
+            theme=self.get_theme(),
+            crash_count=crashes,
+            on_cleared=self.refresh_data_now,
+        )
+
+    def open_settings_dialog(self) -> None:
+        """Opens the full performance presets and configuration dialog."""
+        from .settings_dialog import SettingsDialog
+        SettingsDialog(
+            parent=self.root,
+            current_settings=self.settings,
+            theme=self.get_theme(),
+            font_scale=self.font_scale,
+            on_save=self.apply_new_settings,
+            get_live_overhead=self.get_overhead_stats,
+        )
+
+    def get_overhead_stats(self) -> dict:
+        return {
+            "cpu": self.latest_snap.self_cpu,
+            "ram_mb": self.latest_snap.self_ram_mb,
+            "latency_ms": self.latest_snap.self_latency_ms,
+        }
+
+    def apply_new_settings(self, new_s: dict) -> None:
+        self.settings.update(new_s)
+        self._save_settings()
+        pace = float(new_s.get("poll_pace", 2.0))
+        if hasattr(self.collector, "set_pace"):
+            self.collector.set_pace(pace)
+        if hasattr(self.collector, "set_intervals"):
+            self.collector.set_intervals(
+                stability=new_s.get("stability_interval"),
+                system=new_s.get("scan_interval"),
+                git=new_s.get("scan_interval"),
+                monitor_self=new_s.get("monitor_self"),
+            )
+        self.interval = int(new_s.get("interval_seconds", 6))
+        self.auto_hide_fullscreen = bool(new_s.get("auto_hide_fullscreen", True))
+        self.alerts_pulse = bool(new_s.get("alerts_pulse", True))
+        self.alerts_sound = bool(new_s.get("alerts_sound", False))
+        if "opacity" in new_s:
+            self.set_opacity(float(new_s["opacity"]))
+        self.refresh_data_now()
 
     def _apply_theme(self) -> None:
         """Updates colors across all existing Tkinter widgets live without reloading."""
@@ -910,6 +978,14 @@ class TickerApp:
         self.crash_badge.configure(bg=t["bg"])
         self.btn_close_multi.configure(bg=t["bg"], fg=t["text_dim"])
         self.btn_collapse.configure(bg=t["bg"], fg=t["text_muted"])
+        if hasattr(self, "btn_settings"):
+            self.btn_settings.configure(bg=t["bg"], fg=t["text_muted"])
+        if hasattr(self, "btn_mini"):
+            self.btn_mini.configure(bg=t["bg"], fg=t["text_muted"])
+        if hasattr(self, "mini_frame"):
+            self.mini_frame.configure(bg=t["bg"])
+            self.mini_lbl.configure(bg=t["bg"])
+            self.btn_mini_expand.configure(bg=t["bg"], fg=t["text_muted"])
         self.btn_web.configure(bg=t["bg"], fg=t["accent_primary"])
         self.sep.configure(bg=t["border"])
         for lbl_title, lbl_val in self.row_widgets:
@@ -937,6 +1013,10 @@ class TickerApp:
             "alerts_pulse": True,
             "alerts_sound": False,
             "auto_hide_fullscreen": True,
+            "poll_pace": 2.0,
+            "scan_interval": 60,
+            "stability_interval": 300,
+            "monitor_self": True,
         }
         if SETTINGS_FILE.exists():
             try:
@@ -964,6 +1044,10 @@ class TickerApp:
             self.settings["alerts_pulse"] = self.alerts_pulse
             self.settings["alerts_sound"] = self.alerts_sound
             self.settings["auto_hide_fullscreen"] = self.auto_hide_fullscreen
+            self.settings["poll_pace"] = float(self.settings.get("poll_pace", 2.0))
+            self.settings["scan_interval"] = int(self.settings.get("scan_interval", 60))
+            self.settings["stability_interval"] = int(self.settings.get("stability_interval", 300))
+            self.settings["monitor_self"] = bool(self.settings.get("monitor_self", True))
             cur_x = self.root.winfo_x()
             cur_y = self.root.winfo_y()
             if cur_x > 0 or cur_y > 0:
@@ -1001,18 +1085,28 @@ class TickerApp:
         probe_x = int(self.settings.get("x") or 0) if initial else self.root.winfo_x()
         probe_y = int(self.settings.get("y") or 0) if initial else self.root.winfo_y()
         self._apply_dpi(dpi_factor(probe_x + 40, probe_y + 10) if (probe_x or probe_y) else 1.0)
-        w = int(int(scale_info["width"]) * self._dpi)
+        
+        effective_mode = self._peek_mode if getattr(self, "_is_peeking", False) else self.mode
         single_h = int(int(scale_info["single_h"]) * self._dpi)
         multi_h = int(int(scale_info["multi_h"]) * self._dpi)
-        h = single_h if self.mode == "single" else multi_h
+
+        if effective_mode == "mini":
+            w = int(185 * self._dpi)
+            h = min(single_h, int(26 * self._dpi))
+        elif effective_mode == "single":
+            w = int(int(scale_info["width"]) * self._dpi)
+            h = single_h
+        else:
+            w = int(int(scale_info["width"]) * self._dpi)
+            h = multi_h
 
         (left, top, right, bottom), screen_w, screen_h = get_screen_and_work_area()
         taskbar_h = max(screen_h - bottom, 40)
         taskbar_y = bottom
 
         if self.docked:
-            if self.mode == "single":
-                target_h = min(single_h, taskbar_h - 10)
+            if effective_mode in ("single", "mini"):
+                target_h = min(h, taskbar_h - 10)
                 y = taskbar_y + (taskbar_h - target_h) // 2
                 h = target_h
             else:
@@ -1038,23 +1132,23 @@ class TickerApp:
             x = self.root.winfo_x()
             if not self.docked:
                 curr_y = self.root.winfo_y()
-                curr_h = self.root.winfo_height() or (multi_h if self.mode == "single" else single_h)
+                curr_h = self.root.winfo_height() or h
                 y = curr_y + (curr_h - h)
                 if y < top:
                     y = top
                 if y + h > bottom:
                     y = bottom - h
 
-        if self.docked and self.mode == "single":
+        if self.docked and effective_mode == "single":
             w = dock_width(x, w, self._start_left, int(260 * self._dpi))   # end before the taskbar icons
         x, y = self._clamp(x, y, w, h)
         self.root.geometry(f"{w}x{h}+{x}+{y}")
 
     def _clamp(self, x: int, y: int, w: int, h: int) -> tuple[int, int]:
-        """Keep the whole window on the monitor it's on (any monitor, e.g. the 4K one above the main screen). The
-        multi-line panel never covers that monitor's taskbar; the single line may sit inside it only if docked."""
+        """Keep the whole window on the monitor it's on. The multi-line panel never covers that monitor's taskbar; the single/mini line may sit inside it only if docked."""
+        effective_mode = self._peek_mode if getattr(self, "_is_peeking", False) else self.mode
         (mon, work) = monitor_rects(x + w // 2, y + h // 2)
-        max_y = (mon[3] - h) if (self.mode == "single" and self.docked) else (work[3] - h)
+        max_y = (mon[3] - h) if (effective_mode in ("single", "mini") and self.docked) else (work[3] - h)
         return clamp_rect(x, y, w, h, mon, max_y)
 
     def _create_widgets(self) -> None:
@@ -1100,8 +1194,18 @@ class TickerApp:
             self.single_frame, text="⊞", bg=t["bg"], fg=t["text_muted"],
             font=self._font(10), padx=4, cursor="hand2"
         )
-        self.btn_expand.pack(side=tk.LEFT, padx=(2, 4))
-        self.btn_expand.bind("<Button-1>", lambda e: self.toggle_mode())
+        self.btn_expand.pack(side=tk.LEFT, padx=(2, 2))
+        self.btn_expand.bind("<Button-1>", lambda e: self.set_mode("multi"))
+        Tooltip(self.btn_expand).set_text("Switch to Multi-line Grid mode")
+
+        # Toggle to mini pill button
+        self.btn_mini = tk.Label(
+            self.single_frame, text="▫", bg=t["bg"], fg=t["text_muted"],
+            font=self._font(10), padx=4, cursor="hand2"
+        )
+        self.btn_mini.pack(side=tk.LEFT, padx=(0, 4))
+        self.btn_mini.bind("<Button-1>", lambda e: self.set_mode("mini"))
+        Tooltip(self.btn_mini).set_text("Switch to Mini Pill mode (peeks on hover)")
 
         # Close button
         self.btn_close_single = tk.Label(
@@ -1110,6 +1214,26 @@ class TickerApp:
         )
         self.btn_close_single.pack(side=tk.RIGHT, padx=(0, 4))
         self.btn_close_single.bind("<Button-1>", lambda e: self.quit("✕ button"))
+
+        # --- Mini-line View (Taskbar Mini / Peek Mode) ---
+        self.mini_frame = tk.Frame(self.container, bg=t["bg"], height=24)
+        self.mini_dot = tk.Label(
+            self.mini_frame, text="●", bg=t["bg"], fg=t["accent_green"],
+            font=self._font(7)
+        )
+        self.mini_dot.pack(side=tk.LEFT, padx=(6, 4))
+        self.mini_lbl = tk.Label(
+            self.mini_frame, text="SOL AI", bg=t["bg"], fg=t["accent_primary"],
+            font=self._font(8, "bold"), cursor="hand2"
+        )
+        self.mini_lbl.pack(side=tk.LEFT, padx=(0, 4))
+        self.btn_mini_expand = tk.Label(
+            self.mini_frame, text="⊞", bg=t["bg"], fg=t["text_muted"],
+            font=self._font(8), padx=4, cursor="hand2"
+        )
+        self.btn_mini_expand.pack(side=tk.RIGHT, padx=(0, 4))
+        self.btn_mini_expand.bind("<Button-1>", lambda e: self.set_mode("single"))
+        Tooltip(self.btn_mini_expand).set_text("Expand to Single-line Ticker")
 
         # --- Multi-line View ---
         self.multi_frame = tk.Frame(self.container, bg=t["bg"], padx=8, pady=6)
@@ -1161,6 +1285,14 @@ class TickerApp:
         self.btn_collapse.pack(side=tk.RIGHT)
         self.btn_collapse.bind("<Button-1>", lambda e: self.toggle_mode())
 
+        self.btn_settings = tk.Label(
+            self.header_frame, text="⚙", bg=t["bg"], fg=t["text_muted"],
+            font=self._font(8), padx=4, cursor="hand2"
+        )
+        self.btn_settings.pack(side=tk.RIGHT, padx=2)
+        self.btn_settings.bind("<Button-1>", lambda e: self.open_settings_dialog())
+        Tooltip(self.btn_settings).set_text("Settings & Polling Presets")
+
         self.btn_web = tk.Label(
             self.header_frame, text="↗ Web HUD", bg=t["bg"], fg=t["accent_primary"],
             font=self._font(8), padx=6, cursor="hand2"
@@ -1199,7 +1331,9 @@ class TickerApp:
                 w.bind("<Double-Button-1>", lambda e: self.open_web_hud())
 
         # Display initial mode
-        if self.mode == "single":
+        if self.mode == "mini":
+            self.mini_frame.pack(fill=tk.BOTH, expand=True)
+        elif self.mode == "single":
             self.single_frame.pack(fill=tk.BOTH, expand=True)
         else:
             self.multi_frame.pack(fill=tk.BOTH, expand=True)
@@ -1207,7 +1341,7 @@ class TickerApp:
     def _bind_events(self) -> None:
         # Dragging on container and frames
         for w in [self.container, self.single_frame, self.multi_frame, self.header_frame,
-                 self.single_text, self.title_label]:
+                  self.single_text, self.title_label, self.mini_frame, self.mini_lbl]:
             w.bind("<ButtonPress-1>", self._start_drag)
             w.bind("<B1-Motion>", self._on_drag)
             w.bind("<ButtonRelease-1>", self._stop_drag)
@@ -1219,9 +1353,12 @@ class TickerApp:
         self.tag_label.bind("<Button-1>", lambda e: self._on_tag_click())
         self.dots_label.bind("<Button-1>", lambda e: self._on_text_click())
 
-        # Pause rotation on mouse hover
+        # Pause rotation and trigger peek on mouse hover
         self.root.bind("<Enter>", lambda e: self._on_mouse_enter())
         self.root.bind("<Leave>", lambda e: self._on_mouse_leave())
+        for w in [self.mini_frame, self.mini_dot, self.mini_lbl, self.btn_mini_expand]:
+            w.bind("<Enter>", lambda e: self._on_mouse_enter())
+            w.bind("<Leave>", lambda e: self._on_mouse_leave())
 
         # Keybindings
         self.root.bind("<t>", lambda e: self.toggle_mode())
@@ -1376,8 +1513,11 @@ class TickerApp:
         def _collect():
             if hasattr(self.collector, "invalidate_cache"):
                 self.collector.invalidate_cache()
-            self.collector.collect_once()
-            self.root.after(0, self._on_data_tick)
+            try:
+                if self.root.winfo_exists():
+                    self.root.after(0, self._on_data_tick)
+            except Exception:
+                pass
         threading.Thread(target=_collect, daemon=True).start()
 
     def _on_tag_click(self) -> None:
@@ -1421,19 +1561,63 @@ class TickerApp:
     def _on_mouse_enter(self) -> None:
         self.paused = True
         self.dots_label.configure(fg=self.get_theme()["accent_primary"])
+        if self.mode == "mini":
+            self._on_mini_enter()
 
     def _on_mouse_leave(self) -> None:
         self.paused = False
         self.dots_label.configure(fg=self.get_theme()["text_dim"])
+        if self.mode == "mini":
+            self._on_mini_leave()
+
+    def _on_mini_enter(self) -> None:
+        if self._peek_cancel_timer is not None:
+            try:
+                self.root.after_cancel(self._peek_cancel_timer)
+            except Exception:
+                pass
+            self._peek_cancel_timer = None
+        if not self._is_peeking:
+            self._is_peeking = True
+            self._peek_mode = "single"
+            self.mini_frame.pack_forget()
+            self.single_frame.pack(fill=tk.BOTH, expand=True)
+            self._apply_geometry()
+            self._render()
+
+    def _on_mini_leave(self) -> None:
+        if self._is_peeking:
+            if self._peek_cancel_timer is not None:
+                try:
+                    self.root.after_cancel(self._peek_cancel_timer)
+                except Exception:
+                    pass
+            self._peek_cancel_timer = self.root.after(450, self._collapse_peek)
+
+    def _collapse_peek(self) -> None:
+        self._peek_cancel_timer = None
+        if self.mode == "mini" and self._is_peeking:
+            self._is_peeking = False
+            self.single_frame.pack_forget()
+            self.mini_frame.pack(fill=tk.BOTH, expand=True)
+            self._apply_geometry()
+            self._render()
 
     def _show_context_menu(self, event) -> None:
         t = self.get_theme()
         menu = tk.Menu(self.root, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
-        mode_text = "Switch to Multi-line Mode (T)" if self.mode == "single" else "Switch to Single-line Mode (T)"
         dock_text = "Float Above Taskbar" if self.docked else "Dock in Taskbar"
-        menu.add_command(label=mode_text, command=self.toggle_mode)
+
+        # Display Mode submenu
+        mode_menu = tk.Menu(menu, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
+        for m_key, m_label in [("mini", "Mini Pill (Peek on Hover)"), ("single", "Single-Line Ticker"), ("multi", "Multi-Line Grid")]:
+            mark = "✓ " if m_key == self.mode else "   "
+            mode_menu.add_command(label=f"{mark}{m_label}", command=lambda k=m_key: self.set_mode(k))
+        menu.add_cascade(label="Display Mode 🪟", menu=mode_menu)
+
         menu.add_command(label=dock_text, command=self.toggle_dock)
         menu.add_command(label="Next Slide (Space)", command=self._manual_next_slide)
+        menu.add_command(label="Settings & Presets ⚙", command=self.open_settings_dialog)
         if self.hub:
             menu.add_separator()
             menu.add_command(label="🌐 Open dashboard (browser)", command=self.hub.open_dashboard)
@@ -1455,6 +1639,7 @@ class TickerApp:
         crashes = self.latest_snap.unexpected_reboots + self.latest_snap.gpu_resets
         if crashes > 0:
             actions_menu.add_separator()
+            actions_menu.add_command(label=f"🩺 Inspect & Clear Crashes (x{crashes})", command=self.open_crash_inspector)
             actions_menu.add_command(label=f"✓ Clear Crash Alert (x{crashes})", command=self.acknowledge_crashes)
         menu.add_cascade(label="Quick Actions ⚡", menu=actions_menu)
 
@@ -1478,10 +1663,16 @@ class TickerApp:
         chain_menu = tk.Menu(menu, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
         if chains:
             for c_name, c_path in chains:
-                chain_menu.add_command(
-                    label=f"▶ {c_name}",
-                    command=lambda p=c_path: self.launch_chain(p),
+                c_sub = tk.Menu(chain_menu, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
+                c_sub.add_command(
+                    label="▶ Run Now (Desk)",
+                    command=lambda p=c_path: self.launch_chain(p, mode="desk"),
                 )
+                c_sub.add_command(
+                    label="🌙 Queue for Away Mode",
+                    command=lambda p=c_path: self.launch_chain(p, mode="away"),
+                )
+                chain_menu.add_cascade(label=f"⚡ {c_name}", menu=c_sub)
         else:
             chain_menu.add_command(label="(No chains found in 1Notebook/Chains)", state=tk.DISABLED)
         chain_menu.add_separator()
@@ -1781,19 +1972,37 @@ class TickerApp:
             except Exception:
                 pass
 
-    def toggle_mode(self) -> None:
-        if self.mode == "single":
-            self.mode = "multi"
-            self.single_frame.pack_forget()
-            self._apply_geometry()
-            self.multi_frame.pack(fill=tk.BOTH, expand=True)
-        else:
-            self.mode = "single"
-            self.multi_frame.pack_forget()
-            self._apply_geometry()
+    def set_mode(self, new_mode: str) -> None:
+        if new_mode not in ("mini", "single", "multi"):
+            new_mode = "single"
+        self.mode = new_mode
+        self.settings["mode"] = self.mode
+        self._is_peeking = False
+        if self._peek_cancel_timer is not None:
+            try:
+                self.root.after_cancel(self._peek_cancel_timer)
+            except Exception:
+                pass
+            self._peek_cancel_timer = None
+
+        self.mini_frame.pack_forget()
+        self.single_frame.pack_forget()
+        self.multi_frame.pack_forget()
+
+        if self.mode == "mini":
+            self.mini_frame.pack(fill=tk.BOTH, expand=True)
+        elif self.mode == "single":
             self.single_frame.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.multi_frame.pack(fill=tk.BOTH, expand=True)
+
+        self._apply_geometry()
         self._save_settings()
         self._render()
+
+    def toggle_mode(self) -> None:
+        next_mode = {"single": "multi", "multi": "mini", "mini": "single"}.get(self.mode, "single")
+        self.set_mode(next_mode)
 
     def _manual_next_slide(self) -> None:
         if self.slides:
@@ -1842,10 +2051,34 @@ class TickerApp:
                 "#f87171": t["accent_red"], "#94a3b8": t["text_dim"], "#e2e8f0": t["text_main"]}.get(raw, raw)
 
     def _render(self) -> None:
-        if self.mode == "single":
+        if self.mode == "mini" and not getattr(self, "_is_peeking", False):
+            self._render_mini()
+        elif self.mode == "single" or getattr(self, "_is_peeking", False):
             self._render_single_slide()
         else:
             self._render_multiline()
+
+    def _render_mini(self) -> None:
+        s = self.latest_snap
+        t = self.get_theme()
+        router_up = s.services.get("Router", False)
+        dot_col = t["accent_green"] if router_up else t["accent_red"]
+        self.mini_dot.configure(fg=dot_col, bg=t["bg"])
+
+        crashes = s.unexpected_reboots + s.gpu_resets
+        if crashes > 0:
+            txt = f"[CRASH x{crashes}]"
+            col = t["accent_red"]
+        elif s.ai_generating:
+            txt = f"{s.ai_model or 'AI'} ⚡"
+            col = t["accent_green"]
+        elif s.gpu_temp is not None:
+            txt = f"{s.ai_model or 'SOL'} · {s.gpu_temp}°C"
+            col = t["accent_primary"]
+        else:
+            txt = f"{s.ai_model or 'SOL AI'}"
+            col = t["text_main"]
+        self.mini_lbl.configure(text=txt, fg=col, bg=t["bg"])
 
     def _render_single_slide(self) -> None:
         if not self.slides:
@@ -1908,9 +2141,9 @@ class TickerApp:
         if crashes:
             self.crash_badge.configure(text=f"CRASH x{crashes} · Away blocked", fg=t["accent_red"], bg=t["bg"], cursor="hand2")
             self.crash_tooltip.set_text(f"{crashes} unexpected reboot(s) / GPU reset(s) since the last review: Away "
-                                        "won't start until they're reviewed.\nClick to view the stability reports · "
+                                        "won't start until they're reviewed.\nClick to inspect & clear crash alert (unblocks Away mode) · "
                                         "Right-click → Quick Actions to mark them reviewed.")
-            self.crash_badge.bind("<Button-1>", lambda e: self._open_slide_target("SYS"))
+            self.crash_badge.bind("<Button-1>", lambda e: self.open_crash_inspector())
         elif alerts:
             first = alerts[0][1] if len(alerts[0][1]) <= 34 else alerts[0][1][:33] + "…"   # the header is narrow
             self.crash_badge.configure(text=f"⚠ {first}" + (f" (+{len(alerts) - 1})" if len(alerts) > 1 else ""),
