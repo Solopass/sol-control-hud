@@ -158,6 +158,11 @@ class Snapshot:
     services: dict[str, bool] = field(default_factory=dict)
     sampled_at: float = 0.0
 
+    # Self-Resource Telemetry (HUD & Ticker overhead)
+    self_cpu: float = 0.0          # Process CPU % (e.g. 0.3%)
+    self_ram_mb: float = 0.0       # Working Set in MB (e.g. 48.5)
+    self_latency_ms: float = 0.0   # Last collection duration in ms
+
 
 def check_port(port: int, host: str = "127.0.0.1", timeout: float = 0.04) -> bool:
     try:
@@ -737,11 +742,15 @@ def format_slides(s: Snapshot) -> list[dict]:
         svc_items.append(f"{name} {dot}")
     svc_txt = "  |  ".join(svc_items)
 
+    svc_detail = "Router :11440, Embed :11443, HUD :7900, chain runner, WSL (its services start on demand)"
+    if s.self_cpu > 0 or s.self_ram_mb > 0:
+        svc_detail += f"\nHUD Overhead: {s.self_cpu:.1f}% CPU · {s.self_ram_mb:.0f} MB RAM ({s.self_latency_ms:.1f}ms loop)"
+
     slides.append({
         "tag": "SVC",
         "text": svc_txt,
         "color": "#38bdf8",
-        "detail": "Router :11440, Embed :11443, HUD :7900, chain runner, WSL (its services start on demand)"
+        "detail": svc_detail,
     })
 
     # Slide 4: Disks (if available)
@@ -1088,6 +1097,8 @@ def format_multiline_rows(s: Snapshot) -> list[dict]:
         up = s.services.get(name, False)
         off = "off" if name == "WSL" else "down"   # WSL being off is normal (its services start on demand)
         svc_items.append((name, "up" if up else off, "#4ade80" if up else "#64748b"))
+    if s.self_cpu > 0 or s.self_ram_mb > 0:
+        svc_items.append(("HUD", f"{s.self_cpu:.1f}%", "#38bdf8"))
 
     row_svc = {
         "title": "SERVICES",
@@ -1151,6 +1162,26 @@ class TickerCollector:
         self._last_net_time: float = 0.0
         self._net_down_kb: float = 0.0
         self._net_up_kb: float = 0.0
+        self.stability_interval: float = 300.0
+        self.system_interval: float = 60.0
+        self.git_interval: float = 60.0
+        self.monitor_self: bool = True
+        self._last_self_check: float = 0.0
+        self._self_cpu: float = 0.0
+        self._self_ram_mb: float = 0.0
+        self._proc: psutil.Process | None = None
+
+    def set_intervals(self, stability: float | None = None, system: float | None = None,
+                      git: float | None = None, monitor_self: bool | None = None) -> None:
+        """Sets throttled data intervals dynamically without stopping the collector."""
+        if stability is not None:
+            self.stability_interval = max(10.0, float(stability))
+        if system is not None:
+            self.system_interval = max(5.0, float(system))
+        if git is not None:
+            self.git_interval = max(5.0, float(git))
+        if monitor_self is not None:
+            self.monitor_self = bool(monitor_self)
 
     def start(self) -> None:
         if hasattr(self._sampler, "start"):
@@ -1183,6 +1214,7 @@ class TickerCollector:
         self._last_git = 0.0
 
     def collect_once(self) -> Snapshot:
+        t_gather_start = time.perf_counter()
         # 1. System Memory & CPU
         mem = system.memory()
         cpu = psutil.cpu_percent(interval=None)
@@ -1242,9 +1274,9 @@ class TickerCollector:
         if not chain_name:
             chain_last_finished = read_last_finished_chain()
 
-        # 5. Stability (cached every 300s / 5 min: Get-WinEvent is expensive)
+        # 5. Stability (cached every stability_interval: Get-WinEvent is expensive)
         now = time.time()
-        if now - self._last_stability >= 300.0:
+        if now - self._last_stability >= self.stability_interval:
             try:
                 self._stability_data = system.stability()
             except Exception:
@@ -1254,8 +1286,8 @@ class TickerCollector:
         whea_errors = self._stability_data.get("whea", 0)
         unexpected_reboots = self._stability_data.get("unexpected_reboots", 0)
 
-        # 6. Disks & Backups (cached every 60s), a free-space history for the red/green trend, the last Away session
-        if now - self._last_system >= 60.0 or not self._disks_data:
+        # 6. Disks & Backups (cached every system_interval), a free-space history for the red/green trend, the last Away session
+        if now - self._last_system >= self.system_interval or not self._disks_data:
             try:
                 self._disks_data = system.disks()
                 self._backups_data = system.backups()
@@ -1272,8 +1304,8 @@ class TickerCollector:
         disk_trends = disk_trends_from(self._disk_hist, now)
         chain_pending, chain_next = read_chains_extra()
 
-        # 7. Workspace Git (every 60 s, in its own thread: 13 repos can take seconds and must not freeze the other stats)
-        if now - self._last_git >= 60.0 and not (self._git_thread and self._git_thread.is_alive()):
+        # 7. Workspace Git (every git_interval, in its own thread: 13 repos can take seconds and must not freeze the other stats)
+        if now - self._last_git >= self.git_interval and not (self._git_thread and self._git_thread.is_alive()):
             self._last_git = now
 
             def scan():
@@ -1324,6 +1356,22 @@ class TickerCollector:
             media_status = "none"
             media_title = media_artist = media_app = None
             media_playing = False
+
+        # 12. Self-Resource Overhead
+        if self.monitor_self:
+            if now - self._last_self_check >= 4.0 or self._last_self_check == 0.0:
+                try:
+                    if self._proc is None:
+                        self._proc = psutil.Process()
+                    self._self_cpu = self._proc.cpu_percent(interval=None)
+                    self._self_ram_mb = self._proc.memory_info().rss / (1024.0 * 1024.0)
+                except Exception:
+                    pass
+                self._last_self_check = now
+        else:
+            self._self_cpu = 0.0
+            self._self_ram_mb = 0.0
+        t_latency_ms = (time.perf_counter() - t_gather_start) * 1000.0
 
         snap = Snapshot(
             gpu_name=gpu_name,
@@ -1385,6 +1433,9 @@ class TickerCollector:
             media_playing=media_playing,
             services=services,
             sampled_at=time.time(),
+            self_cpu=self._self_cpu,
+            self_ram_mb=self._self_ram_mb,
+            self_latency_ms=round(t_latency_ms, 1),
         )
         with self._lock:
             self._latest = snap
