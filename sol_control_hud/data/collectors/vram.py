@@ -13,7 +13,8 @@ from pathlib import Path
 from ...paths import DATA_DIR
 
 RUNNER = re.compile(r"^(llama-server|ollama)$", re.IGNORECASE)
-EVICTED_SHARED_GB = 0.3      # runner memory in system RAM above this = evicted
+EVICTED_SHARED_GB = 1.0      # runner memory in system RAM above this = evicted (0.3 until 10-02: with the new Vulkan
+                             # settings in sol-llm.ps1 sol-fast keeps ~0.66 GB in RAM by design, at full speed)
 HEADROOM_GB = 0.8            # spare VRAM below this = TIGHT
 DEFAULT_MODEL = "sol-fast"
 LABELS = {"dwm": "Windows desktop (monitors)", "RadeonSoftware": "AMD Adrenalin", "explorer": "Explorer"}

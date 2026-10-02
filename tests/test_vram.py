@@ -60,7 +60,8 @@ def test_summarize_sums_per_pid_and_ignores_other_adapters():
 def test_budget_uses_the_card_total_not_the_double_counted_process_sum(tmp_path):
     # real 2026-09-16 16:02 reading: processes summed to 18.95 GB on a card holding 14.86 GB
     ded = {pm(100): 11.31, pm(200): 4.39, pm(300): 0.76, pm(600): 0.44, pm(500): 0.31, pm(400): 1.74}
-    v = guard(tmp_path, confirm=1).update(gpu_block(ded, {ps(100): 0.92}, used=14.86), OLLAMA_LOADED)
+    # shared 1.42 (was the real 0.92): the evicted threshold went 0.3 -> 1.0 GB on 2026-10-02
+    v = guard(tmp_path, confirm=1).update(gpu_block(ded, {ps(100): 1.42}, used=14.86), OLLAMA_LOADED)
     assert v["others_gb"] == 3.55 and v["used_gb"] == 14.86
     assert v["spare_gb"] == 1.04 and v["evicted"] is True
     assert abs(sum(t["gb"] for t in v["top_consumers"]) - 3.55) < 0.1     # apportioned, adds up to the truth
