@@ -16,6 +16,7 @@
   <div class="headline" id="headline"></div>
   <div class="range" id="range" title="Chart range"><button data-range="1h" class="on">1 h</button><button data-range="24h">24 h</button><button data-range="7d">7 d</button></div>
   <span class="age" id="age">connecting…</span>
+  <button id="cmdPaletteBtn" class="mini" title="Command Palette (Ctrl+K)">⌘ Ctrl+K</button>
   <select id="theme" title="Theme (the ticker uses the same one)"></select>
   <button id="tickerBtn" hidden>…</button>
 </header>
@@ -52,7 +53,7 @@
       <div class="temps" id="gpuTemps"></div></div>
     <div class="engines" id="gpuEngines"></div>
     <canvas class="chart" id="chGpu" data-series="gpu,temp" data-max="100,110"></canvas>
-    <div class="legend"><span style="--c:var(--cyan)">load</span><span style="--c:var(--amber)">temp °C</span><span class="dim" id="gpuFan"></span></div>
+    <div class="legend"><span style="--c:var(--cyan)">load</span><span style="--c:var(--amber)">temp °C</span><span class="dim" id="gpuFan"></span><span class="dim" id="gpuDelta" title="Hotspot delta (Hotspot - Temp)"></span></div>
   </article>
 
   <article class="card" id="c-vram">
@@ -61,12 +62,19 @@
     <div class="stack" id="vramStack"></div>
     <div class="legend" id="vramLegend"></div>
     <div class="note" id="vramNote"></div>
+    <div class="note" id="vramHeadroom"></div>
     <canvas class="chart" id="chVram" data-series="vram" data-max="16"></canvas>
+    <div class="vram-procs-box" id="vramProcsBox"></div>
   </article>
 
   <article class="card" id="c-ai" data-open="AI">
     <h2>Local AI <span class="dim">:11440</span></h2>
     <div class="model" id="aiModel"><span class="orb"></span><div><div class="model-name" id="aiName">–</div><div class="dim" id="aiState"></div></div></div>
+    <div class="model-switcher" id="modelSwitcher">
+      <button class="mini" data-quick-model="sol-fast" title="Fast 12B model with vision">⚡ sol-fast</button>
+      <button class="mini" data-quick-model="sol-smart" title="20B reasoning model">🧠 sol-smart</button>
+      <button class="mini" data-quick-model="sol-long" title="20B model with 65k context">📜 sol-long</button>
+    </div>
     <div class="mlist" id="aiModels"></div>
     <div class="buttons"><button class="mini" data-models="unload_all" data-confirm="Unload every model? The next request loads what it needs again.">Unload all</button><button class="mini" id="aiPower">…</button><span class="dim small" id="aiHint"></span></div>
     <div class="row"><span>GPU lock</span><b id="aiLock">–</b></div>
@@ -75,6 +83,10 @@
   <article class="card wide" id="c-chains" data-open="RUN">
     <h2>Chains <button class="mini" data-act="open" data-target="RUN">open folder</button></h2>
     <div class="seg" id="runSeg"></div>
+    <div class="chain-progress-box" id="chainProgressBox" hidden>
+      <div class="row"><span id="chainStepName" class="small"></span><b id="chainStepPct" class="small"></b></div>
+      <div class="bar" id="chainStepBar"><i></i></div>
+    </div>
     <div class="pipeline" id="pipeline" hidden></div>
     <div class="bar" id="itemsBar" hidden><i></i></div>
     <div class="cols">
@@ -131,7 +143,7 @@
   </article>
 
   <article class="card" id="c-stab" data-open="SYS">
-    <h2>Stability &amp; backups</h2>
+    <h2>Stability &amp; backups <button class="mini danger" id="ackCrashBtn" hidden title="Clear crash events and unblock Away mode">✓ Clear Crashes</button></h2>
     <div class="seg" id="sysSeg"></div>
     <div class="row"><span>Crash events since review</span><b id="crashCount">–</b></div>
     <div class="row"><span>Reviewed until</span><span id="ackUntil">–</span></div>
@@ -160,6 +172,7 @@
     <h2>
       <span>Obsidian Notes <span class="dim" id="notesVaultCount">recently edited</span></span>
       <div class="notes-controls">
+        <button class="mini" id="notesComposeBtn" title="Create quick note or scratchpad">📝 + New</button>
         <select id="notesVault" title="Choose Obsidian vault (one at a time)"></select>
         <input type="search" id="notesSearch" placeholder="Filter notes..." class="mini-search">
         <button class="mini ghost" id="notesRefresh" title="Refresh notes">⟳</button>
@@ -187,7 +200,69 @@
   <label class="toggle" title="Start SOL Control HUD when you log in to Windows (Startup apps)"><input type="checkbox" id="loginStart"> Start at login</label>
   <span class="dim" id="foot"></span>
 </footer>
-<div class="modal" id="modal" hidden><div class="sheet"><header><b id="modalTitle"></b><button id="modalClose" class="ghost">Close</button></header><div class="md" id="modalBody"></div></div></div>
+
+<!-- Markdown Reader & Editor Modal -->
+<div class="modal" id="modal" hidden>
+  <div class="sheet">
+    <header>
+      <b id="modalTitle"></b>
+      <div class="modal-acts">
+        <button id="modalEditBtn" class="mini ghost" title="Toggle edit mode">✏ Edit</button>
+        <button id="modalSaveBtn" class="mini" hidden title="Save changes">Save</button>
+        <button id="modalClose" class="ghost">Close</button>
+      </div>
+    </header>
+    <div class="md" id="modalBody"></div>
+    <textarea class="md-editor" id="modalEdit" hidden spellcheck="false"></textarea>
+  </div>
+</div>
+
+<!-- Quick Scratch & Note Composer Modal -->
+<div class="modal" id="composerModal" hidden>
+  <div class="sheet sheet-sm">
+    <header>
+      <b>New Note / Quick Scratch</b>
+      <button id="composerClose" class="ghost">✕</button>
+    </header>
+    <form id="composerForm" class="composer-body">
+      <div class="composer-targets">
+        <label><input type="radio" name="compDest" value="daily" checked> Daily Note (Polymatica)</label>
+        <label><input type="radio" name="compDest" value="scratch"> Private Scratch (OBVLT)</label>
+        <label><input type="radio" name="compDest" value="new"> New Vault File</label>
+      </div>
+      <div id="newFileNameBox" hidden>
+        <input id="newFileName" placeholder="File path e.g. 1Notebook/MyIdea.md">
+      </div>
+      <textarea id="composerText" rows="6" placeholder="Write your note or thought here..." required></textarea>
+      <div class="composer-actions">
+        <button type="button" id="composerCancel" class="ghost">Cancel</button>
+        <button type="submit">Save Note</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Command Palette Modal (Ctrl+K) -->
+<div class="modal" id="paletteModal" hidden>
+  <div class="sheet sheet-palette">
+    <div class="palette-input-box">
+      <span class="dim">🔍</span>
+      <input id="paletteInput" placeholder="Type a note, command, model, chain, or action... (Esc to close)" autocomplete="off">
+    </div>
+    <div class="palette-list" id="paletteList"></div>
+  </div>
+</div>
+
+<!-- Git Repo Status Modal -->
+<div class="modal" id="gitModal" hidden>
+  <div class="sheet sheet-sm">
+    <header>
+      <b id="gitModalTitle">Git Status</b>
+      <button id="gitModalClose" class="ghost">✕</button>
+    </header>
+    <pre class="git-status-pre" id="gitModalBody"></pre>
+  </div>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>

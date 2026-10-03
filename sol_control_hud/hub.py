@@ -290,6 +290,28 @@ class Hub:
             r = notes.open_note(vault, file_path)
             log(f"open note: {vault}/{file_path} -> {r.get('ok')}")
             return r
+        if action == "scratch":
+            from .views.scratch_dialog import append_scratch_note
+            b = body or {}
+            text = str(b.get("text", "")).strip()
+            dest = str(b.get("destination", "daily"))
+            r = append_scratch_note(text, destination=dest)
+            log(f"scratch note ({dest}): {r.get('success')} -> {r.get('message')}")
+            return {"ok": bool(r.get("success")), "why": r.get("message", "")}
+        if action == "open_folder":
+            from .data.collectors import notes
+            b = body or {}
+            vault = str(b.get("vault") or "OBVLT")
+            file_path = str(b.get("file") or target)
+            r = notes.open_folder(vault, file_path)
+            log(f"open folder: {vault}/{file_path} -> {r.get('ok')}")
+            return r
+        if action == "ack_crashes":
+            from .views.crash_dialog import ACK_FILE
+            from .views.ticker import write_crash_ack
+            write_crash_ack(ACK_FILE)
+            log("crashes acknowledged via web dashboard")
+            return {"ok": True, "why": "Crash events acknowledged and cleared"}
         return {"ok": False, "why": f"unknown action {action!r}"}
 
     # ---- setup
@@ -487,6 +509,73 @@ class Hub:
         def note_content(vault: str = "OBVLT", file: str = "") -> dict:
             from .data.collectors import notes
             return notes.read_note_content(vault_name=vault, rel_path=file)
+
+        @app.post("/api/note-save")
+        def note_save(body: dict = Body(default={})) -> dict:
+            from .data.collectors import notes
+            return notes.save_note_content(
+                vault_name=str(body.get("vault") or "OBVLT"),
+                rel_path=str(body.get("file") or ""),
+                text=str(body.get("text", "")),
+            )
+
+        @app.post("/api/note-create")
+        def note_create(body: dict = Body(default={})) -> dict:
+            from .data.collectors import notes
+            return notes.create_note(
+                vault_name=str(body.get("vault") or "OBVLT"),
+                rel_path=str(body.get("file") or ""),
+                initial_text=str(body.get("text", "")),
+            )
+
+        @app.get("/api/git-status")
+        def git_repo_status(repo: str = "") -> dict:
+            import subprocess
+            ws = Path(r"D:\Workspace")
+            target_repo = (ws / repo).resolve()
+            try:
+                target_repo.relative_to(ws.resolve())
+            except ValueError:
+                return {"ok": False, "why": "Invalid repo path"}
+            if not target_repo.exists() or not (target_repo / ".git").exists():
+                return {"ok": False, "why": f"Repo '{repo}' not found"}
+            try:
+                proc = subprocess.run(
+                    ["git", "status", "--short", "--branch"],
+                    cwd=str(target_repo),
+                    capture_output=True,
+                    text=True,
+                    timeout=5.0,
+                )
+                return {"ok": True, "repo": repo, "status": proc.stdout.strip()}
+            except Exception as e:
+                return {"ok": False, "why": str(e)}
+
+        @app.get("/api/crashes")
+        def list_crashes() -> dict:
+            from .views.crash_dialog import parse_unacknowledged_crashes
+            events = parse_unacknowledged_crashes()
+            return {"ok": True, "count": len(events), "events": events}
+
+        @app.get("/api/top-processes")
+        def top_processes() -> dict:
+            import psutil
+            procs = []
+            for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
+                try:
+                    mem_info = p.info.get("memory_info")
+                    mem_mb = (mem_info.rss if mem_info else 0) / (1024 * 1024)
+                    procs.append({
+                        "pid": p.info["pid"],
+                        "name": p.info.get("name") or "",
+                        "cpu": p.info.get("cpu_percent") or 0.0,
+                        "mem_mb": round(mem_mb, 1),
+                    })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            top_cpu = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:5]
+            top_mem = sorted(procs, key=lambda x: x["mem_mb"], reverse=True)[:5]
+            return {"ok": True, "top_cpu": top_cpu, "top_mem": top_mem}
 
         @app.get("/api/snapshot")
         def snapshot() -> dict:

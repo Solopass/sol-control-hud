@@ -91,3 +91,33 @@ def test_open_note_dispatches(monkeypatch, tmp_path):
     assert res["ok"] is True
     assert len(called) == 1
     assert "obsidian://open?vault=V&file=Test.md" in called[0]
+
+
+def test_save_and_create_note(monkeypatch, tmp_path):
+    vdir = tmp_path / "V2"
+    vdir.mkdir()
+    monkeypatch.setattr(notes, "discover_vaults", lambda: {"V2": vdir})
+
+    # Create note
+    c_res = notes.create_note("V2", "NewFolder/MyNote.md", "# Hello World")
+    assert c_res["ok"] is True
+    assert (vdir / "NewFolder" / "MyNote.md").exists()
+    assert (vdir / "NewFolder" / "MyNote.md").read_text(encoding="utf-8") == "# Hello World"
+
+    # Cannot recreate existing note
+    c_dup = notes.create_note("V2", "NewFolder/MyNote.md", "# Hello Again")
+    assert c_dup["ok"] is False
+
+    # Save note edit
+    s_res = notes.save_note_content("V2", "NewFolder/MyNote.md", "# Updated Content")
+    assert s_res["ok"] is True
+    assert (vdir / "NewFolder" / "MyNote.md").read_text(encoding="utf-8") == "# Updated Content"
+
+    # Open folder
+    folder_calls = []
+    monkeypatch.setattr("os.startfile", lambda p: folder_calls.append(p))
+    f_res = notes.open_folder("V2", "NewFolder/MyNote.md")
+    assert f_res["ok"] is True
+    assert len(folder_calls) == 1
+    assert str(vdir / "NewFolder") == folder_calls[0]
+

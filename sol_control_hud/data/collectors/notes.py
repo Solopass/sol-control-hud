@@ -75,6 +75,32 @@ _cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 CACHE_TTL = 4.0  # seconds
 
 
+def extract_metadata(file_path: Path) -> tuple[list[str], int]:
+    """Extracts frontmatter tags and approximate word count from a markdown file."""
+    tags: list[str] = []
+    words: int = 0
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="ignore")
+        words = len(content.split())
+        lines = content.splitlines()
+        if lines and lines[0].strip() == "---":
+            for line in lines[1:]:
+                if line.strip() == "---":
+                    break
+                stripped = line.strip()
+                if stripped.startswith("tags:") or stripped.startswith("tag:"):
+                    val = stripped.split(":", 1)[1].strip()
+                    if val.startswith("[") and val.endswith("]"):
+                        tags = [t.strip().strip("'\"#") for t in val[1:-1].split(",") if t.strip()]
+                    elif val:
+                        tags = [t.strip().strip("'\"#") for t in val.split() if t.strip()]
+                elif stripped.startswith("- ") and tags:
+                    tags.append(stripped[2:].strip().strip("'\"#"))
+    except Exception:
+        pass
+    return tags, words
+
+
 def scan_vault_notes(vault_name: str = "OBVLT", force: bool = False) -> list[dict[str, Any]]:
     """Scans all non-hidden markdown files in a vault, sorted by st_mtime descending."""
     now = time.time()
@@ -90,7 +116,6 @@ def scan_vault_notes(vault_name: str = "OBVLT", force: bool = False) -> list[dic
     notes: list[dict[str, Any]] = []
     try:
         for root, dirs, files in os.walk(vault_path):
-            # Skip hidden and internal directories in-place to avoid descending into them
             dirs[:] = [d for d in dirs if not d.startswith(".") and d.lower() not in (".trash", "node_modules")]
             rel_dir = os.path.relpath(root, vault_path)
             folder_display = "" if rel_dir == "." else rel_dir.replace("\\", "/")
@@ -112,11 +137,26 @@ def scan_vault_notes(vault_name: str = "OBVLT", force: bool = False) -> list[dic
                     "mtime": st.st_mtime,
                     "folder": folder_display,
                     "size_bytes": st.st_size,
+                    "words": 0,
+                    "tags": [],
+                    "_path": full_path,
                 })
     except Exception:
         pass
 
     notes.sort(key=lambda x: x["mtime"], reverse=True)
+
+    # Populate tags and word counts for top 50 recently edited notes
+    for n in notes[:50]:
+        p = n.pop("_path", None)
+        if p and p.exists():
+            tags, words = extract_metadata(p)
+            n["tags"] = tags
+            n["words"] = words
+
+    for n in notes[50:]:
+        n.pop("_path", None)
+
     _cache[vault_name] = (now, notes)
     return notes
 
@@ -201,3 +241,82 @@ def open_note(vault_name: str, rel_path: str) -> dict[str, Any]:
             except Exception as e2:
                 return {"ok": False, "why": f"Could not open note: {e2}"}
         return {"ok": False, "why": f"Could not launch Obsidian: {e}"}
+
+
+def save_note_content(vault_name: str, rel_path: str, text: str) -> dict[str, Any]:
+    """Safely saves edited markdown content to a note in the vault, invalidating cache."""
+    vault_path = get_vault_path(vault_name)
+    if not vault_path or not vault_path.exists():
+        return {"ok": False, "why": f"Vault '{vault_name}' not found"}
+
+    resolved_vault = vault_path.resolve()
+    target = (vault_path / rel_path).resolve()
+    try:
+        target.relative_to(resolved_vault)
+    except ValueError:
+        return {"ok": False, "why": "Security error: path outside vault boundary"}
+
+    if target.suffix.lower() != ".md":
+        return {"ok": False, "why": "Only markdown (.md) files can be edited"}
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic write via temp file in same directory
+        tmp_target = target.with_suffix(".tmp.md")
+        tmp_target.write_text(text, encoding="utf-8")
+        tmp_target.replace(target)
+        _cache.pop(vault_name, None)
+        return {"ok": True, "why": f"Saved {rel_path}", "size": len(text)}
+    except Exception as e:
+        return {"ok": False, "why": f"Failed to save note: {e}"}
+
+
+def create_note(vault_name: str, rel_path: str, initial_text: str = "") -> dict[str, Any]:
+    """Creates a new markdown note in the specified vault."""
+    vault_path = get_vault_path(vault_name)
+    if not vault_path or not vault_path.exists():
+        return {"ok": False, "why": f"Vault '{vault_name}' not found"}
+
+    clean_rel = rel_path.strip().replace("\\", "/")
+    if not clean_rel.lower().endswith(".md"):
+        clean_rel += ".md"
+
+    resolved_vault = vault_path.resolve()
+    target = (vault_path / clean_rel).resolve()
+    try:
+        target.relative_to(resolved_vault)
+    except ValueError:
+        return {"ok": False, "why": "Security error: path outside vault boundary"}
+
+    if target.exists():
+        return {"ok": False, "why": f"Note '{clean_rel}' already exists"}
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(initial_text, encoding="utf-8")
+        _cache.pop(vault_name, None)
+        return {"ok": True, "file": clean_rel, "why": f"Created {clean_rel}"}
+    except Exception as e:
+        return {"ok": False, "why": f"Failed to create note: {e}"}
+
+
+def open_folder(vault_name: str, rel_path: str = "") -> dict[str, Any]:
+    """Opens the directory containing the note (or the vault root) in Windows Explorer."""
+    vault_path = get_vault_path(vault_name)
+    if not vault_path or not vault_path.exists():
+        return {"ok": False, "why": f"Vault '{vault_name}' not found"}
+
+    resolved_vault = vault_path.resolve()
+    target = (vault_path / rel_path).resolve() if rel_path else resolved_vault
+    try:
+        target.relative_to(resolved_vault)
+    except ValueError:
+        return {"ok": False, "why": "Security error: path outside vault boundary"}
+
+    target_dir = target if target.is_dir() else target.parent
+    try:
+        os.startfile(str(target_dir))
+        return {"ok": True, "why": f"Opened folder {target_dir.name}"}
+    except Exception as e:
+        return {"ok": False, "why": f"Failed to open folder: {e}"}
+

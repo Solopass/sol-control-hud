@@ -458,12 +458,67 @@ function md(text) {
   flush();
   return out.join('');
 }
-function openReader(title, text) {
-  $('modalTitle').textContent = title; $('modalBody').innerHTML = md(text); $('modal').hidden = false; $('modalBody').scrollTop = 0;
+let currentNote = null;
+function openReader(title, text, vault = null, file = null) {
+  currentNote = { title, text, vault, file, isEditing: false };
+  $('modalTitle').textContent = title;
+  $('modalBody').innerHTML = md(text);
+  $('modalBody').hidden = false;
+  $('modalEdit').hidden = true;
+  $('modalEditBtn').hidden = !file;
+  $('modalEditBtn').textContent = '✏ Edit';
+  $('modalSaveBtn').hidden = true;
+  $('modal').hidden = false;
+  $('modalBody').scrollTop = 0;
 }
 $('modalClose').onclick = () => { $('modal').hidden = true; };
 $('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') $('modal').hidden = true; });
-addEventListener('keydown', (e) => { if (e.key === 'Escape') $('modal').hidden = true; });
+
+$('modalEditBtn').onclick = () => {
+  if (!currentNote || !currentNote.file) return;
+  currentNote.isEditing = !currentNote.isEditing;
+  if (currentNote.isEditing) {
+    $('modalEdit').value = currentNote.text;
+    $('modalBody').hidden = true;
+    $('modalEdit').hidden = false;
+    $('modalEditBtn').textContent = '👁 Preview';
+    $('modalSaveBtn').hidden = false;
+    $('modalEdit').focus();
+  } else {
+    currentNote.text = $('modalEdit').value;
+    $('modalBody').innerHTML = md(currentNote.text);
+    $('modalBody').hidden = false;
+    $('modalEdit').hidden = true;
+    $('modalEditBtn').textContent = '✏ Edit';
+    $('modalSaveBtn').hidden = true;
+  }
+};
+
+$('modalSaveBtn').onclick = async () => {
+  if (!currentNote || !currentNote.file) return;
+  const newText = $('modalEdit').value;
+  $('modalSaveBtn').disabled = true;
+  try {
+    const res = await post('/api/note-save', { vault: currentNote.vault, file: currentNote.file, text: newText });
+    $('modalSaveBtn').disabled = false;
+    if (res?.ok) {
+      toast('Note saved');
+      currentNote.text = newText;
+      currentNote.isEditing = false;
+      $('modalBody').innerHTML = md(newText);
+      $('modalBody').hidden = false;
+      $('modalEdit').hidden = true;
+      $('modalEditBtn').textContent = '✏ Edit';
+      $('modalSaveBtn').hidden = true;
+      loadNotes();
+    } else {
+      toast(res?.why || 'Failed to save note');
+    }
+  } catch (err) {
+    $('modalSaveBtn').disabled = false;
+    toast('Error saving note');
+  }
+};
 
 const OPS = { queued: ['cancel'], running: ['cancel'], waiting: ['cancel'], paused: ['run', 'resume'], cancel: [], };
 const OP_LABEL = { run: 'Run now', pause: 'Pause', resume: 'Resume', cancel: 'Cancel' };
@@ -560,6 +615,8 @@ setInterval(loadWeek, 300000);
 let selectedVault = localStorage.getItem('sol_notes_vault') || 'OBVLT';
 let notesQuery = '';
 let searchTimeout = null;
+let pinnedNotes = new Set(JSON.parse(localStorage.getItem('sol_pinned_notes') || '[]'));
+let allNotesCache = [];
 
 async function initVaults() {
   const sel = $('notesVault');
@@ -592,23 +649,41 @@ async function loadNotes() {
       return;
     }
     const notes = res.notes || [];
+    allNotesCache = notes;
     $('notesVaultCount').textContent = `${notes.length} recent in ${selectedVault}`;
     if (!notes.length) {
       setHTML(container, `<div class="empty">no notes match in ${esc(selectedVault)}</div>`);
       return;
     }
-    const html = notes.map((n) => `
+
+    // Sort: pinned first, then chronological
+    const sorted = [...notes].sort((a, b) => {
+      const aPin = pinnedNotes.has(`${a.vault}::${a.file}`);
+      const bPin = pinnedNotes.has(`${b.vault}::${b.file}`);
+      if (aPin !== bPin) return aPin ? -1 : 1;
+      return b.mtime - a.mtime;
+    });
+
+    const html = sorted.map((n) => {
+      const pinKey = `${n.vault}::${n.file}`;
+      const isPinned = pinnedNotes.has(pinKey);
+      const tags = (n.tags || []).slice(0, 3).map((t) => `<span class="note-tag" title="Tag #${esc(t)}">#${esc(t)}</span>`).join('');
+      return `
       <div class="note-row" data-vault="${esc(n.vault)}" data-file="${esc(n.file)}" data-title="${esc(n.title)}">
         <div class="note-title-box">
+          <span class="note-star ${isPinned ? 'on' : ''}" data-star="${esc(pinKey)}" title="${isPinned ? 'Unpin' : 'Pin to top'}">★</span>
           <span class="note-title" title="${esc(n.file)}">${esc(n.title)}</span>
+          ${tags}
         </div>
         <span class="note-folder" title="${esc(n.folder)}">${esc(n.folder || '–')}</span>
         <span class="note-time">${esc(n.mtime_str)}</span>
         <div class="note-acts">
-          <button class="mini ghost" data-note-act="preview" title="Quick preview in browser">👁 Read</button>
+          <button class="mini ghost" data-note-act="folder" title="Open containing folder in Explorer">📁</button>
+          <button class="mini ghost" data-note-act="preview" title="Quick preview / edit in browser">👁 Read</button>
           <button class="mini" data-note-act="open" title="Open in Obsidian desktop app">↗ Obsidian</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     setHTML(container, html);
   } catch (e) {
     setHTML(container, '<div class="empty">error fetching notes</div>');
@@ -629,7 +704,115 @@ if ($('notesRefresh')) {
   $('notesRefresh').onclick = () => loadNotes();
 }
 
+// Scratch & New Note Composer Modal
+if ($('notesComposeBtn')) {
+  $('notesComposeBtn').onclick = () => {
+    $('composerModal').hidden = false;
+    $('composerText').value = '';
+    $('newFileName').value = '';
+    $('newFileNameBox').hidden = true;
+    const dailyR = document.querySelector('input[name="compDest"][value="daily"]');
+    if (dailyR) dailyR.checked = true;
+    $('composerText').focus();
+  };
+}
+if ($('composerClose')) $('composerClose').onclick = () => { $('composerModal').hidden = true; };
+if ($('composerCancel')) $('composerCancel').onclick = () => { $('composerModal').hidden = true; };
+if ($('composerModal')) {
+  $('composerModal').addEventListener('click', (e) => { if (e.target.id === 'composerModal') $('composerModal').hidden = true; });
+}
+document.querySelectorAll('input[name="compDest"]').forEach((r) => {
+  r.onchange = () => {
+    $('newFileNameBox').hidden = r.value !== 'new';
+  };
+});
+if ($('composerForm')) {
+  $('composerForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const dest = document.querySelector('input[name="compDest"]:checked').value;
+    const text = $('composerText').value.trim();
+    if (!text) return;
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    if (dest === 'new') {
+      const fileName = $('newFileName').value.trim();
+      if (!fileName) {
+        toast('Please enter a note filename');
+        btn.disabled = false;
+        return;
+      }
+      const res = await post('/api/note-create', { vault: selectedVault, file: fileName, text });
+      btn.disabled = false;
+      toast(res.why || (res.ok ? 'Note created' : 'Failed to create note'));
+      if (res.ok) {
+        $('composerModal').hidden = true;
+        loadNotes();
+      }
+    } else {
+      const res = await post('/api/action', { action: 'scratch', destination: dest, text });
+      btn.disabled = false;
+      toast(res.why || (res.ok ? 'Saved to note' : 'Failed to save'));
+      if (res.ok) {
+        $('composerModal').hidden = true;
+        loadNotes();
+      }
+    }
+  };
+}
+
+// Git Status Modal
 document.addEventListener('click', async (e) => {
+  const repoChip = e.target.closest('#gitRepos span');
+  if (repoChip) {
+    const repoName = repoChip.textContent.replace(/\*$/, '').trim();
+    if (!repoName) return;
+    $('gitModalTitle').textContent = `Git Status: ${repoName}`;
+    $('gitModalBody').textContent = 'Loading status…';
+    $('gitModal').hidden = false;
+    try {
+      const res = await (await fetch(`/api/git-status?repo=${encodeURIComponent(repoName)}`)).json();
+      $('gitModalBody').textContent = res.status || (res.ok ? 'Working tree clean' : (res.why || 'Failed to get status'));
+    } catch (err) {
+      $('gitModalBody').textContent = 'Error querying git status';
+    }
+  }
+});
+if ($('gitModalClose')) $('gitModalClose').onclick = () => { $('gitModal').hidden = true; };
+if ($('gitModal')) {
+  $('gitModal').addEventListener('click', (e) => { if (e.target.id === 'gitModal') $('gitModal').hidden = true; });
+}
+
+// Clear Crashes Action
+if ($('ackCrashBtn')) {
+  $('ackCrashBtn').onclick = async (e) => {
+    e.stopPropagation();
+    const r = await post('/api/action', { action: 'ack_crashes' });
+    toast(r.why || 'Crashes cleared');
+  };
+}
+
+// Quick Model Switcher
+document.addEventListener('click', (e) => {
+  const qm = e.target.closest('[data-quick-model]');
+  if (qm) {
+    const model = qm.dataset.quickModel;
+    post('/api/action', { action: 'model', target: model, op: 'load' }).then((r) => toast(r.why));
+  }
+});
+
+// Note row clicks and Star Pinning
+document.addEventListener('click', async (e) => {
+  const star = e.target.closest('[data-star]');
+  if (star) {
+    e.stopPropagation();
+    const key = star.dataset.star;
+    if (pinnedNotes.has(key)) pinnedNotes.delete(key);
+    else pinnedNotes.add(key);
+    localStorage.setItem('sol_pinned_notes', JSON.stringify([...pinnedNotes]));
+    loadNotes();
+    return;
+  }
+
   const actBtn = e.target.closest('[data-note-act]');
   const row = e.target.closest('.note-row');
   if (!actBtn && !row) return;
@@ -645,17 +828,138 @@ document.addEventListener('click', async (e) => {
     e.stopPropagation();
     try {
       const res = await (await fetch(`/api/note-content?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(file)}`)).json();
-      if (res.ok) openReader(`${title} (${vault})`, res.text);
+      if (res.ok) openReader(`${title} (${vault})`, res.text, vault, file);
       else toast(res.why || 'Could not load note content');
     } catch (err) {
       toast('Failed to preview note');
     }
+  } else if (act === 'folder') {
+    e.stopPropagation();
+    const res = await post('/api/action', { action: 'open_folder', vault, file });
+    if (res?.why) toast(res.why);
   } else if (act === 'open') {
     e.stopPropagation();
     const res = await post('/api/action', { action: 'open_note', vault, file });
     if (res?.why) toast(res.why);
   }
 });
+
+// Command Palette (Ctrl+K)
+let paletteOpen = false;
+let paletteSelectedIndex = 0;
+
+function openPalette() {
+  paletteOpen = true;
+  $('paletteModal').hidden = false;
+  $('paletteInput').value = '';
+  renderPalette('');
+  $('paletteInput').focus();
+}
+
+function closePalette() {
+  paletteOpen = false;
+  $('paletteModal').hidden = true;
+}
+
+if ($('cmdPaletteBtn')) $('cmdPaletteBtn').onclick = openPalette;
+if ($('paletteModal')) {
+  $('paletteModal').addEventListener('click', (e) => { if (e.target.id === 'paletteModal') closePalette(); });
+}
+
+addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    if (paletteOpen) closePalette(); else openPalette();
+  } else if (e.key === 'Escape') {
+    if (paletteOpen) closePalette();
+    if ($('composerModal') && !$('composerModal').hidden) $('composerModal').hidden = true;
+    if ($('gitModal') && !$('gitModal').hidden) $('gitModal').hidden = true;
+  }
+});
+
+function getPaletteItems(query) {
+  const q = query.toLowerCase().trim();
+  const items = [
+    { label: 'New Scratch Note / Composer', cat: 'Action', run: () => { closePalette(); $('notesComposeBtn')?.click(); } },
+    { label: 'Inspect & Acknowledge Crashes', cat: 'Action', run: () => { closePalette(); post('/api/action', { action: 'ack_crashes' }).then((r) => toast(r.why)); } },
+    { label: 'Unload All Local AI Models', cat: 'AI', run: () => { closePalette(); post('/api/action', { action: 'models_unload_all' }).then((r) => toast(r.why)); } },
+    { label: 'Start Away Mode + Sleep', cat: 'System', run: () => { closePalette(); post('/api/action', { action: 'away-sleep' }).then((r) => toast(r.why)); } },
+    { label: 'Load sol-fast (Gemma 4 12B Vision)', cat: 'Model', run: () => { closePalette(); post('/api/action', { action: 'model', target: 'sol-fast', op: 'load' }).then((r) => toast(r.why)); } },
+    { label: 'Load sol-smart (gpt-oss-20b Reasoning)', cat: 'Model', run: () => { closePalette(); post('/api/action', { action: 'model', target: 'sol-smart', op: 'load' }).then((r) => toast(r.why)); } },
+    { label: 'Load sol-long (gpt-oss-20b 65k Context)', cat: 'Model', run: () => { closePalette(); post('/api/action', { action: 'model', target: 'sol-long', op: 'load' }).then((r) => toast(r.why)); } },
+  ];
+
+  if (control?.chains) {
+    for (const c of control.chains) {
+      items.push({
+        label: `Run Chain: ${c.name}`,
+        cat: 'Chain',
+        run: () => { closePalette(); post('/api/action', { action: 'chain', target: c.name, op: 'run' }).then((r) => toast(r.why)); }
+      });
+    }
+  }
+
+  for (const n of allNotesCache) {
+    items.push({
+      label: `Note: ${n.title} (${n.vault})`,
+      cat: 'Note',
+      run: () => { closePalette(); post('/api/action', { action: 'open_note', vault: n.vault, file: n.file }).then((r) => toast(r.why)); }
+    });
+  }
+
+  return q ? items.filter((it) => it.label.toLowerCase().includes(q) || it.cat.toLowerCase().includes(q)) : items;
+}
+
+function renderPalette(query) {
+  const items = getPaletteItems(query).slice(0, 15);
+  paletteSelectedIndex = Math.min(paletteSelectedIndex, Math.max(0, items.length - 1));
+  if (!items.length) {
+    setHTML($('paletteList'), '<div class="empty">no matching commands or notes</div>');
+    return;
+  }
+  const html = items.map((it, idx) => `
+    <div class="palette-item ${idx === paletteSelectedIndex ? 'selected' : ''}" data-idx="${idx}">
+      <span>${esc(it.label)}</span>
+      <span class="cat">${esc(it.cat)}</span>
+    </div>
+  `).join('');
+  setHTML($('paletteList'), html);
+}
+
+if ($('paletteInput')) {
+  $('paletteInput').oninput = (e) => {
+    paletteSelectedIndex = 0;
+    renderPalette(e.target.value);
+  };
+
+  $('paletteInput').onkeydown = (e) => {
+    const items = getPaletteItems($('paletteInput').value).slice(0, 15);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      paletteSelectedIndex = (paletteSelectedIndex + 1) % items.length;
+      renderPalette($('paletteInput').value);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      paletteSelectedIndex = (paletteSelectedIndex - 1 + items.length) % items.length;
+      renderPalette($('paletteInput').value);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (items[paletteSelectedIndex]) {
+        items[paletteSelectedIndex].run();
+      }
+    }
+  };
+}
+
+if ($('paletteList')) {
+  $('paletteList').addEventListener('click', (e) => {
+    const itemEl = e.target.closest('.palette-item');
+    if (!itemEl) return;
+    const idx = parseInt(itemEl.dataset.idx, 10);
+    const items = getPaletteItems($('paletteInput').value).slice(0, 15);
+    if (items[idx]) items[idx].run();
+  });
+}
 
 setInterval(loadNotes, 15000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) loadNotes(); });

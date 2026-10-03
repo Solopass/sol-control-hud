@@ -100,3 +100,59 @@ def test_notes_api_endpoints(the_hub, tmp_path, monkeypatch):
     assert act_data["ok"] is True
     assert len(dispatched) == 1
     assert "obsidian://open?vault=OBVLT&file=doc1.md" in dispatched[0]
+
+    # 6. POST /api/note-save
+    save_res = client.post(
+        "/api/note-save",
+        json={"vault": "OBVLT", "file": "doc1.md", "text": "# Updated Doc 1"},
+        headers=OURS,
+    )
+    assert save_res.status_code == 200
+    assert save_res.json()["ok"] is True
+    assert (v1 / "doc1.md").read_text(encoding="utf-8") == "# Updated Doc 1"
+
+    # 7. POST /api/note-create
+    create_res = client.post(
+        "/api/note-create",
+        json={"vault": "OBVLT", "file": "new_created.md", "text": "# Brand New"},
+        headers=OURS,
+    )
+    assert create_res.status_code == 200
+    assert create_res.json()["ok"] is True
+    assert (v1 / "new_created.md").exists()
+
+    # 8. GET /api/top-processes
+    top_res = client.get("/api/top-processes")
+    assert top_res.status_code == 200
+    assert top_res.json()["ok"] is True
+    assert "top_cpu" in top_res.json()
+    assert "top_mem" in top_res.json()
+
+    # 9. GET /api/crashes
+    crash_res = client.get("/api/crashes")
+    assert crash_res.status_code == 200
+    assert crash_res.json()["ok"] is True
+
+    # 10. POST /api/action scratch
+    monkeypatch.setattr(
+        "sol_control_hud.views.scratch_dialog.append_scratch_note",
+        lambda text, destination: {"success": True, "message": "Saved to note"},
+    )
+    scratch_res = client.post(
+        "/api/action",
+        json={"action": "scratch", "text": "Test scratch idea", "destination": "daily"},
+        headers=OURS,
+    )
+    assert scratch_res.status_code == 200
+    assert scratch_res.json()["ok"] is True
+
+    # 11. POST /api/action ack_crashes
+    monkeypatch.setattr("sol_control_hud.views.ticker.write_crash_ack", lambda path: None)
+    ack_res = client.post(
+        "/api/action",
+        json={"action": "ack_crashes"},
+        headers=OURS,
+    )
+    assert ack_res.status_code == 200
+    assert ack_res.json()["ok"] is True
+
