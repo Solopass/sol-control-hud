@@ -931,6 +931,18 @@ class TickerApp:
             get_live_overhead=self.get_overhead_stats,
         )
 
+    def open_scratch_dialog(self) -> None:
+        """Opens the Quick Scratch note capture dialog."""
+        from .scratch_dialog import QuickScratchDialog
+        def _on_scratch_saved(path, text):
+            self.trigger_alert(self.get_theme()["accent_green"], "note_saved")
+            self.refresh_data_now()
+        QuickScratchDialog(
+            parent=self.root,
+            theme=self.get_theme(),
+            on_saved=_on_scratch_saved,
+        )
+
     def get_overhead_stats(self) -> dict:
         return {
             "cpu": self.latest_snap.self_cpu,
@@ -980,6 +992,8 @@ class TickerApp:
         self.btn_collapse.configure(bg=t["bg"], fg=t["text_muted"])
         if hasattr(self, "btn_settings"):
             self.btn_settings.configure(bg=t["bg"], fg=t["text_muted"])
+        if hasattr(self, "btn_scratch"):
+            self.btn_scratch.configure(bg=t["bg"], fg=t["text_muted"])
         if hasattr(self, "btn_mini"):
             self.btn_mini.configure(bg=t["bg"], fg=t["text_muted"])
         if hasattr(self, "mini_frame"):
@@ -1292,6 +1306,14 @@ class TickerApp:
         self.btn_settings.pack(side=tk.RIGHT, padx=2)
         self.btn_settings.bind("<Button-1>", lambda e: self.open_settings_dialog())
         Tooltip(self.btn_settings).set_text("Settings & Polling Presets")
+
+        self.btn_scratch = tk.Label(
+            self.header_frame, text="📝", bg=t["bg"], fg=t["text_muted"],
+            font=self._font(8), padx=4, cursor="hand2"
+        )
+        self.btn_scratch.pack(side=tk.RIGHT, padx=2)
+        self.btn_scratch.bind("<Button-1>", lambda e: self.open_scratch_dialog())
+        Tooltip(self.btn_scratch).set_text("Quick Scratch / Note Capture")
 
         self.btn_web = tk.Label(
             self.header_frame, text="↗ Web HUD", bg=t["bg"], fg=t["accent_primary"],
@@ -1618,6 +1640,7 @@ class TickerApp:
         menu.add_command(label=dock_text, command=self.toggle_dock)
         menu.add_command(label="Next Slide (Space)", command=self._manual_next_slide)
         menu.add_command(label="Settings & Presets ⚙", command=self.open_settings_dialog)
+        menu.add_command(label="Quick Scratch Note 📝", command=self.open_scratch_dialog)
         if self.hub:
             menu.add_separator()
             menu.add_command(label="🌐 Open dashboard (browser)", command=self.hub.open_dashboard)
@@ -1626,6 +1649,7 @@ class TickerApp:
 
         # Quick Actions submenu
         actions_menu = tk.Menu(menu, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
+        actions_menu.add_command(label="📝 Quick Scratch / Note Capture", command=self.open_scratch_dialog)
         if self.latest_snap.ai_mode == "away":
             actions_menu.add_command(label="⏹ Stop AI work (job goes back in the queue)", command=self.stop_ai_work)
         else:
