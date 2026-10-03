@@ -556,6 +556,110 @@ async function loadWeek() {
 }
 setInterval(loadWeek, 300000);
 
+// ---------- Obsidian Notes widget
+let selectedVault = localStorage.getItem('sol_notes_vault') || 'OBVLT';
+let notesQuery = '';
+let searchTimeout = null;
+
+async function initVaults() {
+  const sel = $('notesVault');
+  if (!sel) return;
+  try {
+    const res = await (await fetch('/api/vaults', { cache: 'no-store' })).json();
+    if (res.ok && res.vaults?.length) {
+      sel.innerHTML = res.vaults.map((v) => `<option value="${esc(v)}"${v === selectedVault ? ' selected' : ''}>${esc(v)}</option>`).join('');
+      if (!res.vaults.includes(selectedVault)) {
+        selectedVault = res.default || res.vaults[0];
+        sel.value = selectedVault;
+      }
+    }
+  } catch (e) { /* keep default */ }
+  sel.onchange = () => {
+    selectedVault = sel.value;
+    localStorage.setItem('sol_notes_vault', selectedVault);
+    loadNotes();
+  };
+}
+
+async function loadNotes() {
+  const container = $('notesList');
+  if (!container || document.hidden) return;
+  try {
+    const url = `/api/notes?vault=${encodeURIComponent(selectedVault)}&q=${encodeURIComponent(notesQuery)}`;
+    const res = await (await fetch(url, { cache: 'no-store' })).json();
+    if (!res.ok) {
+      setHTML(container, `<div class="empty">${esc(res.why || 'error loading notes')}</div>`);
+      return;
+    }
+    const notes = res.notes || [];
+    $('notesVaultCount').textContent = `${notes.length} recent in ${selectedVault}`;
+    if (!notes.length) {
+      setHTML(container, `<div class="empty">no notes match in ${esc(selectedVault)}</div>`);
+      return;
+    }
+    const html = notes.map((n) => `
+      <div class="note-row" data-vault="${esc(n.vault)}" data-file="${esc(n.file)}" data-title="${esc(n.title)}">
+        <div class="note-title-box">
+          <span class="note-title" title="${esc(n.file)}">${esc(n.title)}</span>
+        </div>
+        <span class="note-folder" title="${esc(n.folder)}">${esc(n.folder || '–')}</span>
+        <span class="note-time">${esc(n.mtime_str)}</span>
+        <div class="note-acts">
+          <button class="mini ghost" data-note-act="preview" title="Quick preview in browser">👁 Read</button>
+          <button class="mini" data-note-act="open" title="Open in Obsidian desktop app">↗ Obsidian</button>
+        </div>
+      </div>`).join('');
+    setHTML(container, html);
+  } catch (e) {
+    setHTML(container, '<div class="empty">error fetching notes</div>');
+  }
+}
+
+if ($('notesSearch')) {
+  $('notesSearch').oninput = (e) => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      notesQuery = e.target.value.trim();
+      loadNotes();
+    }, 200);
+  };
+}
+
+if ($('notesRefresh')) {
+  $('notesRefresh').onclick = () => loadNotes();
+}
+
+document.addEventListener('click', async (e) => {
+  const actBtn = e.target.closest('[data-note-act]');
+  const row = e.target.closest('.note-row');
+  if (!actBtn && !row) return;
+
+  const targetRow = actBtn ? actBtn.closest('.note-row') : row;
+  if (!targetRow) return;
+  const vault = targetRow.dataset.vault;
+  const file = targetRow.dataset.file;
+  const title = targetRow.dataset.title;
+
+  const act = actBtn ? actBtn.dataset.noteAct : 'open';
+  if (act === 'preview') {
+    e.stopPropagation();
+    try {
+      const res = await (await fetch(`/api/note-content?vault=${encodeURIComponent(vault)}&file=${encodeURIComponent(file)}`)).json();
+      if (res.ok) openReader(`${title} (${vault})`, res.text);
+      else toast(res.why || 'Could not load note content');
+    } catch (err) {
+      toast('Failed to preview note');
+    }
+  } else if (act === 'open') {
+    e.stopPropagation();
+    const res = await post('/api/action', { action: 'open_note', vault, file });
+    if (res?.why) toast(res.why);
+  }
+});
+
+setInterval(loadNotes, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadNotes(); });
+
 (async function start() {
   try {
     const meta = await (await fetch('/api/meta', { cache: 'no-store' })).json();
@@ -566,5 +670,7 @@ setInterval(loadWeek, 300000);
   await loadHistory();
   loadControl();
   loadWeek();
+  await initVaults();
+  loadNotes();
   if (!document.hidden) connect();
 })();

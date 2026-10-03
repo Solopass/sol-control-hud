@@ -282,6 +282,14 @@ class Hub:
             self._login = start_at_login(target == "on")
             log(f"start at login: {'on' if self._login else 'off'}")
             return {"ok": True, "why": f"start at login: {'on' if self._login else 'off'}", "start_at_login": self._login}
+        if action == "open_note":
+            from .data.collectors import notes
+            b = body or {}
+            vault = str(b.get("vault") or "OBVLT")
+            file_path = str(b.get("file") or target)
+            r = notes.open_note(vault, file_path)
+            log(f"open note: {vault}/{file_path} -> {r.get('ok')}")
+            return r
         return {"ok": False, "why": f"unknown action {action!r}"}
 
     # ---- setup
@@ -458,6 +466,27 @@ class Hub:
                 return {"ok": True, "text": control.chain_result(name)}
             except control.ControlError as e:
                 return {"ok": False, "why": str(e)}
+
+        @app.get("/api/vaults")
+        def vaults_list() -> dict:
+            from .data.collectors import notes
+            discovered = notes.discover_vaults()
+            names = list(discovered.keys())
+            if "OBVLT" in names:
+                names.remove("OBVLT")
+                names.insert(0, "OBVLT")
+            return {"ok": True, "vaults": names, "default": "OBVLT" if "OBVLT" in names else (names[0] if names else "")}
+
+        @app.get("/api/notes")
+        def notes_list(vault: str = "OBVLT", limit: int = 30, q: str = "") -> dict:
+            from .data.collectors import notes
+            items = notes.list_notes(vault_name=vault, limit=min(max(1, limit), 100), query=q)
+            return {"ok": True, "vault": vault, "count": len(items), "notes": items}
+
+        @app.get("/api/note-content")
+        def note_content(vault: str = "OBVLT", file: str = "") -> dict:
+            from .data.collectors import notes
+            return notes.read_note_content(vault_name=vault, rel_path=file)
 
         @app.get("/api/snapshot")
         def snapshot() -> dict:

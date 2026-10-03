@@ -156,6 +156,18 @@
     <div class="media" id="media" hidden><span class="eq"><i></i><i></i><i></i><i></i></span><span id="mediaText"></span></div>
   </article>
 
+  <article class="card wide" id="c-notes">
+    <h2>
+      <span>Obsidian Notes <span class="dim" id="notesVaultCount">recently edited</span></span>
+      <div class="notes-controls">
+        <select id="notesVault" title="Choose Obsidian vault (one at a time)"></select>
+        <input type="search" id="notesSearch" placeholder="Filter notes..." class="mini-search">
+        <button class="mini ghost" id="notesRefresh" title="Refresh notes">⟳</button>
+      </div>
+    </h2>
+    <div class="notes-list" id="notesList"><div class="empty">loading notes…</div></div>
+  </article>
+
   <article class="card" id="c-week">
     <h2>This week <span class="dim" id="weekCover"></span></h2>
     <div class="stats" id="weekStats"></div>

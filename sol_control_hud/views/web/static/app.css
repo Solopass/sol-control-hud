@@ -273,3 +273,26 @@ footer .toggle input { accent-color:var(--cyan); cursor:pointer; }
 .mrow.pending .mhead b::after { content:" …"; color:var(--amber); }
 .buttons .small { font-size:11px; align-self:center; }
 button:disabled { opacity:.45; cursor:not-allowed; }
+
+/* Obsidian Notes widget */
+.notes-controls { display:flex; gap:6px; align-items:center; }
+.notes-controls select { padding:3px 8px; font-size:11px; max-width:140px; }
+.mini-search { background:var(--badge); border:1px solid var(--line); border-radius:9px; padding:3px 9px; font-size:11px; color:var(--text); width:130px; transition:border-color .2s, width .2s; }
+.mini-search:focus { outline:none; border-color:var(--cyan); width:170px; }
+.notes-list { display:flex; flex-direction:column; gap:4px; max-height:330px; overflow-y:auto; padding-right:2px; }
+.note-row { display:grid; grid-template-columns:minmax(140px, 1.5fr) minmax(80px, 1fr) auto auto; gap:10px; align-items:center;
+  padding:6px 10px; border-radius:8px; background:var(--badge); font-size:13px; transition:background .15s, border-color .15s;
+  cursor:pointer; border:1px solid transparent; }
+.note-row:hover { background:color-mix(in srgb, var(--cyan) 10%, var(--badge)); border-color:color-mix(in srgb, var(--cyan) 30%, transparent); }
+.note-title-box { display:flex; align-items:center; gap:8px; min-width:0; }
+.note-title { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.note-folder { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.note-time { color:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.note-acts { display:flex; gap:4px; justify-content:flex-end; }
+@media (max-width:760px) {
+  .notes-controls { flex-wrap:wrap; }
+  .note-row { grid-template-columns:1fr auto; gap:4px 8px; }
+  .note-folder { grid-column:1; }
+  .note-time { grid-column:2; }
+  .note-acts { grid-column:1 / span 2; justify-content:flex-start; margin-top:2px; }
+}
