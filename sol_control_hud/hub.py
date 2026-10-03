@@ -31,7 +31,7 @@ from fastapi import Request   # module level: annotations are strings here, Fast
 
 from . import heal, models_ctl
 from .data.collectors import engines, vram
-from .data.snapshot import TickerCollector, attention, format_multiline_rows, format_slides
+from .data.snapshot import RED, TickerCollector, attention, format_multiline_rows, format_slides
 from .paths import DATA_DIR
 
 SETTINGS_FILE = DATA_DIR / "hub-settings.json"
@@ -562,8 +562,16 @@ class Hub:
                 self._prev_snap = snap
             self._maybe_heal(snap)
             if self.tray:
-                alerts = attention(self.collector.get_snapshot())
-                self.tray.set_tooltip("SOL Control HUD: " + (alerts[0][1] if alerts else "all fine"))
+                alerts = attention(snap)
+                if alerts:
+                    top_color, top_text, _ = alerts[0]
+                    if top_color == RED:
+                        prefix = "🔴 CRASH ALERT: " if "crash" in top_text.lower() else "🔴 ALERT: "
+                    else:
+                        prefix = "🟡 "
+                    self.tray.set_tooltip(f"{prefix}{top_text}")
+                else:
+                    self.tray.set_tooltip(f"🟢 SOL: {snap.ai_model or 'No model'} · {snap.ai_mode} · GPU {snap.gpu_temp or '--'}°C")
         except Exception as e:  # noqa: BLE001
             log(f"tick error: {type(e).__name__}: {e}")
         self.root.after(2000, self._tick)

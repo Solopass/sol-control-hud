@@ -26,6 +26,7 @@ except ImportError:
 from ..data.snapshot import (HOTSPOT_ALERT_C, Snapshot, TickerCollector, attention, format_multiline_rows, format_slides,
                           rotation)
 from ..paths import DATA_DIR, ROOT
+from .widgets import SegmentedBar, Sparkline
 
 
 def play_alert_sound(sound_type: int | None = None) -> None:
@@ -448,6 +449,8 @@ class SegmentLabel(tk.Canvas):
     def __init__(self, master, font: tkfont.Font, bg: str, fg: str, max_px: int = 0, **kw):
         super().__init__(master, bg=bg, highlightthickness=0, bd=0, height=font.metrics("linespace") + 2, **kw)
         self._font, self._fg, self._segments, self.max_px = font, fg, [], max_px
+        self._offset_x = 0
+        self._anim_timer = None
         self.bind("<Configure>", lambda e: self._redraw())
 
     def configure(self, cnf=None, **kw):
@@ -470,17 +473,44 @@ class SegmentLabel(tk.Canvas):
             return "".join(t for t, _ in self._segments)
         return super().cget(key)
 
-    def set_segments(self, segments: list[tuple[str, str | None]], max_px: int | None = None) -> None:
+    def set_segments(self, segments: list[tuple[str, str | None]], max_px: int | None = None, animate: bool = False) -> None:
         self._segments = list(segments)
         if max_px is not None:
             self.max_px = max_px
-        self._redraw()
+        if animate:
+            self.animate_slide_in()
+        else:
+            self._offset_x = 0
+            self._redraw()
+
+    def animate_slide_in(self) -> None:
+        if self._anim_timer is not None:
+            try:
+                self.after_cancel(self._anim_timer)
+            except Exception:
+                pass
+            self._anim_timer = None
+
+        offsets = [14, 7, 2, 0]
+        step = 0
+
+        def _step():
+            nonlocal step
+            if step < len(offsets):
+                self._offset_x = offsets[step]
+                step += 1
+                self._redraw()
+                if step < len(offsets):
+                    self._anim_timer = self.after(22, _step)
+                else:
+                    self._anim_timer = None
+        _step()
 
     def _redraw(self) -> None:
         self.delete("all")
         width = self.max_px or self.winfo_width() or 400
         y = max(self.winfo_height(), int(self.cget("height"))) // 2
-        x, ell = 0, self._font.measure("…")
+        x, ell = getattr(self, "_offset_x", 0), self._font.measure("…")
         for text, color in self._segments:
             w = self._font.measure(text)
             if x + w > width:                          # doesn't fit: cut this part, end with '…', stop
@@ -969,6 +999,8 @@ class TickerApp:
         self.alerts_sound = bool(new_s.get("alerts_sound", False))
         if "opacity" in new_s:
             self.set_opacity(float(new_s["opacity"]))
+        if "theme" in new_s:
+            self.set_theme(new_s["theme"])
         self.refresh_data_now()
 
     def _apply_theme(self) -> None:
@@ -1000,6 +1032,12 @@ class TickerApp:
             self.mini_frame.configure(bg=t["bg"])
             self.mini_lbl.configure(bg=t["bg"])
             self.btn_mini_expand.configure(bg=t["bg"], fg=t["text_muted"])
+        if hasattr(self, "spark_gpu"):
+            self.spark_gpu.configure_theme(bg=t["bg"], color=t["accent_primary"])
+        if hasattr(self, "spark_cpu"):
+            self.spark_cpu.configure_theme(bg=t["bg"], color=t["accent_green"])
+        if hasattr(self, "vram_segmented"):
+            self.vram_segmented.configure(bg=t["border"])
         self.btn_web.configure(bg=t["bg"], fg=t["accent_primary"])
         self.sep.configure(bg=t["border"])
         for lbl_title, lbl_val in self.row_widgets:
@@ -1031,6 +1069,8 @@ class TickerApp:
             "scan_interval": 60,
             "stability_interval": 300,
             "monitor_self": True,
+            "slide_transitions": True,
+            "show_sparklines": True,
         }
         if SETTINGS_FILE.exists():
             try:
@@ -1174,9 +1214,9 @@ class TickerApp:
         # --- Single-line View ---
         self.single_frame = tk.Frame(self.container, bg=t["bg"], height=SINGLE_HEIGHT)
 
-        # VRAM visual meter (2px bar at bottom of single line)
-        self.vram_meter = tk.Canvas(
-            self.single_frame, height=2, bg=t["bg"], highlightthickness=0, bd=0
+        # VRAM visual meter (2px segmented bar at bottom of single line)
+        self.vram_meter = SegmentedBar(
+            self.single_frame, height=2, bg=t["bg"]
         )
         self.vram_meter.pack(side=tk.BOTTOM, fill=tk.X)
 
@@ -1339,11 +1379,25 @@ class TickerApp:
             )
             lbl_title.pack(side=tk.LEFT)
 
+            if row_idx == 0:
+                self.spark_gpu = Sparkline(rf, width=42, height=14, bg=t["bg"], color=t["accent_primary"])
+                self.spark_gpu.pack(side=tk.RIGHT, padx=4)
+                Tooltip(self.spark_gpu).set_text("GPU Load History (last 60s)")
+            elif row_idx == 3:
+                self.spark_cpu = Sparkline(rf, width=42, height=14, bg=t["bg"], color=t["accent_green"])
+                self.spark_cpu.pack(side=tk.RIGHT, padx=4)
+                Tooltip(self.spark_cpu).set_text("CPU Usage History (last 60s)")
+
             lbl_val = SegmentLabel(rf, self.font_row, bg=t["bg"], fg=t["text_main"], cursor="hand2")
             lbl_val.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
             self.row_tooltips.append(Tooltip(lbl_val))
             self.row_widgets.append((lbl_title, lbl_val))
+
+            if row_idx == 0:
+                self.vram_segmented = SegmentedBar(self.multi_frame, height=3, bg=t["border"])
+                self.vram_segmented.pack(fill=tk.X, pady=(1, 2))
+                Tooltip(self.vram_segmented).set_text("VRAM: AI Model (Cyan) · Other Apps (Purple) · Free (Dark)")
 
             # Bind row click to its target action
             idx_capture = row_idx
@@ -2124,7 +2178,8 @@ class TickerApp:
         full_w = int(int(scale_info["width"]) * self._dpi)
         cur_w = self.root.winfo_width() if self.root.winfo_width() > 1 else full_w
         room = int(int(scale_info["max_single_px"]) * self._dpi) - max(0, full_w - cur_w)
-        self.single_text.set_segments([(txt, self._tc(c)) for txt, c in segs], max(80, room))
+        animate = bool(self.settings.get("slide_transitions", True))
+        self.single_text.set_segments([(txt, self._tc(c)) for txt, c in segs], max(80, room), animate=animate)
 
         detail = slide.get("detail", "")
         tip_content = f"{slide['tag']}: {full_text}\n{detail}" if detail else f"{slide['tag']}: {full_text}"
@@ -2136,18 +2191,25 @@ class TickerApp:
         dot_color = t["accent_primary"] if self.paused else t["text_dim"]
         self.dots_label.configure(text=" ".join(dots), fg=dot_color, bg=t["bg"])
 
-        # Update 2px VRAM visual meter at bottom
+        # Update 2px segmented VRAM visual meter at bottom
         s = self.latest_snap
-        used = s.vram_used_gb or 0.0
-        total = s.vram_total_gb or 16.0
-        ratio = min(max(used / total, 0.0), 1.0)
-        curr_w = self.root.winfo_width() or int(scale_info["width"])
-        vram_col = t["accent_red"] if s.vram_evicted else (t["accent_amber"] if s.vram_tight else t["accent_primary"])
+        tot = s.vram_total_gb or 16.0
         if s.ai_mode == "away" and s.away_fraction is not None:
-            ratio, vram_col = min(max(s.away_fraction, 0.0), 1.0), t["accent_green"]   # while Away works: its progress
-        bar_w = int(curr_w * ratio)
-        self.vram_meter.delete("all")
-        self.vram_meter.create_rectangle(0, 0, bar_w, 2, fill=vram_col, width=0)
+            ratio = min(max(s.away_fraction, 0.0), 1.0)
+            self.vram_meter.set_segments([(ratio, t["accent_green"])])
+        elif s.vram_evicted:
+            ratio = min(max((s.vram_used_gb or 0.0) / tot, 0.0), 1.0)
+            self.vram_meter.set_segments([(ratio, t["accent_red"])])
+        elif s.vram_tight:
+            ratio = min(max((s.vram_used_gb or 0.0) / tot, 0.0), 1.0)
+            self.vram_meter.set_segments([(ratio, t["accent_amber"])])
+        else:
+            m_frac = min(max(s.vram_model_gb / tot, 0.0), 1.0)
+            o_frac = min(max(s.vram_other_gb / tot, 0.0), 1.0)
+            self.vram_meter.set_segments([
+                (m_frac, t["accent_primary"]),
+                (o_frac, "#a855f7"),
+            ])
 
     def _render_multiline(self) -> None:
         s = self.latest_snap
@@ -2198,6 +2260,33 @@ class TickerApp:
                 lbl_v.set_segments(segs, int(int(scale_info["max_row_px"]) * self._dpi))
                 if i < len(self.row_tooltips):
                     self.row_tooltips[i].set_text(f"{r['title']}: {full_row}")
+
+        # Update live sparklines and segmented VRAM
+        if self.settings.get("show_sparklines", True):
+            if hasattr(self, "spark_gpu"):
+                if not self.spark_gpu.winfo_manager():
+                    self.spark_gpu.pack(side=tk.RIGHT, padx=4)
+                if s.gpu_history:
+                    self.spark_gpu.set_data(s.gpu_history, min_val=0.0, max_val=100.0)
+            if hasattr(self, "spark_cpu"):
+                if not self.spark_cpu.winfo_manager():
+                    self.spark_cpu.pack(side=tk.RIGHT, padx=4)
+                if s.cpu_history:
+                    self.spark_cpu.set_data(s.cpu_history, min_val=0.0, max_val=100.0)
+        else:
+            if hasattr(self, "spark_gpu") and self.spark_gpu.winfo_manager():
+                self.spark_gpu.pack_forget()
+            if hasattr(self, "spark_cpu") and self.spark_cpu.winfo_manager():
+                self.spark_cpu.pack_forget()
+
+        if hasattr(self, "vram_segmented") and s.vram_total_gb:
+            tot = s.vram_total_gb
+            m_frac = min(max(s.vram_model_gb / tot, 0.0), 1.0)
+            o_frac = min(max(s.vram_other_gb / tot, 0.0), 1.0)
+            self.vram_segmented.set_segments([
+                (m_frac, t["accent_primary"]),
+                (o_frac, "#a855f7"),
+            ])
 
     def open_web_hud(self) -> None:
         if self.hub:                       # the hub serves the dashboard itself: just open it

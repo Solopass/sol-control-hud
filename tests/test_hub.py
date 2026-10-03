@@ -139,3 +139,25 @@ def test_dashboard_shortcut_opens_the_page_without_touching_the_ticker(monkeypat
     monkeypatch.setattr("httpx.post", lambda url, json, timeout: sent.append(json) or R())
     hub.tell_running_hub(7900, "open-dashboard")
     assert sent == [{"dashboard": True}]                       # no "ticker" key: a hidden ticker stays hidden
+
+
+def test_tray_tooltip_alert_and_normal(the_hub):
+    class FakeTray:
+        def __init__(self):
+            self.tip = ""
+
+        def set_tooltip(self, tip: str):
+            self.tip = tip
+
+    the_hub.tray = FakeTray()
+    the_hub.root = type("R", (), {"after": lambda *a, **k: None})()
+
+    # Case 1: Crash alert present (gpu_resets=1)
+    the_hub._tick()
+    assert "🔴 CRASH ALERT:" in the_hub.tray.tip
+
+    # Case 2: Clean snapshot
+    the_hub.collector.snap = Snapshot(ai_state="loaded", ai_model="sol-smart", ai_mode="desk", gpu_temp=45, sampled_at=2.0)
+    the_hub._tick()
+    assert the_hub.tray.tip == "🟢 SOL: sol-smart · desk · GPU 45°C"
+

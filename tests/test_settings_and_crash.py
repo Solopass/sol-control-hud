@@ -132,6 +132,9 @@ def test_settings_dialog_presets_and_save():
         assert saved_data[0]["poll_pace"] == PRESETS["turbo"]["poll_pace"]
         assert saved_data[0]["interval_seconds"] == PRESETS["turbo"]["interval_seconds"]
         assert saved_data[0]["monitor_self"] is True
+        assert saved_data[0]["theme"] == "cyber-cyan"
+        assert saved_data[0]["slide_transitions"] is True
+        assert saved_data[0]["show_sparklines"] is True
     finally:
         root.destroy()
 
@@ -146,7 +149,29 @@ def test_ticker_mini_mode_and_peek(monkeypatch, tmp_path):
     root.withdraw()
     try:
         app = ticker.TickerApp(root)
-        app.latest_snap = Snapshot(self_cpu=0.2, self_ram_mb=35.0, self_latency_ms=1.5)
+        app.latest_snap = Snapshot(
+            self_cpu=0.2,
+            self_ram_mb=35.0,
+            self_latency_ms=1.5,
+            gpu_history=[20.0, 45.0, 30.0],
+            cpu_history=[10.0, 15.0, 12.0],
+            vram_total_gb=16.0,
+            vram_model_gb=6.5,
+            vram_other_gb=3.5,
+            vram_free_gb=6.0,
+        )
+
+        # 0. Test visual widgets exist and render in multi-mode
+        assert hasattr(app, "spark_gpu")
+        assert hasattr(app, "spark_cpu")
+        assert hasattr(app, "vram_segmented")
+        app.set_mode("multi")
+        app._render_multiline()
+
+        # Test single mode with slide transitions
+        app.set_mode("single")
+        app.slides = [{"tag": "HW", "text": "GPU 30% · VRAM 10/16G", "color": "#38bdf8"}]
+        app._render_single_slide()
 
         # 1. Switch to mini mode
         app.set_mode("mini")

@@ -163,6 +163,14 @@ class Snapshot:
     self_ram_mb: float = 0.0       # Working Set in MB (e.g. 48.5)
     self_latency_ms: float = 0.0   # Last collection duration in ms
 
+    # Visual Monitoring: Sparklines & Segmented Memory
+    gpu_history: list[float] = field(default_factory=list)
+    vram_history: list[float] = field(default_factory=list)
+    cpu_history: list[float] = field(default_factory=list)
+    vram_model_gb: float = 0.0
+    vram_other_gb: float = 0.0
+    vram_free_gb: float = 0.0
+
 
 def check_port(port: int, host: str = "127.0.0.1", timeout: float = 0.04) -> bool:
     try:
@@ -1170,6 +1178,9 @@ class TickerCollector:
         self._self_cpu: float = 0.0
         self._self_ram_mb: float = 0.0
         self._proc: psutil.Process | None = None
+        self._gpu_history: list[float] = []
+        self._vram_history: list[float] = []
+        self._cpu_history: list[float] = []
 
     def set_intervals(self, stability: float | None = None, system: float | None = None,
                       git: float | None = None, monitor_self: bool | None = None) -> None:
@@ -1373,6 +1384,26 @@ class TickerCollector:
             self._self_ram_mb = 0.0
         t_latency_ms = (time.perf_counter() - t_gather_start) * 1000.0
 
+        # Rolling metric history (up to 40 samples, ~60-80s on 2s pace)
+        if gpu_load is not None:
+            self._gpu_history = (self._gpu_history + [float(gpu_load)])[-40:]
+        if vram_used is not None:
+            self._vram_history = (self._vram_history + [float(vram_used)])[-40:]
+        self._cpu_history = (self._cpu_history + [float(cpu)])[-40:]
+
+        # Segmented VRAM calculation
+        v_tot = float(vram_total or 16.0)
+        v_used = float(vram_used or 0.0)
+        v_model = 0.0
+        if gpu_avail:
+            for p in gpu_latest.get("processes", []):
+                pname = (p.get("name") or "").lower()
+                if any(k in pname for k in ("llama", "ollama", "sol-", "python")):
+                    v_model += float(p.get("dedicated_gb", 0.0))
+        v_model = min(v_model, v_used)
+        v_other = max(0.0, v_used - v_model)
+        v_free = max(0.0, v_tot - v_used)
+
         snap = Snapshot(
             gpu_name=gpu_name,
             gpu_load=gpu_load,
@@ -1436,6 +1467,12 @@ class TickerCollector:
             self_cpu=self._self_cpu,
             self_ram_mb=self._self_ram_mb,
             self_latency_ms=round(t_latency_ms, 1),
+            gpu_history=list(self._gpu_history),
+            vram_history=list(self._vram_history),
+            cpu_history=list(self._cpu_history),
+            vram_model_gb=round(v_model, 2),
+            vram_other_gb=round(v_other, 2),
+            vram_free_gb=round(v_free, 2),
         )
         with self._lock:
             self._latest = snap

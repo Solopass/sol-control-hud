@@ -70,6 +70,9 @@ class SettingsDialog:
         self._pulse_var = tk.BooleanVar(value=bool(self.settings.get("alerts_pulse", True)))
         self._sound_var = tk.BooleanVar(value=bool(self.settings.get("alerts_sound", False)))
         self._opacity_var = tk.DoubleVar(value=float(self.settings.get("opacity", 0.94)))
+        self._theme_var = tk.StringVar(value=str(self.settings.get("theme", "cyber-cyan")))
+        self._transitions_var = tk.BooleanVar(value=bool(self.settings.get("slide_transitions", True)))
+        self._sparklines_var = tk.BooleanVar(value=bool(self.settings.get("show_sparklines", True)))
 
         self._build_ui()
         self._position_window()
@@ -222,6 +225,63 @@ class SettingsDialog:
         )
         chk_pulse.pack(anchor="w")
 
+        # Section 3: Appearance & Themes
+        sec3 = tk.LabelFrame(
+            body, text=" Appearance & Themes ",
+            bg=t["bg"], fg=t["accent_primary"], font=f_bold, padx=10, pady=8
+        )
+        sec3.pack(fill=tk.X, pady=(0, 10))
+
+        # Theme Selector Row
+        row_theme = tk.Frame(sec3, bg=t["bg"])
+        row_theme.pack(fill=tk.X, pady=2)
+        tk.Label(row_theme, text="Color Theme:", bg=t["bg"], fg=t["text_main"], font=f_sub, width=16, anchor="w").pack(side=tk.LEFT)
+
+        theme_options = [
+            ("cyber-cyan", "Cyber Cyan (Default)"),
+            ("high-contrast", "High Contrast OLED"),
+            ("amber-terminal", "Amber Terminal (CRT)"),
+            ("emerald-matrix", "Emerald Matrix"),
+            ("nordic-frost", "Nordic Frost"),
+            ("dracula-synth", "Dracula Synthwave"),
+        ]
+        theme_menu = ttk.Combobox(
+            row_theme,
+            textvariable=self._theme_var,
+            values=[opt[0] for opt in theme_options],
+            state="readonly",
+            width=22,
+        )
+        theme_menu.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Opacity Slider Row
+        row_op = tk.Frame(sec3, bg=t["bg"])
+        row_op.pack(fill=tk.X, pady=2)
+        self.lbl_opacity = tk.Label(row_op, text=f"Window Opacity: {int(self._opacity_var.get() * 100)}%", bg=t["bg"], fg=t["text_main"], font=f_sub, width=22, anchor="w")
+        self.lbl_opacity.pack(side=tk.LEFT)
+        s_op = tk.Scale(
+            row_op, from_=0.50, to=1.00, resolution=0.05, orient=tk.HORIZONTAL, showvalue=0,
+            variable=self._opacity_var, bg=t["bg"], fg=t["text_main"], highlightthickness=0,
+            command=lambda v: self.lbl_opacity.configure(text=f"Window Opacity: {int(self._opacity_var.get() * 100)}%")
+        )
+        s_op.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+
+        chk_trans = tk.Checkbutton(
+            sec3, text="Smooth fluid slide transition animations",
+            variable=self._transitions_var, bg=t["bg"], fg=t["text_main"],
+            activebackground=t["bg"], activeforeground=t["text_main"],
+            selectcolor=t["card"], font=f_sub
+        )
+        chk_trans.pack(anchor="w")
+
+        chk_sparks = tk.Checkbutton(
+            sec3, text="Show live 60s sparkline trendlines (GPU & CPU)",
+            variable=self._sparklines_var, bg=t["bg"], fg=t["text_main"],
+            activebackground=t["bg"], activeforeground=t["text_main"],
+            selectcolor=t["card"], font=f_sub
+        )
+        chk_sparks.pack(anchor="w")
+
         # Live Overhead Readout Bar
         self.overhead_frame = tk.Frame(body, bg=t["card"], padx=10, pady=8, highlightbackground=t["border"], highlightthickness=1)
         self.overhead_frame.pack(fill=tk.X, pady=(0, 12))
@@ -301,6 +361,9 @@ class SettingsDialog:
             "alerts_pulse": self._pulse_var.get(),
             "alerts_sound": self._sound_var.get(),
             "opacity": self._opacity_var.get(),
+            "theme": self._theme_var.get(),
+            "slide_transitions": self._transitions_var.get(),
+            "show_sparklines": self._sparklines_var.get(),
         }
         if self.on_save:
             try:
