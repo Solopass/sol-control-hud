@@ -142,6 +142,22 @@
     <div id="diskList"></div>
   </article>
 
+  <article class="card wide" id="c-ports">
+    <h2>
+      <span>Localhost <span class="dim" id="portsSummary">what listens on this PC</span></span>
+      <div class="notes-controls">
+        <button class="mini ghost" id="portsAll" aria-pressed="false" title="Also list apps and Windows services">+ apps · Windows</button>
+        <button class="mini ghost" id="portsRefresh" title="Check again now">⟳</button>
+      </div>
+    </h2>
+    <div class="plist" id="portsList"><div class="empty">loading…</div></div>
+    <div id="portsHistory" hidden>
+      <h3>Recently closed</h3>
+      <div class="plist" id="portsClosed"></div>
+      <div class="note" id="portsApprox" hidden>* closed while the dashboard was shut: the time shown is the last one we saw it.</div>
+    </div>
+  </article>
+
   <article class="card" id="c-stab" data-open="SYS">
     <h2>Stability &amp; backups <button class="mini danger" id="ackCrashBtn" hidden title="Clear crash events and unblock Away mode">✓ Clear Crashes</button></h2>
     <div class="seg" id="sysSeg"></div>

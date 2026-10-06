@@ -312,6 +312,15 @@ class Hub:
             write_crash_ack(ACK_FILE)
             log("crashes acknowledged via web dashboard")
             return {"ok": True, "why": "Crash events acknowledged and cleared"}
+        if action == "close_port":
+            # ports.close_listener looks the port up itself and refuses the AI stack, Windows services and us
+            from .data.collectors import ports
+            b = body or {}
+            r = ports.close_listener(target or b.get("port"), b.get("pid"))
+            log(f"close port {target or b.get('port')}: {r.get('why')}")
+            if hasattr(self, "collectors") and "ports" in self.collectors:
+                self.collectors["ports"].value = None      # the card lists what's left on its next poll
+            return r
         return {"ok": False, "why": f"unknown action {action!r}"}
 
     # ---- setup
@@ -405,7 +414,8 @@ class Hub:
         from .views.web.app import STATIC, Cached, build_collectors, create_app
         self.collectors = build_collectors(self.collector._sampler, self.guard)
         from . import models_ctl
-        from .data.collectors import cpu
+        from .data.collectors import cpu, ports
+        self.collectors["ports"] = Cached(ports.listeners, 3)      # also keeps the open/closed history up to date
         self.collectors.update({"cpu": Cached(cpu.sample, 1.5),    # per-core load + clock for the CPU · GPU card
                                 "model_procs": Cached(models_ctl.model_processes, 5),
                                 "model_desc": Cached(models_ctl.descriptions, 60)})
@@ -556,6 +566,11 @@ class Hub:
             from .views.crash_dialog import parse_unacknowledged_crashes
             events = parse_unacknowledged_crashes()
             return {"ok": True, "count": len(events), "events": events}
+
+        @app.get("/api/ports")
+        def localhost_ports() -> dict:
+            """What listens on this PC and what closed recently (the Localhost card polls this)."""
+            return {"ok": True, **(self.collectors["ports"].get() or {})}
 
         @app.get("/api/top-processes")
         def top_processes() -> dict:

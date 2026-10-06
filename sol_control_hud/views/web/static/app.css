@@ -227,6 +227,18 @@ footer .toggle input { accent-color:var(--cyan); cursor:pointer; }
   padding:6px 10px; border-radius:8px; background:var(--badge); font-size:13px; }
 .crow .meta { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .crow .acts { display:flex; gap:4px; justify-content:flex-end; flex-wrap:wrap; }
+/* Localhost card: one row per listening port (port · what it is · how long · close or why not) */
+.plist { display:flex; flex-direction:column; gap:4px; max-height:300px; overflow-y:auto; padding-right:2px; }
+.prow { display:grid; grid-template-columns:72px minmax(120px, 1fr) 62px auto; gap:10px; align-items:center;
+  padding:6px 10px; border-radius:8px; background:var(--badge); font-size:13px; }
+.prow b { font-variant-numeric:tabular-nums; }
+.prow .meta { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.prow .acts { display:flex; gap:4px; justify-content:flex-end; align-items:center; }
+.prow .pill { font-size:9px; padding:1px 6px; color:var(--amber); }
+@media (max-width:760px) {
+  .prow { grid-template-columns:62px 1fr auto; }
+  .prow .acts { grid-column:1 / span 3; justify-content:flex-start; margin-top:2px; }
+}
 .status { font-size:10px; letter-spacing:.08em; padding:2px 8px; border-radius:10px; border:1px solid currentColor; text-transform:uppercase; white-space:nowrap; }
 .status.queued, .status.running { color:var(--cyan); } .status.running { animation:pulse 1.4s ease-in-out infinite; }
 .status.done { color:var(--green); } .status.paused, .status.draft, .status.cancelled { color:var(--dim); }
