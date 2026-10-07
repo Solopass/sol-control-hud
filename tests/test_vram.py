@@ -125,10 +125,10 @@ def test_verdict_without_a_loaded_model(tmp_path):
     none_loaded = {"up": True, "loaded": []}
     fits = guard(tmp_path).update(gpu_block({pm(200): 2.1}, {}), none_loaded)
     assert fits["verdict"] == "FITS" and fits["need"]["source"] == "estimate"
-    # sol-fast's seed need is 7.9 GB since v2 (Gemma 12B): card 15.9 - others 7.6 - 7.9 = 0.4 spare -> TIGHT
-    tight = guard(tmp_path).update(gpu_block({pm(200): 2.1, pm(300): 5.5}, {}), none_loaded)
+    # sol-fast's seed need is 7.1 GB (Gemma 12B pinned 8k, q8_0 KV): card 15.9 - others 8.4 - 7.1 = 0.4 spare -> TIGHT
+    tight = guard(tmp_path).update(gpu_block({pm(200): 2.1, pm(300): 6.3}, {}), none_loaded)
     assert tight["verdict"] == "TIGHT"
-    wont = guard(tmp_path).update(gpu_block({pm(200): 2.3, pm(300): 5.5, pm(500): 0.4, pm(600): 0.4}, {}), none_loaded)
+    wont = guard(tmp_path).update(gpu_block({pm(200): 2.3, pm(300): 6.5, pm(500): 0.4, pm(600): 0.4}, {}), none_loaded)
     assert wont["verdict"] == "WONT_FIT" and wont["spare_gb"] < 0
 
 

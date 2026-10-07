@@ -22,12 +22,13 @@ NOT_MOVABLE = {"dwm", "explorer", "csrss", "RadeonSoftware", "AMDRSServ", "AMDRS
 
 # (num_ctx, GB on the card) until a real load is observed. sol-coder / sol-specialist split with the CPU by design.
 SEED_NEEDS = {
-    # Local AI v2 (2026-09-25, llama.cpp router; OBVLT reports\ai-v2-bench.md). The Ollama-era values are in git history.
-    "sol-fast": (32768, 7.9),      # Gemma 4 12B QAT + MTP, fully on the card
-    "sol-vision": (32768, 7.9),    # same process as sol-fast
-    "sol-smart": (32768, 9.4),     # gpt-oss-20b, experts past the margin go to RAM on purpose
+    # Local AI v2 (2026-09-25, dual-lane overhaul 2026-10-07; OBVLT reports\ai-v2-bench.md).
+    "sol-fast": (8192, 7.1),        # Gemma 4 12B QAT + MTP, pinned 8k ctx, q8_0 KV cache
+    "sol-vision": (8192, 7.9),      # Gemma 4 12B QAT + MTP + mmproj F16
+    "sol-smart": (32768, 9.4),      # gpt-oss-20b, experts past the margin go to RAM on purpose
+    "sol-long": (65536, 10.2),      # gpt-oss-20b at 65k context
     "sol-specialist": (32768, 12.5),  # Away: Qwen3.8-27B GSQ + MTP, whole card
-    "sol-coder": (32768, 11.0),    # Away: MoE with experts in RAM (fit-target)
+    "sol-coder": (32768, 11.0),     # Away: MoE with experts in RAM (fit-target)
 }
 NEEDS_FILE = DATA_DIR / "vram-needs.json"
 
