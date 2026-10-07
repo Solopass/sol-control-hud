@@ -66,3 +66,21 @@ def test_a_failing_reload_is_reported_not_raised():
 def test_no_model_loaded_is_not_an_error():
     d = decide(HealState(), now=1.0, evicted=True, model=None, busy=False, fits=True)
     assert not d.heal and "no model" in d.why
+
+
+def test_hud_heal_is_off_by_default_the_watcher_heals(tmp_path, monkeypatch):
+    """Since 2026-10-07 sol-llm-watch.ps1 heals spills (waiting while the model is busy); two healers could reload
+    twice, so the HUD's own heal only runs when hub-settings.json says "hud_heal": true."""
+    from sol_control_hud import hub
+    monkeypatch.setattr(hub, "SETTINGS_FILE", tmp_path / "hub-settings.json")
+    h = hub.Hub(dict(hub.DEFAULTS), False, False)
+    h._heal_state = HealState()
+    called = []
+    monkeypatch.setattr(hub.heal, "decide", lambda *a, **k: called.append(1) or Decision(False, "x"))
+    snap = type("S", (), {"vram_guard": {"available": True, "evicted": True}, "ai_mode": "desk", "gpu": {}})()
+    h._maybe_heal(snap)
+    assert called == []
+    h.settings["hud_heal"] = True
+    h._prev_others_gb, h._last_big_vram_change = None, 0.0
+    h._maybe_heal(snap)
+    assert called == [1]

@@ -1,4 +1,5 @@
-# Runbook step 10: recording or URL -> transcript (media-api, parakeet) -> summary (sol-fast) -> Obsidian note.
+# Runbook step 10: recording or URL -> transcript (media-api, parakeet) -> notes per part + merged summary (sol-fast)
+# -> Obsidian note.
 # Run: .\.venv\Scripts\python.exe -m sol_hud.pipelines note <file-or-url> [--title "..."]
 name: transcript-note
 fallback: true                  # in Desk mode sol-specialist -> sol-smart (as the old translator did)
@@ -12,31 +13,101 @@ steps:
       engine: "{{ inputs.engine }}"
       language: "{{ inputs.language }}"
 
-  - id: summary
-    model: sol-fast               # Gemma 4 12B, 32k context
-    long_model: sol-long          # gpt-oss-20b at 65k: loaded only when the transcript is too long for sol-fast
+  # Summarized in pieces (2026-10-07): sol-fast holds 8k tokens, so a recording longer than ~15-20 min no longer fits
+  # in one prompt. `parts` cuts the transcript to fit, sol-fast takes notes on each part, and `summary` merges them
+  # (a short recording is one part). long_model stays as the backstop if a part or the merge still doesn't fit.
+  - id: parts
+    tool: split_transcript
+    args:
+      transcription: "{{ steps.transcribe.output }}"
+      model: sol-fast
+
+  - id: part_notes
+    model: sol-fast               # Gemma 4 12B, 8k context
+    long_model: sol-long          # gpt-oss-20b at 65k: only if a part still doesn't fit
     escalate_to: sol-specialist   # Away: Qwen3.8-27B; Desk: sol-smart. Used only if sol-fast fails twice
     retries: 2
-    max_tokens: 8192
-    # Instructions first and transcript last, so the prompt prefix stays the same between runs.
+    max_tokens: 4096
+    for_each: {items: "{{ steps.parts.output.parts }}", as: part}
     prompt: |
-      You turn a transcript into structured notes. Use only what the transcript says; never add facts,
-      names, numbers or dates that are not in it. Keep names, amounts and dates exactly as transcribed.
+      You take notes on one part of a transcript. Use only what this part says; never add facts, names,
+      numbers or dates that are not in it. Keep names, amounts and dates exactly as transcribed.
 
-      - overview: 2-4 sentences on what the recording is about and its outcome.
-      - key_points: the most important points in order, 3-8 for longer recordings (fewer only if the
-        recording is very short). Summarize; don't copy every sentence. "at" = where the point is made,
+      - summary: 1-3 sentences on what this part covers.
+      - key_points: the important points in this part, in order (up to 6). "at" = where the point is made,
         written like 00:01:05 (no brackets).
       - action_items: tasks someone committed to or was asked to do. owner = the person named, or "unknown".
-        due = the deadline in the transcript's own words (e.g. "March 1", "Friday afternoon"), or "none".
-        Never put a timestamp or an invented time in due. Empty list if there are none.
-      - decisions: things that were agreed or decided. Empty list if none.
+        due = the deadline in the transcript's own words, or "none". Empty list if none.
+      - decisions: things agreed or decided. Empty list if none.
       - dates: every date or deadline mentioned, with what it is for.
       - people: names of people mentioned.
 
       Title: {{ steps.transcribe.output.title }}
-      Transcript (timestamps in [HH:MM:SS]):
-      {{ steps.transcribe.output.timestamped_text }}
+      Part {{ part.n }} of {{ part.of }} ({{ part.start }} to {{ part.end }}; timestamps in [HH:MM:SS]):
+      {{ part.text }}
+    schema:
+      type: object
+      additionalProperties: false
+      required: [summary, key_points, action_items, decisions, dates, people]
+      properties:
+        summary: {type: string}
+        key_points:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [point, at]
+            properties:
+              point: {type: string}
+              at: {type: string, pattern: "^\\d{2}:\\d{2}:\\d{2}$"}
+        action_items:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [task, owner, due]
+            properties:
+              task: {type: string}
+              owner: {type: string}
+              due: {type: string}
+        decisions: {type: array, items: {type: string}}
+        dates:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [date, what]
+            properties:
+              date: {type: string}
+              what: {type: string}
+        people: {type: array, items: {type: string}}
+    checks:
+      - {path: summary, min_length: 15}
+
+  - id: summary
+    model: sol-fast
+    long_model: sol-long          # only for a very long recording whose part notes together exceed 8k
+    escalate_to: sol-specialist
+    retries: 2
+    max_tokens: 8192
+    # Instructions first and the notes last, so the prompt prefix stays the same between runs.
+    prompt: |
+      You turn notes on the parts of one recording into structured notes for the whole recording. Use only
+      what the notes say; never add facts, names, numbers or dates that are not in them. Keep names, amounts
+      and dates exactly as written.
+
+      - overview: 2-4 sentences on what the recording is about and its outcome.
+      - key_points: the most important points across all parts, in order, 3-8 for longer recordings (fewer
+        only if it is very short). Merge repeats. Keep each point's "at" timestamp (like 00:01:05).
+      - action_items: every task from the parts, merged where they are the same task. Keep owner and due as
+        written ("unknown" / "none" when missing). Never put a timestamp or an invented time in due.
+      - decisions: everything agreed or decided. Empty list if none.
+      - dates: every date or deadline, with what it is for, without repeats.
+      - people: everyone named, without repeats.
+
+      Title: {{ steps.transcribe.output.title }}
+      Notes on each part, in order ({{ steps.parts.output.count }} part(s)):
+      {{ steps.part_notes.output }}
     schema:
       type: object
       additionalProperties: false

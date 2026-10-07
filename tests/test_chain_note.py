@@ -193,3 +193,13 @@ def test_check_command_understands_chain_notes(env):
     bad = chains / "B.md"; bad.write_text("## A\nmodel: sol-nonexistent\nhi\n", encoding="utf-8")
     assert check_file(good) == []
     assert any("sol-nonexistent" in p for p in check_file(bad))
+
+
+def test_loop_parts_fit_the_steps_model(monkeypatch):
+    """sol-fast holds 8k since 2026-10-07: fixed 20k file chunks / 16k group parts sent every big one to sol-long."""
+    from sol_control_hud.chains import chain_note, llm
+    monkeypatch.setattr(llm, "load_registry", lambda path=None: {"sol-fast": {"num_ctx": 8192}, "sol-smart": {"num_ctx": 32768}})
+    assert chain_note.part_tokens("sol-fast", chain_note.CHUNK_TOKENS) == 8192 - chain_note.PART_RESERVE_TOKENS
+    assert chain_note.part_tokens("sol-fast", chain_note.GROUP_TOKENS) == 8192 - chain_note.PART_RESERVE_TOKENS
+    assert chain_note.part_tokens("sol-smart", chain_note.CHUNK_TOKENS) == chain_note.CHUNK_TOKENS
+    assert chain_note.part_tokens("unknown", 20000) == 20000

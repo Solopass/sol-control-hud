@@ -148,10 +148,15 @@ def test_example_workflow_file_is_valid():
     from pathlib import Path
     from sol_control_hud.chains.workflow import load
     wf = load(Path(__file__).parent.parent / "workflows" / "transcript-note.yaml")
-    assert [s.id for s in wf.steps] == ["transcribe", "summary", "note"]
+    assert [s.id for s in wf.steps] == ["transcribe", "parts", "part_notes", "summary", "note"]
 
 
 def test_render_and_checks():
     assert render("Hi {{ inputs.name }}", {"inputs": {"name": "Sol"}}) == "Hi Sol"
     with pytest.raises(StepFailure):
         run_checks({"a": "x"}, [{"path": "a", "matches": r"^\d+$"}])
+
+
+def test_numbers_render_plainly():
+    """yaml.safe_dump(1) is '1\n...': the document-end marker used to land in prompts ("Part 1\n... of 5")."""
+    assert render("Part {{ p.n }} of {{ p.of }}, {{ p.x }}", {"p": {"n": 1, "of": 5, "x": 2.5}}) == "Part 1 of 5, 2.5"

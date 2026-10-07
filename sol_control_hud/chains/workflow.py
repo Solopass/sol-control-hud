@@ -197,7 +197,11 @@ def _lookup(ref: str, context: dict) -> object:
 def render(template: str, context: dict) -> str:
     def value(match: re.Match) -> str:
         cur = _lookup(match.group(1), context)
-        return cur if isinstance(cur, str) else yaml.safe_dump(cur, default_flow_style=True, allow_unicode=True).strip()
+        if isinstance(cur, str):
+            return cur
+        out = yaml.safe_dump(cur, default_flow_style=True, allow_unicode=True).strip()
+        # a lone number/bool dumps as "3\n...": that document-end marker landed in prompts ("Part 1\n... of 5")
+        return out[:-4] if out.endswith("\n...") else out
     return _REF.sub(value, template)
 
 

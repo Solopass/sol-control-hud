@@ -201,7 +201,8 @@ DEFAULT_FONT_SCALE = "normal"
 
 # Models available on the llama.cpp router (http://127.0.0.1:11440)
 AI_MODELS: list[tuple[str, str]] = [
-    ("sol-fast", "sol-fast (Gemma 4 12B · Fast · Vision)"),
+    ("sol-fast", "sol-fast (Gemma 4 12B · Fast · 8k)"),
+    ("sol-vision", "sol-vision (Gemma 4 12B · Images)"),     # split from sol-fast 2026-10-07: loads the vision module
     ("sol-smart", "sol-smart (gpt-oss-20b · Reasoning)"),
     ("sol-long", "sol-long (gpt-oss-20b · 65k Context)"),
 ]

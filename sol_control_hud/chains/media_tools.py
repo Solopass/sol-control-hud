@@ -229,4 +229,55 @@ def write_note(args: dict, ctx: ToolContext) -> dict:
     return {"path": str(path), "link": link}
 
 
-TOOLS = {"transcribe": transcribe, "write_note": write_note}
+CHARS_PER_TOKEN = 3.0       # conservative, same as llm.py: real transcripts run ~3.4-4 chars a token
+PART_RESERVE_TOKENS = 2948  # instructions + schema (~900) + the answer room the runner keeps (2048)
+
+
+def split_transcript(args: dict, ctx: ToolContext) -> dict:
+    """Cut a transcript into parts that each fit `model` (sol-fast holds 8k since 2026-10-07), so long recordings are
+    summarized in pieces on the fast model instead of moving to sol-long. Parts end on segment boundaries and keep
+    their [HH:MM:SS] timestamps; a short recording is one part.
+
+    args: transcription (transcribe output), model (whose num_ctx sets the size), max_part_tokens (optional cap)."""
+    transcription = args.get("transcription") or {}
+    segments = transcription.get("segments") or []
+    if not segments:
+        text = str(transcription.get("timestamped_text") or transcription.get("full_text") or "")
+        segments = [{"start": 0.0, "end": 0.0, "text": line} for line in text.splitlines() if line.strip()]
+    ctx_tokens = (load_registry().get(str(args.get("model") or "")) or {}).get("num_ctx") or 8192
+    budget = int(ctx_tokens) - PART_RESERVE_TOKENS
+    if args.get("max_part_tokens"):
+        budget = min(budget, int(args["max_part_tokens"]))
+    limit = max(200, int(budget * CHARS_PER_TOKEN))
+
+    parts, lines, size = [], [], 0
+    first = last = 0.0
+
+    def close():
+        if lines:
+            parts.append({"start": timestamp(first), "end": timestamp(last), "text": "\n".join(lines)})
+
+    for seg in segments:
+        start = seg.get("start") or 0
+        line = f"[{timestamp(start)}] {seg.get('text', '')}".strip()
+        while len(line) > limit:                       # one huge segment (no pauses): cut it, keep its timestamp
+            close()
+            head, line = line[:limit], f"[{timestamp(start)}] …" + line[limit:]
+            parts.append({"start": timestamp(start), "end": timestamp(seg.get("end") or start), "text": head})
+            lines, size = [], 0
+        if lines and size + len(line) + 1 > limit:
+            close()
+            lines, size = [], 0
+        if not lines:
+            first = start
+        lines.append(line)
+        size += len(line) + 1
+        last = seg.get("end") or start
+    close()
+    for i, p in enumerate(parts, 1):
+        p.update({"n": i, "of": len(parts)})
+    ctx.note("transcript split", parts=len(parts), chars_per_part=limit)
+    return {"count": len(parts), "parts": parts}
+
+
+TOOLS = {"transcribe": transcribe, "write_note": write_note, "split_transcript": split_transcript}

@@ -884,7 +884,8 @@ function getPaletteItems(query) {
     { label: 'Inspect & Acknowledge Crashes', cat: 'Action', run: () => { closePalette(); post('/api/action', { action: 'ack_crashes' }).then((r) => toast(r.why)); } },
     { label: 'Unload All Local AI Models', cat: 'AI', run: () => { closePalette(); post('/api/action', { action: 'models_unload_all' }).then((r) => toast(r.why)); } },
     { label: 'Start Away Mode + Sleep', cat: 'System', run: () => { closePalette(); post('/api/action', { action: 'away-sleep' }).then((r) => toast(r.why)); } },
-    { label: 'Load sol-fast (Gemma 4 12B Vision)', cat: 'Model', run: () => { closePalette(); post('/api/action', { action: 'model', target: 'sol-fast', op: 'load' }).then((r) => toast(r.why)); } },
+    { label: 'Load sol-fast (Gemma 4 12B, fast, 8k context)', cat: 'Model', run: () => { closePalette(); post('/api/action', { action: 'model', target: 'sol-fast', op: 'load' }).then((r) => toast(r.why)); } },
+    { label: 'Load sol-vision (Gemma 4 12B with images)', cat: 'Model', run: () => { closePalette(); post('/api/action', { action: 'model', target: 'sol-vision', op: 'load' }).then((r) => toast(r.why)); } },
     { label: 'Load sol-smart (gpt-oss-20b Reasoning)', cat: 'Model', run: () => { closePalette(); post('/api/action', { action: 'model', target: 'sol-smart', op: 'load' }).then((r) => toast(r.why)); } },
     { label: 'Load sol-long (gpt-oss-20b 65k Context)', cat: 'Model', run: () => { closePalette(); post('/api/action', { action: 'model', target: 'sol-long', op: 'load' }).then((r) => toast(r.why)); } },
   ];

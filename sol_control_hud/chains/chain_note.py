@@ -83,6 +83,18 @@ _G_CHANGES = re.compile(r"^changes in (.+?) since (?:the )?last review$", re.I)
 _REF = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 _GROUPED = re.compile(r"^(.+?)\s+grouped by ([a-z_]\w*)$", re.I)
 GROUP_TOKENS = 16000   # one part of a `grouped by` loop: leaves room in a 32k model for the prompt and the answer
+PART_RESERVE_TOKENS = 3000   # the step's own instructions (~1k) + the answer room the runner keeps (2048)
+
+
+def part_tokens(model: str | None, default: int) -> int:
+    """How big one file chunk / group part may be for `model`: the fixed default, but never more than its context
+    leaves room for. sol-fast holds 8k since 2026-10-07, so 20k chunks sent every big file to sol-long."""
+    from .llm import load_registry
+    try:
+        ctx = (load_registry().get(model or "") or {}).get("num_ctx")
+    except (OSError, ValueError, KeyError):
+        ctx = None
+    return max(1000, min(default, int(ctx) - PART_RESERVE_TOKENS)) if ctx else default
 
 
 class ChainError(ValueError):
@@ -355,7 +367,7 @@ def to_workflow(chain: Chain) -> dict:
         if s.loop and s.loop["kind"] == "files":
             steps.append({"id": f"{s.id}__files", "tool": "list_files", "args": {
                 "folder": _translate(s.loop["folder"], chain, idx, where), "glob": s.loop["glob"], "recursive": True,
-                "chunk_tokens": CHUNK_TOKENS, "since_days": s.loop["days"]}})
+                "chunk_tokens": part_tokens(step.get("model"), CHUNK_TOKENS), "since_days": s.loop["days"]}})
             source = f"{{{{ steps.{s.id}__files.output }}}}"
         elif s.loop and s.loop.get("group"):
             src = _translate(s.loop["source"], chain, idx, where, raw=True)
@@ -366,7 +378,7 @@ def to_workflow(chain: Chain) -> dict:
             src_step = next(c for c in chain.steps if c.id == prev["id"])
             steps.append({"id": f"{s.id}__items", "tool": "group_items", "args": {
                 "items": prev["for_each"]["items"], "outputs": src, "key": s.loop["group"],
-                "hide": src_step.settings.get("hide", ""), "chunk_tokens": GROUP_TOKENS}})
+                "hide": src_step.settings.get("hide", ""), "chunk_tokens": part_tokens(step.get("model"), GROUP_TOKENS)}})
             source = f"{{{{ steps.{s.id}__items.output }}}}"
         elif s.loop:
             src = _translate(s.loop["source"], chain, idx, where, raw=True)

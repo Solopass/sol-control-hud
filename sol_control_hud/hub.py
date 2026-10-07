@@ -819,7 +819,14 @@ class Hub:
 
     def _maybe_heal(self, snap) -> None:
         """A model that spilled into system RAM never gets back on its own: reload it (heal.py, VRAM plan step 4).
-        Desk only - in Away a job owns the GPU, and `off` means nothing should load."""
+        Desk only - in Away a job owns the GPU, and `off` means nothing should load.
+
+        Off by default since 2026-10-07: OBVLT's tools/sol-llm-watch.ps1 now heals spills itself (and also runs while
+        the HUD doesn't), waiting while a chain, a queue job or a chat uses the model. Two healers reacting to one spill
+        could reload twice. The HUD still shows the spill (VRAM card, alert); `"hud_heal": true` in hub-settings.json
+        turns this one back on."""
+        if not self.settings.get("hud_heal", False):
+            return
         g = getattr(snap, "vram_guard", None) or {}
         if not g.get("available") or snap.ai_mode != "desk":
             return
