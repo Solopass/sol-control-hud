@@ -27,7 +27,7 @@ projects:
     # 5174, not vite's 5173: speed-reading and Polymatica already use 5173
     start: {cmd: [bun, run, dev, --, --port, '5174', --strictPort]}
     port: 5174
-  korean-karaoke-lyric-video-maker:
+  solang:
     start: {cmd: [bun, server.ts]}
     port: 3000
   solopass-v1:
