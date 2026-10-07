@@ -254,6 +254,13 @@ class Hub:
             try:
                 if action == "ask":
                     files = b.get("files") or []
+                    if b.get("now"):
+                        r = control.ask_now(str(b.get("title", "")), str(b.get("question", "")),
+                                            [str(x) for x in files] if isinstance(files, list) else [],
+                                            str(b.get("model") or "sol-smart"))
+                        log(f"asked now: {r['job']}")
+                        return {"ok": True, "why": f"answering now on {b.get('model') or 'sol-smart'} "
+                                                   "(it shows in Answers when done)", **r}
                     r = control.queue_ask(str(b.get("title", "")), str(b.get("question", "")),
                                           [str(x) for x in files] if isinstance(files, list) else [], str(b.get("model") or "sol-away"))
                     log(f"asked overnight: {r['job']}")
@@ -589,7 +596,7 @@ class Hub:
         @app.get("/api/control")
         def control_state() -> dict:
             from . import control
-            return {"models": control.away_models(), "asks": control.list_asks(), "answers": control.list_answers(),
+            return {"models": control.away_models(), "desk_models": control.desk_models(), "asks": control.list_asks(), "answers": control.list_answers(),
                     "chains": control.list_chains()}
 
         @app.get("/api/answer")

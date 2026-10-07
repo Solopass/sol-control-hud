@@ -581,10 +581,12 @@ let control = null;
 async function loadControl() {
   if (document.hidden) return;
   try { control = await (await fetch('/api/control', { cache: 'no-store' })).json(); } catch (e) { return; }
-  const sel = $('askModel');
-  if (!sel.options.length) sel.innerHTML = control.models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+  if (!$('askModel').options.length) askMode();
+  const askState = (a) => a.state.startsWith('running') ? `<span style="color:var(--cyan)">${esc(a.state)}</span>`
+    : a.state.startsWith('failed') ? `<span style="color:var(--red)" title="${esc(a.state)}">failed</span><button class="mini ghost" data-remove="${esc(a.job)}">clear</button>`
+    : `waiting<button class="mini ghost" data-remove="${esc(a.job)}">remove</button>`;
   setHTML($('askList'), control.asks.length ? control.asks.map((a) => `<div class="item"><span>${esc(a.title)} <span class="dim">· ${esc(a.model)}</span></span>` +
-    `<span>${a.state === 'running' ? '<span style="color:var(--cyan)">running</span>' : `waiting<button class="mini ghost" data-remove="${esc(a.job)}">remove</button>`}</span></div>`).join('')
+    `<span>${askState(a)}</span></div>`).join('')
     : '<div class="empty">nothing waiting</div>');
   setHTML($('answerList'), control.answers.length ? control.answers.map((a) => `<div class="item link" data-answer="${esc(a.file)}">` +
     `<span><b>${esc(a.title)}</b> <span class="dim">· ${esc(when(a.time))}${a.model ? ' · ' + esc(a.model) : ''}</span></span><span class="pv">${esc(a.preview)}</span></div>`).join('')
@@ -686,11 +688,26 @@ document.addEventListener('click', async (e) => {
   if (r?.why) toast(r.why);
   loadControl();
 }, true);
+// "Run now" swaps the Away models (tonight) for the Desk ones (right away); the choice is remembered per browser.
+function askMode() {
+  if (!control) return;
+  const now = $('askNow').checked, list = now ? (control.desk_models || []) : control.models;
+  try { localStorage.setItem('askNow', now ? '1' : ''); } catch (e) { /* private window */ }
+  $('askModel').innerHTML = list.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+  if (now) $('askModel').value = 'sol-smart';
+  $('askGo').textContent = now ? 'Ask now' : 'Queue for tonight';
+  $('askHead').textContent = now ? 'Ask it now' : 'Ask it overnight';
+  $('askSub').textContent = now ? 'a Desk model answers right away (takes its turn on the GPU) · answer in 1Notebook\\Answers'
+    : 'runs in the next Away session · answer in 1Notebook\\Answers';
+}
+try { $('askNow').checked = localStorage.getItem('askNow') === '1'; } catch (e) { /* private window */ }
+$('askNow').onchange = askMode;
 $('askForm').onsubmit = async (e) => {
   e.preventDefault();
   const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
   const files = $('askFiles').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  const r = await post('/api/action', { action: 'ask', title: $('askTitle').value, question: $('askQuestion').value, files, model: $('askModel').value });
+  const r = await post('/api/action', { action: 'ask', title: $('askTitle').value, question: $('askQuestion').value, files,
+    model: $('askModel').value, now: $('askNow').checked });
   btn.disabled = false; toast(r.why || (r.ok ? 'queued' : 'failed'));
   if (r.ok) { $('askTitle').value = ''; $('askQuestion').value = ''; $('askFiles').value = ''; }
   loadControl();

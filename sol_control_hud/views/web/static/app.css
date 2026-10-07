@@ -222,6 +222,7 @@ footer .toggle input { accent-color:var(--cyan); cursor:pointer; }
 .ask input:focus, .ask textarea:focus, .ask select:focus { outline:none; border-color:var(--cyan); }
 .ask details summary { cursor:pointer; color:var(--dim); font-size:12px; margin-bottom:6px; }
 .askrow { display:flex; gap:8px; } .askrow select { flex:1; } .askrow button { white-space:nowrap; }
+.asknow { display:flex; align-items:center; gap:6px; white-space:nowrap; color:var(--muted); font-size:13px; cursor:pointer; }
 .chainlist { display:flex; flex-direction:column; gap:4px; }
 .crow { display:grid; grid-template-columns:minmax(120px, 1.2fr) auto minmax(90px, 1fr) auto; gap:10px; align-items:center;
   padding:6px 10px; border-radius:8px; background:var(--badge); font-size:13px; }

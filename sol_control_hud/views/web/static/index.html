@@ -132,14 +132,15 @@
   </article>
 
   <article class="card wide" id="c-ask">
-    <h2>Ask it overnight <span class="dim">runs in the next Away session · answer in 1Notebook\Answers</span></h2>
+    <h2><span id="askHead">Ask it overnight</span> <span class="dim" id="askSub">runs in the next Away session · answer in 1Notebook\Answers</span></h2>
     <form class="ask" id="askForm" autocomplete="off">
       <input id="askTitle" maxlength="60" placeholder="Title (optional)">
       <textarea id="askQuestion" rows="3" placeholder="Your question or task for the big model…" required></textarea>
       <details><summary>Add files (optional)</summary>
         <textarea id="askFiles" rows="2" placeholder="One path per line, e.g. D:\OBVLT\plans\SOL_CONTROL_HUD_NEXT_PLAN.md (the same folders chains may read)"></textarea>
       </details>
-      <div class="askrow"><select id="askModel"></select><button type="submit">Queue for tonight</button></div>
+      <div class="askrow"><label class="asknow" title="Answer it right away with a Desk model instead of tonight"><input type="checkbox" class="switch" id="askNow"> Run now</label>
+        <select id="askModel"></select><button type="submit" id="askGo">Queue for tonight</button></div>
     </form>
     <div class="cols">
       <div><h3>Waiting</h3><div class="list" id="askList"></div></div>

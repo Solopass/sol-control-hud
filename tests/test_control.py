@@ -132,3 +132,75 @@ def test_edit_a_chains_schedule(dirs):
             control.set_schedule("Code review", bad)
     with pytest.raises(control.ControlError):
         control.set_schedule("Nope", "daily 07:00")
+
+
+class _Reply:
+    def __init__(self, content, model="sol-fast"):
+        self.content, self.finish_reason, self.model = content, "stop", model
+
+
+class _Client:
+    def __init__(self, content="Five dinners: ..."):
+        self.content, self.calls = content, []
+
+    def chat(self, model, messages, *, max_tokens):
+        self.calls.append((model, messages, max_tokens))
+        return _Reply(self.content, model)
+
+
+def _no_lock(what, timeout=None):
+    import contextlib
+    return contextlib.nullcontext()
+
+
+@pytest.fixture
+def desk(monkeypatch):
+    from sol_control_hud.chains import llm
+    monkeypatch.setattr(llm, "load_registry", lambda: {"sol-fast": {"num_ctx": 8192}, "sol-smart": {"num_ctx": 32768}})
+    control._now_jobs.clear()
+    yield
+    control._now_jobs.clear()
+
+
+def test_ask_now_answers_right_away_in_the_overnight_format(dirs, desk):
+    _, ans, _ = dirs
+    client = _Client()
+    r = control.ask_now("Pasta?", "Give me 5 dinners\nquick ones", model="sol-fast", now=datetime(2026, 10, 7, 12, 0),
+                        client=client, mode="desk", lock=_no_lock, background=False)
+    assert r["answer"] == str(ans / "2026-10-07 Pasta.md") and control.list_asks() == []   # done: off the Waiting list
+    model, messages, max_tokens = client.calls[0]
+    assert model == "sol-fast" and max_tokens == 4096 and messages[0]["content"].startswith("Give me 5 dinners")
+    text = (ans / "2026-10-07 Pasta.md").read_text(encoding="utf-8")
+    assert "source: SOL Control HUD (ask now)" in text and "model: sol-fast" in text and "asked: 2026-10-07T12:00:00" in text
+    assert "# Pasta\n\n> Give me 5 dinners\n> quick ones\n\n---\n\nFive dinners: ...\n" in text
+    a = control.list_answers()[0]
+    assert a["title"].endswith("Pasta") and a["model"] == "sol-fast"
+    again = control.ask_now("Pasta?", "more", model="sol-fast", now=datetime(2026, 10, 7, 12, 0),
+                            client=client, mode="desk", lock=_no_lock, background=False)
+    assert again["answer"].endswith("2026-10-07 Pasta (2).md")                 # never overwrites an answer
+
+
+def test_ask_now_refusals_and_failures(dirs, desk):
+    with pytest.raises(control.ControlError, match="Desk model"):
+        control.ask_now("t", "q", model="sol-away", mode="desk")
+    with pytest.raises(control.ControlError, match="off"):
+        control.ask_now("t", "q", model="sol-fast", mode="off")
+    with pytest.raises(control.ControlError, match="Away mode"):
+        control.ask_now("t", "q", model="sol-fast", mode="away")
+    with pytest.raises(control.ControlError, match="more context"):
+        control.ask_now("t", "x" * 20000, model="sol-fast", mode="desk")     # fits sol-smart, not sol-fast's 8k
+    control.ask_now("Empty", "q", model="sol-fast", mode="desk", client=_Client(""), lock=_no_lock, background=False)
+    [a] = control.list_asks()
+    assert a["state"].startswith("failed: empty answer") and a["now"]
+    with pytest.raises(control.ControlError, match="no such"):
+        control.remove_ask("now-nothing")
+    control.remove_ask(a["job"])                                              # ✕ clears a failed one
+    assert control.list_asks() == []
+
+
+def test_ask_now_through_the_dashboard(dirs, desk, monkeypatch):
+    from sol_control_hud.chains import router
+    monkeypatch.setattr(router, "engine_mode", lambda: "away")
+    from sol_control_hud.hub import Hub
+    r = Hub.do_action(Hub.__new__(Hub), "ask", "", {"question": "q", "model": "sol-fast", "now": True})
+    assert not r["ok"] and "Away mode" in r["why"]
