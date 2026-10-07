@@ -312,6 +312,8 @@ class Hub:
             write_crash_ack(ACK_FILE)
             log("crashes acknowledged via web dashboard")
             return {"ok": True, "why": "Crash events acknowledged and cleared"}
+        if action in ("project", "media"):
+            return self._launch(action, target, str((body or {}).get("op", "")))
         if action == "close_port":
             # ports.close_listener looks the port up itself and refuses the AI stack, Windows services and us
             from .data.collectors import ports
@@ -322,6 +324,65 @@ class Hub:
                 self.collectors["ports"].value = None      # the card lists what's left on its next poll
             return r
         return {"ok": False, "why": f"unknown action {action!r}"}
+
+    # ---- the Projects and Media APIs cards
+    def _launchpad(self) -> tuple[dict, dict, list[dict]]:
+        """(registry, WSL probe, Windows listeners): what both cards are built from."""
+        from .data.collectors import projects
+        reg = projects.load_registry()
+        probe = self.collectors["media_probe"].get() if hasattr(self, "collectors") else {}
+        listening = ((self.collectors["ports"].get() or {}).get("listening") or []) if hasattr(self, "collectors") else []
+        return reg, probe if isinstance(probe, dict) else {}, listening
+
+    def projects_payload(self) -> dict:
+        from .data.collectors import media_apis, projects
+        reg, probe, listening = self._launchpad()
+        return projects.collect(listening, media_apis.running_ports(reg, probe), registry=reg)
+
+    def media_payload(self) -> dict:
+        from .data.collectors import media_apis
+        reg, probe, listening = self._launchpad()
+        wsl_state = (self.collectors["wsl"].get() or {}).get("state") if hasattr(self, "collectors") else None
+        return media_apis.collect(reg, listening, wsl_state, probe=probe)
+
+    def _refresh_launchpad(self) -> None:
+        """After a start / stop: look again on the next poll instead of serving the cached state."""
+        for key in ("ports", "media_probe", "projects", "media", "wsl"):
+            if hasattr(self, "collectors") and key in self.collectors:
+                self.collectors[key].value = None
+
+    def _launch(self, kind: str, name: str, op: str) -> dict:
+        from . import launcher
+        from .data.collectors import projects
+        reg = projects.load_registry()
+        self._refresh_launchpad()                     # act on the current state, not a cached one
+        try:
+            rows = self.projects_payload()["projects"]
+            tiles = self.media_payload()["tiles"]
+            if kind == "project":
+                if op == "start":
+                    r = launcher.start_project(reg, name, rows, tiles)
+                elif op == "stop":
+                    r = launcher.stop_project(reg, name, rows, tiles)
+                elif op in ("folder", "editor", "file"):
+                    r = launcher.open_project(reg, name, op)
+                else:
+                    r = {"ok": False, "why": f"unknown project action {op!r}"}
+            elif op == "start":
+                r = launcher.start_media(reg, name, tiles, rows)
+            elif op == "stop":
+                r = launcher.stop_media(reg, name, tiles, rows)
+            elif op == "folder":
+                r = launcher.open_media_folder(reg, name)
+            else:
+                r = {"ok": False, "why": f"unknown media action {op!r}"}
+        except launcher.LaunchError as e:
+            r = {"ok": False, "why": str(e)}
+        if op in ("start", "stop"):
+            log(f"{kind} {op} {name}: {r.get('why')}")
+            projects.forget_git(name)
+            self._refresh_launchpad()
+        return r
 
     # ---- setup
     def run(self) -> None:
@@ -421,6 +482,14 @@ class Hub:
                                 "model_desc": Cached(models_ctl.descriptions, 60)})
         self.collectors.update({"away": Cached(feed.away_info, 1.5), "chains": Cached(lambda: feed._read_json(feed.LLM_DIR / "chains.json"), 1.5),
                                 "activity": Cached(feed.activity, 5)})
+        from .data.collectors import media_apis, projects
+
+        def probe() -> dict:          # one wsl.exe for every media service, never while WSL is stopped
+            reg = projects.load_registry()
+            return media_apis.wsl_probe(reg["media"], media_apis.wsl_port_list(reg), reg.get("wsl_distro", "Ubuntu-24.04"),
+                                        (self.collectors["wsl"].get() or {}).get("state"))
+        self.collectors.update({"media_probe": Cached(probe, 10), "projects": Cached(self.projects_payload, 4),
+                                "media": Cached(self.media_payload, 4)})
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -571,6 +640,28 @@ class Hub:
         def localhost_ports() -> dict:
             """What listens on this PC and what closed recently (the Localhost card polls this)."""
             return {"ok": True, **(self.collectors["ports"].get() or {})}
+
+        @app.get("/api/projects")
+        def projects_list() -> dict:
+            """The Projects card: every folder in D:\\Workspace, its state and whether it runs."""
+            return {"ok": True, **(self.collectors["projects"].get() or {})}
+
+        @app.get("/api/media")
+        def media_list() -> dict:
+            """The Media APIs card. Built without sending a single request to a sleeping service."""
+            return {"ok": True, **(self.collectors["media"].get() or {})}
+
+        @app.get("/api/media-live")
+        def media_live(name: str = "") -> dict:
+            """Live data from a media service that's already running (the tile's "Live" button)."""
+            from . import launcher
+            from .data.collectors import projects
+            self.collectors["media_probe"].value = self.collectors["media"].value = None   # its state right now
+            tiles = (self.collectors["media"].get() or {}).get("tiles") or []
+            try:
+                return launcher.live_media(projects.load_registry(), name, tiles)
+            except launcher.LaunchError as e:
+                return {"ok": False, "why": str(e)}
 
         @app.get("/api/top-processes")
         def top_processes() -> dict:

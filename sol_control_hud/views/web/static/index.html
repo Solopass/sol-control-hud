@@ -97,6 +97,27 @@
     <div class="chainlist" id="chainList"><div class="empty">loading…</div></div>
   </article>
 
+  <article class="card wide" id="c-projects">
+    <h2>
+      <span>Projects <span class="dim" id="projSummary">D:\Workspace</span></span>
+      <div class="notes-controls">
+        <input type="search" id="projSearch" placeholder="Filter projects..." class="mini-search">
+        <button class="mini ghost" id="projHidden" aria-pressed="false" title="Also list finished and hidden projects">+ hidden</button>
+        <button class="mini ghost" id="projRefresh" title="Check again now">⟳</button>
+      </div>
+    </h2>
+    <div class="projlist" id="projList"><div class="empty">loading…</div></div>
+  </article>
+
+  <article class="card wide" id="c-media">
+    <h2>
+      <span>Media APIs <span class="dim" id="mediaSummary">local media services</span></span>
+      <div class="notes-controls"><button class="mini ghost" id="mediaRefresh" title="Check again now">⟳</button></div>
+    </h2>
+    <div class="mtiles" id="mediaTiles"><div class="empty">loading…</div></div>
+    <div class="note">Looking never wakes a service: state comes from systemd and their files on D:. <b>Live</b> asks a running one directly.</div>
+  </article>
+
   <article class="card wide" id="c-ask">
     <h2>Ask it overnight <span class="dim">runs in the next Away session · answer in 1Notebook\Answers</span></h2>
     <form class="ask" id="askForm" autocomplete="off">
@@ -280,5 +301,6 @@
   </div>
 </div>
 <script src="/static/app.js"></script>
+<script src="/static/launchpad.js"></script>
 </body>
 </html>

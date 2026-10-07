@@ -1,0 +1,102 @@
+# The Projects and Media APIs cards: what can't be read from the project folders themselves.
+#
+# Everything else is discovered on each scan of `workspace`: the README title, first sentence and status words
+# (deprecated / retired / finished / paused), the git remote (GitHub link), the last commit, uncommitted changes, and the
+# dev-server command + port from `.claude/launch.json`. A new folder in the workspace shows up without an entry here.
+#
+# The dashboard only ever sends a *name*. Commands, paths and URLs come from this file (or the project's own
+# launch.json), never from the page.
+
+workspace: 'D:\Workspace'
+editor: 'C:\Program Files\Microsoft VS Code\Code.exe'
+wsl_distro: Ubuntu-24.04
+
+# Folded away behind "show hidden" on the card (the value says why).
+hidden:
+  sol-hud: finished 2026-09-26, continued in sol-control-hud
+  sol-hud-away: a second clone of sol-hud
+  solar-station: retired 2026-09-13
+  Textdiff: not needed on the HUD
+  suno-manager: not needed on the HUD
+  'D:': a stray folder from a bad path
+  Ideas: notes, not a project
+
+projects:
+  sol-control-hud:
+    self: true                     # this app: no Start / Stop
+    url: 'http://127.0.0.1:7900/'
+  kiiy2k:
+    # 5174, not vite's 5173: speed-reading and Polymatica already use 5173
+    start: {cmd: [bun, run, dev, --, --port, '5174', --strictPort]}
+    port: 5174
+  korean-karaoke-lyric-video-maker:
+    start: {cmd: [bun, server.ts]}
+    port: 3000
+  solopass-v1:
+    live: 'https://solopass.github.io/solopass-v1/'
+  Polymatica:
+    live: 'https://polymatica.pages.dev'
+  WWenigma:
+    open_file: wwii_cryptography_3d_lab.html     # a standalone build: no server needed
+  omni-tools:
+    title: OmniTools
+    description: Self-hosted browser tools for images, video, audio, PDFs and text (a fork of iib0011/omni-tools).
+    # its node_modules are Linux builds (esbuild/swc linux-x64), so it runs in WSL
+    start: {wsl: 'cd /mnt/d/Workspace/omni-tools && exec npm run dev'}
+    stop: {wsl: 'pkill -f /mnt/d/Workspace/omni-tools/node_modules'}
+    port: 8082
+    runs_in: wsl
+  media-api: {media: media-api}
+  speedman: {media: speedman}
+  voice-savior: {media: voice-savior}
+
+# Media services. `runs_in: wsl` ones sit behind systemd socket activation: a request *starts* them, so the card never
+# sends one unless the service is already running (checked inside WSL in the same call, see media_apis.py).
+media:
+  media-api:
+    title: SOL Media Studio
+    what: download, clip, transcribe, Obsidian notes
+    project: media-api
+    port: 8080
+    runs_in: wsl
+    unit: media-api
+    start: {shortcut: 'D:\Workspace\media-api\Media-Studio-Silent.vbs'}
+    docs: /docs
+    health: /api/v1/health         # only on "Live" (a request during its ~1 s shutdown would start it again)
+    jobs: /api/v1/jobs             # only on "Live" (it counts as activity and postpones the idle shutdown)
+    shutdown: /api/v1/shutdown     # refuses while jobs run
+    jobs_file: 'D:\AI\Cache\media_jobs.json'
+    notes_dir: 'D:\AI\Vault\Transcripts'
+    folder: 'D:\Output'
+  speedman:
+    title: Speedman
+    what: sped-up speech that stays clear
+    project: speedman
+    port: 8081
+    runs_in: wsl
+    unit: speedman
+    start: {shortcut: 'D:\Workspace\speedman\Speedman-Silent.vbs'}
+    docs: /docs
+    # not /health: it pings media-api, which would wake that one up
+    jobs: /api/v1/jobs
+    shutdown: /api/v1/shutdown     # doesn't check for running jobs itself: the HUD asks /api/v1/jobs first
+    folder: 'D:\Audio\Speed'
+  voice-savior:
+    title: Vocal Savior
+    what: tuned, mixed vocals from a raw take
+    project: voice-savior
+    port: 8765
+    runs_in: windows
+    match: vocal_savior            # the listener's command line, to tell it from anything else on :8765
+    start: {cmd: ['D:\Workspace\voice-savior\.venv\Scripts\pythonw.exe', -m, vocal_savior, app], opens_itself: true}
+    # not /health: it pings media-api and speedman
+    jobs: /api/jobs?limit=5
+    shutdown: /api/shutdown
+    jobs_db: 'D:\Audio\Vocals\jobs.sqlite'
+    folder: 'D:\Audio\Vocals\Finished'
+  omni-tools:
+    title: OmniTools
+    what: video, audio, image and PDF tools in the browser
+    project: omni-tools            # started and stopped as the project
+    port: 8082
+    runs_in: wsl

@@ -899,6 +899,8 @@ function getPaletteItems(query) {
     }
   }
 
+  if (typeof launchpadPaletteItems === 'function') items.push(...launchpadPaletteItems());   // launchpad.js
+
   for (const n of allNotesCache) {
     items.push({
       label: `Note: ${n.title} (${n.vault})`,
