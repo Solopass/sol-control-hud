@@ -224,3 +224,22 @@ def test_learned_sizes_are_written_atomically(tmp_path):
     assert not list(tmp_path.glob("*.tmp")), "the temporary file must be renamed, not left behind"
     store.learn("sol-smart", 32768, 12.2)          # a second write replaces the file, still valid JSON
     assert len(json.loads(path.read_text(encoding="utf-8"))) == 2
+
+
+def test_apps_keep_their_own_numbers_when_dwm_reads_absurdly_high(tmp_path):
+    """2026-10-07: dwm's counter read 114 GB on a 16 GB card (it re-counts every window it composes). Apportioning by
+    raw numbers gave it 98% and Brave 0.06 GB of its real 1.14 GB, so the card couldn't say what to close."""
+    reading = dict(
+        dedicated={pm(100): 6.57, pm(200): 114.11, pm(300): 1.14, pm(500): 0.64, pm(600): 0.67},
+        shared={ps(100): 0.62},
+    )
+    g = gpu_block(**reading, used=12.3)
+    v = vram.VramGuard(needs=vram.NeedStore(tmp_path / "needs.json"), confirm=1).update(g, {"up": False})
+    by = {t["name"]: t["gb"] for t in v["top_consumers"]}
+    assert by["brave"] == 1.14 and by["vivaldi"] == 0.67 and by["Discord"] == 0.64
+    assert abs(sum(by.values()) - v["others_gb"]) < 0.05 and by["dwm"] < v["others_gb"]    # the desktop gets the rest
+    assert [t["name"] for t in v["suggest_free"]][:3] == ["brave", "vivaldi", "Discord"]
+    # apps that add up to more than the card total are scaled down to the truth
+    g = gpu_block(dedicated={pm(100): 6.0, pm(300): 3.0, pm(500): 3.0}, shared={}, used=9.0)
+    v = vram.VramGuard(needs=vram.NeedStore(tmp_path / "needs2.json"), confirm=1).update(g, {"up": False})
+    assert abs(sum(t["gb"] for t in v["top_consumers"]) - 3.0) < 0.05

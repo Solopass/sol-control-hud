@@ -17,6 +17,7 @@
   <div class="range" id="range" title="Chart range"><button data-range="1h" class="on">1 h</button><button data-range="24h">24 h</button><button data-range="7d">7 d</button></div>
   <span class="age" id="age">connecting…</span>
   <button id="cmdPaletteBtn" class="mini" title="Command Palette (Ctrl+K)">⌘ Ctrl+K</button>
+  <button id="settingsBtn" class="mini" title="Settings: the app, the ticker, the local AI">⚙ Settings</button>
   <select id="theme" title="Theme (the ticker uses the same one)"></select>
   <button id="tickerBtn" hidden>…</button>
 </header>
@@ -249,6 +250,17 @@
   <span class="dim" id="foot"></span>
 </footer>
 
+<!-- Settings: everything you can change about the app (settings_api.py) -->
+<div class="modal" id="settingsModal" hidden>
+  <div class="sheet settings-sheet">
+    <header>
+      <b>Settings</b>
+      <div class="modal-acts"><span class="dim small">changes apply at once</span><button id="settingsClose" class="ghost">Close</button></div>
+    </header>
+    <div class="settings-body" id="settingsBody"><div class="empty">loading…</div></div>
+  </div>
+</div>
+
 <!-- Markdown Reader & Editor Modal -->
 <div class="modal" id="modal" hidden>
   <div class="sheet">
@@ -313,5 +325,6 @@
 </div>
 <script src="/static/app.js"></script>
 <script src="/static/launchpad.js"></script>
+<script src="/static/settings.js"></script>
 </body>
 </html>

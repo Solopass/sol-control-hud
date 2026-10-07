@@ -261,6 +261,10 @@ class Hub:
                 if action == "ask_remove":
                     control.remove_ask(target)
                     return {"ok": True, "why": "removed from the queue"}
+                if str(b.get("op", "")) == "schedule":
+                    canon = control.set_schedule(target, str(b.get("schedule") or ""))
+                    log(f"chain {target}: schedule {canon or 'removed'} (dashboard)")
+                    return {"ok": True, "why": f"{target}: " + (f"runs {canon}" if canon else "no schedule"), "schedule": canon}
                 status = control.chain_op(target, str(b.get("op", "")))
                 log(f"chain {target}: status {status} (dashboard)")
                 return {"ok": True, "why": f"{target}: {status}", "status": status}
@@ -312,6 +316,14 @@ class Hub:
             write_crash_ack(ACK_FILE)
             log("crashes acknowledged via web dashboard")
             return {"ok": True, "why": "Crash events acknowledged and cleared"}
+        if action == "setting":                   # the dashboard's Settings panel (settings_api.py checks every value)
+            from . import settings_api
+            try:
+                r = settings_api.change(self, target, (body or {}).get("value"))
+            except settings_api.SettingError as e:
+                return {"ok": False, "why": str(e)}
+            log(f"setting {target} = {(body or {}).get('value')!r}: {r.get('why')}")
+            return r
         if action in ("project", "media"):
             return self._launch(action, target, str((body or {}).get("op", "")), body or {})
         if action == "close_port":
@@ -662,6 +674,11 @@ class Hub:
             """What listens on this PC and what closed recently (the Localhost card polls this)."""
             return {"ok": True, **(self.collectors["ports"].get() or {})}
 
+        @app.get("/api/settings")
+        def settings_read() -> dict:
+            from . import settings_api
+            return {"ok": True, **settings_api.read(self)}
+
         @app.get("/api/projects")
         def projects_list() -> dict:
             """The Projects card: every folder in D:\\Workspace, its state and whether it runs."""
@@ -777,6 +794,14 @@ class Hub:
                         self.ticker._open_slide_target(arg)
                 elif name == "theme":
                     self.ticker.set_theme(arg)         # one theme for both views
+                elif name == "ticker_settings":        # the dashboard's Settings (checked in settings_api.py)
+                    self.ticker.apply_new_settings(arg)
+                elif name == "font_scale":
+                    self.ticker.set_font_scale(arg)
+                elif name == "slide":
+                    tag, on = arg
+                    if self.ticker.slides_enabled.get(tag, True) != on:
+                        self.ticker.toggle_slide_enabled(tag)
                 elif name == "exit":
                     self._shutdown(arg)
                     return

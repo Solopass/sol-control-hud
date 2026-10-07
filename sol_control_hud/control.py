@@ -187,6 +187,33 @@ def chain_result(name: str, chains_dir: Path | None = None) -> str:
     return result.read_text(encoding="utf-8", errors="replace")
 
 
+def set_schedule(name: str, schedule: str, chains_dir: Path | None = None) -> str:
+    """Change only `schedule:` in a chain note (empty = no schedule). Checked with the chain runner's own parser and
+    written in its canonical form (`daily 07:00`, `weekly Mon,Thu 09:30`, `on away`). Returns what it says now."""
+    from .chains.chain_daemon import DAYS, ScheduleError, parse_schedule
+    paths = _chain_paths(chains_dir)
+    if name not in paths:
+        raise ControlError("no such chain")
+    text = " ".join(str(schedule or "").split())
+    if not text:
+        chain_note.set_note_props(paths[name], {}, remove=("schedule",))
+        return ""
+    try:
+        sched = parse_schedule(text)
+    except ScheduleError as e:
+        raise ControlError(str(e)) from e
+    if sched["kind"] == "away":
+        canon = "on away"
+    else:
+        if not (0 <= sched["h"] <= 23 and 0 <= sched["m"] <= 59):
+            raise ControlError(f"{sched['h']:02d}:{sched['m']:02d} isn't a time of day")
+        when = f"{sched['h']:02d}:{sched['m']:02d}"
+        names = {i: d.capitalize() for d, i in DAYS.items()}
+        canon = f"daily {when}" if len(sched["days"]) == 7 else f"weekly {','.join(names[d] for d in sched['days'])} {when}"
+    chain_note.set_note_props(paths[name], {"schedule": canon})
+    return canon
+
+
 def chain_op(name: str, op: str, chains_dir: Path | None = None) -> str:
     """run -> queued, pause -> paused (no schedule, no watch), resume -> done (schedules on again), cancel -> the runner
     stops after the current step. Exactly what changing `status:` in the note does."""

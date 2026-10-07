@@ -17,8 +17,9 @@ EVICTED_SHARED_GB = 1.0      # runner memory in system RAM above this = evicted 
                              # settings in sol-llm.ps1 sol-fast keeps ~0.66 GB in RAM by design, at full speed)
 HEADROOM_GB = 0.8            # spare VRAM below this = TIGHT
 DEFAULT_MODEL = "sol-fast"
-LABELS = {"dwm": "Windows desktop (monitors)", "RadeonSoftware": "AMD Adrenalin", "explorer": "Explorer"}
+LABELS = {"dwm": "Windows desktop + shared", "RadeonSoftware": "AMD Adrenalin", "explorer": "Explorer"}
 NOT_MOVABLE = {"dwm", "explorer", "csrss", "RadeonSoftware", "AMDRSServ", "AMDRSSrcExt"}
+COMPOSITORS = {"dwm"}        # its counter re-counts every window it draws: it gets the remainder, not its raw number
 
 # (num_ctx, GB on the card) until a real load is observed. sol-coder / sol-specialist split with the CPU by design.
 SEED_NEEDS = {
@@ -135,11 +136,20 @@ class VramGuard:
             if p in runner:
                 continue
             others_raw[p["name"]] = others_raw.get(p["name"], 0.0) + p["dedicated_gb"]
-        raw_sum = sum(others_raw.values())
-        others_gb = max(0.0, used - ai_ded) if used is not None else raw_sum
-        scale = others_gb / raw_sum if raw_sum > 0 else 0.0
-        top = [{"name": n, "label": LABELS.get(n, n), "gb": round(gb * scale, 2), "movable": n not in NOT_MOVABLE}
-               for n, gb in sorted(others_raw.items(), key=lambda kv: kv[1], reverse=True) if gb * scale >= 0.05]
+        # dwm (the desktop compositor) also counts every window's surfaces it composes: 10-07 it read 114 GB on a 16 GB
+        # card, and apportioning by raw numbers gave it 98% while Brave (1.14 GB on its own counter) showed 0.06 GB.
+        # So apps keep their own numbers (scaled down only if they add up to more than the truth), and the desktop
+        # gets what's left of the adapter total.
+        apps_raw = {n: min(gb, card) for n, gb in others_raw.items() if n not in COMPOSITORS}
+        apps_sum = sum(apps_raw.values())
+        others_gb = max(0.0, used - ai_ded) if used is not None else apps_sum
+        scale = min(1.0, others_gb / apps_sum) if apps_sum > 0 else 0.0
+        parts = {n: gb * scale for n, gb in apps_raw.items()}
+        desktop = others_gb - sum(parts.values())
+        if desktop >= 0.05 and any(n in COMPOSITORS for n in others_raw):
+            parts["dwm"] = desktop
+        top = [{"name": n, "label": LABELS.get(n, n), "gb": round(gb, 2), "movable": n not in NOT_MOVABLE}
+               for n, gb in sorted(parts.items(), key=lambda kv: kv[1], reverse=True) if gb >= 0.05]
 
         loaded = [m for m in (ollama.get("loaded") or [])] if ollama.get("up") else []
         raw = ai_shr > EVICTED_SHARED_GB and ai_ded > 0.5

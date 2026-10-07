@@ -111,3 +111,24 @@ def test_through_the_dashboard(dirs, tmp_path, monkeypatch):
     assert [a["title"] for a in state["asks"]] == ["Hello"] and state["models"][0]["id"] == "sol-away"
     assert c.post("/api/action", json={"action": "ask_remove", "target": "ask-Hello"}, headers=ours).json()["ok"]
     assert c.get("/api/answer", params={"file": "..\\x.md"}).json()["ok"] is False
+
+
+def test_edit_a_chains_schedule(dirs):
+    """The Chains card's ⏱ editor: only `schedule:` changes, checked by the runner's own parser, canonical form."""
+    _, _, chains = dirs
+    p = chains / "Code review.md"
+    original = "---\r\ntype: chain\r\nstatus: done\r\nschedule: daily 01:00\r\nmodel: sol-fast\r\n---\r\n\r\n## Step\r\nHi.\r\n"
+    p.write_bytes(original.encode())
+    assert control.set_schedule("Code review", "weekly mon, thu 9:30") == "weekly Mon,Thu 09:30"
+    text = p.read_bytes().decode()
+    assert text == original.replace("daily 01:00", "weekly Mon,Thu 09:30")            # CRLF and everything else kept
+    assert control.set_schedule("Code review", "weekly sun,mon,tue,wed,thu,fri,sat 7:05") == "daily 07:05"
+    assert control.set_schedule("Code review", "on away") == "on away"
+    assert control.set_schedule("Code review", "") == ""
+    assert p.read_bytes().decode() == original.replace("schedule: daily 01:00\r\n", "")   # the line is gone, nothing else
+    assert control.list_chains()[0]["schedule"] == ""
+    for bad in ("hourly", "daily 25:00", "weekly Funday 10:00"):
+        with pytest.raises(control.ControlError):
+            control.set_schedule("Code review", bad)
+    with pytest.raises(control.ControlError):
+        control.set_schedule("Nope", "daily 07:00")

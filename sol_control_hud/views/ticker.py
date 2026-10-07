@@ -308,6 +308,21 @@ DEFAULT_SLIDES_ENABLED = {
     "APPS": True,
 }
 
+# The slides you can switch on/off (right-click menu and the dashboard's Settings)
+SLIDE_LABELS: list[tuple[str, str]] = [
+    ("HW", "Hardware (GPU/CPU/RAM)"),
+    ("AI", "Local AI Model & Mode"),
+    ("RUN", "Active/Last Chain"),
+    ("SVC", "Services Status"),
+    ("DISK", "Storage & Vaults"),
+    ("SYS", "System & Uptime"),
+    ("NOTE", "Daily Note (Polymatica)"),
+    ("GIT", "Workspace Git Health"),
+    ("NET", "Network Throughput"),
+    ("MEDIA", "Media / Music Now-Playing"),
+    ("APPS", "Running Projects & Media APIs"),
+]
+
 # Available Color Themes (Curated for High Readability and Contrast)
 THEMES: dict[str, dict[str, str]] = {
     "cyber-cyan": {
@@ -1804,20 +1819,7 @@ class TickerApp:
 
         # Visible Slides submenu
         slides_menu = tk.Menu(menu, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
-        slide_labels = [
-            ("HW", "Hardware (GPU/CPU/RAM)"),
-            ("AI", "Local AI Model & Mode"),
-            ("RUN", "Active/Last Chain"),
-            ("SVC", "Services Status"),
-            ("DISK", "Storage & Vaults"),
-            ("SYS", "System & Uptime"),
-            ("NOTE", "Daily Note (Polymatica)"),
-            ("GIT", "Workspace Git Health"),
-            ("NET", "Network Throughput"),
-            ("MEDIA", "Media / Music Now-Playing"),
-            ("APPS", "Running Projects & Media APIs"),
-        ]
-        for tag, label in slide_labels:
+        for tag, label in SLIDE_LABELS:
             is_on = self.slides_enabled.get(tag, True)
             mark = "✓ " if is_on else "   "
             slides_menu.add_command(

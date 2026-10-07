@@ -564,15 +564,72 @@ async function loadControl() {
   setHTML($('answerList'), control.answers.length ? control.answers.map((a) => `<div class="item link" data-answer="${esc(a.file)}">` +
     `<span><b>${esc(a.title)}</b> <span class="dim">· ${esc(when(a.time))}${a.model ? ' · ' + esc(a.model) : ''}</span></span><span class="pv">${esc(a.preview)}</span></div>`).join('')
     : '<div class="empty">no answers yet</div>');
+  if (schedEdit) return;                     // don't redraw under an open schedule editor
   setHTML($('chainList'), control.chains.map((c) => {
     const ops = OPS[c.status] || ['run', 'pause'];
     const meta = [c.schedule && `⏱ ${c.schedule}`, c.watch && 'watches a folder', c.model].filter(Boolean).join(' · ');
     return `<div class="crow"><span>${esc(c.name)}</span><span class="status ${esc(c.status)}">${esc(c.status)}</span>` +
       `<span class="meta" title="${esc(meta)}">${esc(meta)}</span><span class="acts">` +
+      `<button class="mini ghost" data-sched="${esc(c.name)}" title="Change when it runs">⏱</button>` +
       ops.map((o) => `<button class="mini" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o]}</button>`).join('') +
       (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>';
   }).join('') || '<div class="empty">no chain notes in 1Notebook\\Chains</div>');
 }
+// ---------- chain schedules: edit `schedule:` from the card (the server checks it with the runner's own parser)
+let schedEdit = null;
+const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+function schedParts(text) {
+  const t = String(text || '').trim().toLowerCase();
+  if (!t) return { kind: '', time: '07:00', days: [] };
+  if (t === 'on away') return { kind: 'away', time: '07:00', days: [] };
+  let m = t.match(/^daily (\d{1,2}):(\d{2})$/);
+  if (m) return { kind: 'daily', time: `${m[1].padStart(2, '0')}:${m[2]}`, days: [] };
+  m = t.match(/^weekly ([a-z, ]+?) (\d{1,2}):(\d{2})$/);
+  if (m) return { kind: 'weekly', time: `${m[2].padStart(2, '0')}:${m[3]}`, days: m[1].split(/[ ,]+/).map((d) => d.slice(0, 3)) };
+  return { kind: 'daily', time: '07:00', days: [] };
+}
+function schedEditor(c) {
+  const s = schedParts(c.schedule);
+  const days = DAY_NAMES.map((d) => `<label><input type="checkbox" value="${d}"${s.days.includes(d.toLowerCase()) ? ' checked' : ''}>${d}</label>`).join('');
+  return `<div class="sched-edit" data-for="${esc(c.name)}"><b>${esc(c.name)}</b> runs ` +
+    `<select class="sk"><option value=""${s.kind === '' ? ' selected' : ''}>never by itself</option><option value="daily"${s.kind === 'daily' ? ' selected' : ''}>every day</option>` +
+    `<option value="weekly"${s.kind === 'weekly' ? ' selected' : ''}>on these days</option><option value="away"${s.kind === 'away' ? ' selected' : ''}>when Away starts</option></select>` +
+    `<span class="sdays"${s.kind === 'weekly' ? '' : ' hidden'}>${days}</span>` +
+    `<span class="stime"${s.kind === 'daily' || s.kind === 'weekly' ? '' : ' hidden'}>at <input type="time" class="st" value="${s.time}"></span>` +
+    `<button class="mini go" data-sched-save>Save</button><button class="mini ghost" data-sched-cancel>Cancel</button>` +
+    (c.status === 'paused' ? '<span class="dim small">paused: Resume it for the schedule to apply</span>' : '') + '</div>';
+}
+$('chainList').addEventListener('click', async (e) => {
+  const open = e.target.closest('[data-sched]');
+  if (open) {
+    e.stopPropagation();
+    const c = (control?.chains || []).find((x) => x.name === open.dataset.sched);
+    document.querySelectorAll('.sched-edit').forEach((el) => el.remove());
+    if (!c || schedEdit === c.name) { schedEdit = null; return; }
+    schedEdit = c.name;
+    open.closest('.crow').insertAdjacentHTML('afterend', schedEditor(c));
+    return;
+  }
+  const box = e.target.closest('.sched-edit');
+  if (!box) return;
+  if (e.target.closest('[data-sched-cancel]')) { e.stopPropagation(); box.remove(); schedEdit = null; return; }
+  if (!e.target.closest('[data-sched-save]')) return;
+  e.stopPropagation();
+  const kind = box.querySelector('.sk').value, time = box.querySelector('.st').value || '07:00';
+  const days = [...box.querySelectorAll('.sdays input:checked')].map((i) => i.value);
+  if (kind === 'weekly' && !days.length) { toast('pick at least one day'); return; }
+  const schedule = kind === 'daily' ? `daily ${time}` : kind === 'weekly' ? `weekly ${days.join(',')} ${time}` : kind === 'away' ? 'on away' : '';
+  const r = await post('/api/action', { action: 'chain', target: box.dataset.for, op: 'schedule', schedule });
+  toast(r.why || (r.ok ? 'saved' : 'that did not work'));
+  if (r.ok) { box.remove(); schedEdit = null; loadControl(); }
+}, true);
+$('chainList').addEventListener('change', (e) => {
+  const box = e.target.closest('.sched-edit');
+  if (!box || !e.target.classList.contains('sk')) return;
+  const k = e.target.value;
+  box.querySelector('.sdays').hidden = k !== 'weekly';
+  box.querySelector('.stime').hidden = !(k === 'daily' || k === 'weekly');
+});
 const pendingModels = new Map();   // model -> the state it had when you pressed its button (shown as "…" until it changes)
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-model],[data-models],[data-power]');

@@ -507,6 +507,12 @@ TOOLS = {"to_list": to_list, "join_items": join_items, "group_items": group_item
 # ---------------------------------------------------------------- the chain note's own status line
 def set_chain_status(path: Path, status: str, **extra) -> None:
     """Change only `status:` (and the given extra keys) in the chain note's properties; everything else stays byte-for-byte."""
+    set_note_props(path, {"status": status, **extra})
+
+
+def set_note_props(path: Path, props: dict, remove: tuple = ()) -> None:
+    """Set the given keys (and drop the ones in `remove`) in a chain note's properties; everything else stays
+    byte-for-byte. Only notes under the chains folder are ever written."""
     path = Path(path)
     if not file_tools._under(file_tools._real(path), [str(CHAINS_DIR)]):
         return
@@ -515,13 +521,18 @@ def set_chain_status(path: Path, status: str, **extra) -> None:
     nl = "\r\n" if "\r\n" in text else "\n"
     m = _FRONT.match(text)
     if not m:
-        text = f"---{nl}status: {status}{nl}---{nl}" + text
+        if not props:
+            return
+        key, value = next(iter(props.items()))
+        text = f"---{nl}{key}: {value}{nl}---{nl}" + text
         m = _FRONT.match(text)
     front = m.group(1)
-    for key, value in {"status": status, **extra}.items():
+    for key, value in props.items():
         line = f"{key}: {value}"
         pat = re.compile(rf"^{re.escape(key)}:[^\r\n]*", re.M)  # no `$`: a CRLF line has \r before the \n
         front = pat.sub(line, front, count=1) if pat.search(front) else front + nl + line
+    for key in remove:                                        # the line and the line break before it
+        front = re.sub(rf"(?:\r?\n)?^{re.escape(key)}:[^\r\n]*", "", front, count=1, flags=re.M)
     new = text[:m.start(1)] + front + text[m.end(1):]
     if new != text:
         tmp = path.with_name(path.name + ".tmp")
