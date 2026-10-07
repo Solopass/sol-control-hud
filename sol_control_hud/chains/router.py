@@ -24,6 +24,20 @@ DESK_FALLBACK = {"sol-specialist": "sol-smart", "sol-coder": "sol-smart", "sol-c
 REASONING = ("off", "on", "low", "medium", "high")
 ANSWER_ROOM = 2048        # a thinking model needs room to think before it answers
 PER_MESSAGE_TOKENS = 16   # chat template overhead per message
+IMAGE_TOKENS = 1024       # what one image costs a vision model's context (Gemma 4: up to ~1k; on the safe side)
+
+
+def message_text(m: dict) -> str:
+    """The text of a message, whether its content is a string or a list of parts (text + image_url)."""
+    c = m.get("content") or ""
+    if isinstance(c, list):
+        return "\n".join(str(p.get("text") or "") for p in c if isinstance(p, dict) and p.get("type") == "text")
+    return str(c)
+
+
+def message_images(m: dict) -> int:
+    c = m.get("content")
+    return sum(1 for p in c if isinstance(p, dict) and p.get("type") == "image_url") if isinstance(c, list) else 0
 
 
 class ModelUnavailable(LLMError):
@@ -105,10 +119,12 @@ class RouterClient:
         return int(len(text) / CHARS_PER_TOKEN) + 1
 
     def fits(self, model: str, messages: list[dict], max_tokens: int) -> tuple[bool, int, int | None]:
-        """(fits, prompt tokens, context). The prompt plus room to think/answer must fit; max_tokens is only a ceiling."""
+        """(fits, prompt tokens, context). The prompt plus room to think/answer must fit; max_tokens is only a ceiling.
+        Image parts (OpenAI-style content lists) count as IMAGE_TOKENS each, not as their base64 text."""
         ctx = self.context(model)
-        text = "\n".join(str(m.get("content") or "") for m in messages)
-        prompt = self.count_tokens(model, text) + PER_MESSAGE_TOKENS * len(messages)
+        text = "\n".join(message_text(m) for m in messages)
+        images = sum(message_images(m) for m in messages)
+        prompt = self.count_tokens(model, text) + PER_MESSAGE_TOKENS * len(messages) + IMAGE_TOKENS * images
         if not ctx:
             return True, prompt, None
         return prompt + min(max_tokens, ANSWER_ROOM) <= ctx, prompt, ctx

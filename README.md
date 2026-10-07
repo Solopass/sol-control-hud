@@ -21,6 +21,7 @@ Away screen and the doctor from here. Next: `D:\OBVLT\plans\SOL_CONTROL_HUD_NEXT
 | `sol_control_hud/chains/` | prompt chains: the runner, chain notes, the chain daemon (schedules, file watches, lanes that take turns on one GPU), drafting chains from a description |
 | `sol_control_hud/launchpad.yaml`, `launcher.py` | the Projects and Media APIs cards: what can't be read from the project folders, and Start / Stop / Open by name (`data/collectors/projects.py`, `media_apis.py` collect; nothing they do wakes a socket-activated service). Your own tags and hides from the card's ⋯ menu live in `data/launchpad-user.json`; the Media card's box runs the transcript-note workflow |
 | `sol_control_hud/doctor.py` | health checks used by the morning briefing |
+| `sol_control_hud/exam_review.py`, `quiz_capture.py`, `views/box_picker.py` | the Exam review card: draw a box on a graded results page; every 15 s (never while busy) it checks the box for a new question, reads it with sol-vision and explains the ones you missed (never answers an ungraded question); missed ones go to `1NotebookSchool<date> exam review.md`, the last result shows on the ticker (REVIEW) |
 | `sol_control_hud/paths.py` | where the app keeps its files (`data/`, override with `SOL_CONTROL_DATA`) |
 
 ## Run (from this folder)

@@ -1486,7 +1486,7 @@ class TickerApp:
 
     def _open_slide_target(self, tag: str) -> None:
         tag_u = (tag or "").upper()
-        if tag_u == "APPS":
+        if tag_u in ("APPS", "REVIEW"):
             if self.hub:
                 self.hub.open_dashboard()
             else:

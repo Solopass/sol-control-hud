@@ -124,6 +124,7 @@ class Snapshot:
     chain_pending: list[dict] = field(default_factory=list)   # [{"chain", "blocked"}] from chains.json
     chain_next: str | None = None                              # "Weekly digest Sun 20:00"
     night: dict | None = None                                  # the last Away session, see night_summary()
+    review: dict | None = None                                 # the exam review helper, see exam_review.ticker_state()
     disk_trends: dict[str, float] = field(default_factory=dict)   # drive -> GB of free space gained (+) / lost (-)
     vram_rise_gb: float | None = None      # VRAM now minus the lowest of the last 10 min
     temp_rise_c: float | None = None       # GPU edge temperature now minus the lowest of the last 5 min
@@ -910,6 +911,9 @@ def format_slides(s: Snapshot) -> list[dict]:
                                  "Click to open the newest review / report (this summary then goes away)",
                        "level": "info"})
 
+    if s.review:
+        slides.append(review_slide(s.review))
+
     # What needs you, in one slide (the ticker shows it first and holds it longer)
     alerts = attention(s)
     if alerts:
@@ -922,6 +926,38 @@ def format_slides(s: Snapshot) -> list[dict]:
         sl.setdefault("segments", colorize(sl, s))
         sl.setdefault("level", slide_level(sl, s))
     return slides
+
+
+def _review_state() -> dict | None:
+    try:
+        from ..exam_review import ticker_state
+        return ticker_state()
+    except Exception:  # noqa: BLE001 - a display nicety
+        return None
+
+
+def review_slide(r: dict) -> dict:
+    """The exam review helper on the ticker: the last result while it watches (held like an alert so a glance finds
+    it), the full explanation in the tooltip. Click opens the dashboard's card."""
+    cur, busy = r.get("current") or {}, r.get("status") in ("reading", "explaining", "waiting")
+    segs: list[tuple[str, str]] = [("Review ", MUTED)]
+    if cur and cur.get("result") == "correct":
+        segs += [("✓ correct", GREEN)]
+    elif cur:
+        segs += [(f"✗ {cur.get('topic') or 'missed'}", RED), SEP,
+                 (f"you {'/'.join(cur.get('your_labels') or []) or '?'}", AMBER), SEP,
+                 (f"correct {'/'.join(cur.get('correct_labels') or []) or '?'}", GREEN)]
+    else:
+        segs += [(r.get("text") or "watching", MUTED)]
+    segs += [SEP, (f"{r.get('correct', 0)} ✓ {r.get('wrong', 0)} ✗", TEXT)]
+    if busy:
+        segs += [SEP, (r.get("text") or r.get("status", ""), CYAN)]
+    elif not r.get("running"):
+        segs += [SEP, ("stopped", MUTED)]
+    detail = (f"{cur.get('question', '')}\nYou: {cur.get('yours', '')} · Correct: {cur.get('correct') or '(not shown)'}\n"
+              f"{cur.get('explanation', '')}" if cur and cur.get("result") != "correct" else r.get("text") or "")
+    return {"tag": "REVIEW", "text": plain(segs), "segments": segs, "color": CYAN if busy else MUTED,
+            "detail": detail + "\nClick to open the Exam review card", "level": "alert" if r.get("running") else "info"}
 
 
 def _part_color(tag: str, part: str, s: Snapshot) -> str:
@@ -1025,7 +1061,8 @@ def slide_level(slide: dict, s: Snapshot) -> str:
 
 def rotation(slides: list[dict]) -> list[int]:
     """The order the ticker cycles through by itself: the ALERT slide first and between every other slide, quiet
-    slides left out (unless that would leave fewer than 3). Clicking still steps through every slide."""
+    slides left out (unless that would leave fewer than 3). Clicking still steps through every slide.
+    With two alert-level slides (ALERT and the exam REVIEW) they take turns in those between-slots."""
     alert = [i for i, sl in enumerate(slides) if sl.get("level") == "alert"]
     rest = [i for i, sl in enumerate(slides) if sl.get("level") == "info"]
     if len(rest) < 3:
@@ -1033,8 +1070,8 @@ def rotation(slides: list[dict]) -> list[int]:
     if not alert:
         return rest or list(range(len(slides)))
     order: list[int] = []
-    for i in rest:
-        order += [alert[0], i]
+    for k, i in enumerate(rest):
+        order += [alert[k % len(alert)], i]
     return order or alert
 
 
@@ -1505,6 +1542,7 @@ class TickerCollector:
             chain_pending=chain_pending,
             chain_next=chain_next,
             night=self._night,
+            review=_review_state(),
             disk_trends=disk_trends,
             vram_rise_gb=vram_rise,
             temp_rise_c=temp_rise,

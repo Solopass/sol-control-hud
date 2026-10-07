@@ -84,6 +84,24 @@
     <div class="note" id="aiSlow" hidden></div>
   </article>
 
+  <article class="card wide" id="c-review">
+    <h2>Exam review <span class="pill" id="revStatus">stopped</span> <span class="dim" id="revCount"></span></h2>
+    <div class="buttons">
+      <button class="mini go" data-act="review" data-target="pick" title="Drag a box around the question on the results page; it starts watching at once">▣ Set box &amp; start</button>
+      <button class="mini" id="revToggle" data-act="review" data-target="start">Start</button>
+      <button class="mini" data-act="review" data-target="look" title="Read the box again now">Look now</button>
+      <button class="mini ghost" data-act="review" data-target="open_note">Open notes</button>
+      <button class="mini ghost" data-act="review" data-target="clear" data-confirm="Clear this session's list? (The notes file stays.)">Clear</button>
+    </div>
+    <div class="note" id="revText"></div>
+    <div class="rev-current" id="revCurrent" hidden></div>
+    <div class="cols">
+      <div><h3>This session</h3><div class="list" id="revHistory"><div class="empty">nothing yet</div></div></div>
+      <div><h3>Topics to review</h3><div class="list" id="revTopics"><div class="empty">no missed questions yet</div></div></div>
+    </div>
+    <div class="note" id="revBox"></div>
+  </article>
+
   <article class="card wide" id="c-chains" data-open="RUN">
     <h2>Chains <button class="mini" data-act="open" data-target="RUN">open folder</button></h2>
     <div class="seg" id="runSeg"></div>

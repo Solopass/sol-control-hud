@@ -343,7 +343,28 @@ class Hub:
             if hasattr(self, "collectors") and "ports" in self.collectors:
                 self.collectors["ports"].value = None      # the card lists what's left on its next poll
             return r
+        if action == "review":                    # the Exam review card (exam_review.py)
+            return self.review_action(target)
         return {"ok": False, "why": f"unknown action {action!r}"}
+
+    def review_action(self, target: str) -> dict:
+        from . import exam_review
+        w = exam_review.watcher()
+        if target == "pick":                      # the box is drawn on the Tk thread
+            self.cmds.put(("review_pick", None))
+            return {"ok": True, "why": "drag a box around the question (Esc cancels)"}
+        if target == "open_note":
+            note = w.state().get("note")
+            if not note or not Path(note).exists():
+                return {"ok": False, "why": "no review note yet: it's made with the first missed question"}
+            os.startfile(note)
+            return {"ok": True, "why": "opening today's review note"}
+        ops = {"start": w.start, "stop": w.stop, "look": w.look_now, "clear": w.clear}
+        if target not in ops:
+            return {"ok": False, "why": f"unknown review action {target!r}"}
+        r = ops[target]()
+        log(f"exam review: {target} -> {r.get('why')}")
+        return r
 
     # ---- the Projects and Media APIs cards
     def _launchpad(self) -> tuple[dict, dict, list[dict]]:
@@ -496,7 +517,12 @@ class Hub:
                 "router": c["llama_swap"].get(), "wsl": c["wsl"].get(), "stability": c["stability"].get(),
                 "away": c["away"].get(), "chains": c["chains"].get(), "activity": c["activity"].get(),
                 "point": self.history.latest(), "models": self._model_rows(),
-                "speed": c["speed"].get(), "heal": c["heal"].get()}
+                "speed": c["speed"].get(), "heal": c["heal"].get(), "review": self._review_state()}
+
+    @staticmethod
+    def _review_state() -> dict:
+        from . import exam_review
+        return exam_review.watcher().state()
 
     def _model_rows(self) -> list[dict]:
         from .models_ctl import rows
@@ -770,11 +796,19 @@ class Hub:
     def _start_tray(self) -> None:
         from .tray import Tray
 
+        def review_item():
+            from . import exam_review
+            w = exam_review._watcher
+            if w is not None and w.state()["running"]:
+                return ("Stop exam review", lambda: self.review_action("stop"), False)
+            return ("Exam review: set box & start", lambda: self.review_action("pick"), False)
+
         def menu():
             ticker_on = bool(self.ticker and not self.ticker.user_hidden)
             return [("Show ticker", self.hide_ticker if ticker_on else self.show_ticker, ticker_on),
                     ("Open dashboard", self.open_dashboard, False),
                     ("Unload AI models", lambda: self.do_action("models_unload_all", ""), False),
+                    review_item(),
                     None,
                     ("Open the dashboard when SOL starts",
                      lambda: self.cmds.put(("dashboard_at_start", not self.settings["dashboard_at_start"])),
@@ -821,6 +855,11 @@ class Hub:
                     tag, on = arg
                     if self.ticker.slides_enabled.get(tag, True) != on:
                         self.ticker.toggle_slide_enabled(tag)
+                elif name == "review_pick":
+                    from . import exam_review
+                    from .views.box_picker import pick_box
+                    pick_box(self.root, lambda rect: (exam_review.watcher().set_rect(rect, start=True),
+                                                      log(f"exam review: box {rect}, watching")))
                 elif name == "exit":
                     self._shutdown(arg)
                     return
@@ -911,12 +950,18 @@ class Hub:
                 log(f"heal: loading {name} again failed: {type(e).__name__}: {e}")
         threading.Thread(target=_load_again, name="heal-load", daemon=True).start()
 
+    @staticmethod
+    def _stop_review() -> None:
+        from . import exam_review
+        if exam_review._watcher is not None:
+            exam_review._watcher.stop()
+
     def _shutdown(self, why: str) -> None:
         clear_running_marker()                 # a clean exit: the watcher must not bring it back
         log(f"exit: {why}")
         for step in (lambda: self.tray and self.tray.stop(), lambda: setattr(self.server, "should_exit", True),
                      lambda: self.metrics and self.metrics.close(),
-                     self.collector.stop, self.guard.stop, self.ticker._save_settings, self.root.destroy):
+                     self._stop_review, self.collector.stop, self.guard.stop, self.ticker._save_settings, self.root.destroy):
             try:
                 step()
             except Exception:  # noqa: BLE001 - leave no matter what

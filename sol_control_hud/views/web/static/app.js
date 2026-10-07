@@ -193,6 +193,7 @@ function render(p) {
   renderAi(p);
   renderSpeed(p);
   renderChains(p);
+  renderReview(p);
 
   // Away & queue card
   const a = p.away || {};
@@ -442,6 +443,40 @@ function renderFeed(items) {
 }
 
 // ---------- the stream (only while this tab is visible)
+// the Exam review card (exam_review.py): the last graded question, explained if you missed it
+const REV_PILL = { watching: 'ok', reading: '', explaining: '', waiting: 'warn', paused: 'warn', error: 'bad', stopped: '' };
+function renderReview(p) {
+  const r = p.review; if (!r) return;
+  const st = r.running ? r.status : 'stopped', pill = $('revStatus');
+  pill.textContent = st; pill.className = `pill ${REV_PILL[st] ?? ''}`;
+  pill.style.color = ['reading', 'explaining'].includes(st) ? 'var(--cyan)' : '';
+  $('revCount').textContent = r.correct + r.wrong ? `${r.correct} ✓ · ${r.wrong} ✗` : '';
+  const tg = $('revToggle'); tg.dataset.target = r.running ? 'stop' : 'start'; tg.textContent = r.running ? 'Stop' : 'Start';
+  tg.disabled = !r.running && !r.rect; tg.title = r.rect ? '' : 'Set the box first';
+  $('revText').textContent = (r.text || '') + (r.running && r.next_look && st === 'watching' ? ` · next look ${r.next_look}` : '');
+  $('revBox').textContent = r.rect ? `Box ${r.rect[2]}×${r.rect[3]} at (${r.rect[0]}, ${r.rect[1]}) · looks every 15 s, not while it's explaining` +
+    ' · only graded questions (it never answers one for you)' : 'No box yet: open the attempt\'s review page, then Set box & start.';
+  const c = r.current, cur = $('revCurrent');
+  cur.hidden = !c;
+  if (c) {
+    const mark = (lb) => (c.correct_labels || []).includes(lb) ? 'right' : (c.your_labels || []).includes(lb) ? 'mine' : '';
+    const opts = (c.choices || []).map((o) => `<div class="rev-opt ${mark(o.label)}"><b>${esc(o.label)}.</b> ${esc(o.text)}` +
+      `${(c.your_labels || []).includes(o.label) ? ' <span class="dim small">your answer</span>' : ''}` +
+      `${(c.correct_labels || []).includes(o.label) ? ' <span class="small" style="color:var(--green)">✓ correct</span>' : ''}</div>`).join('');
+    const head = c.result === 'correct' ? '<span style="color:var(--green)">✓ Correct</span>'
+      : `<span style="color:var(--red)">✗ ${esc(c.topic || 'Missed')}</span>`;
+    const body = c.result === 'correct' ? '' : `<p class="rev-explain">${esc(c.explanation)}</p>` +
+      (c.your_mistake ? `<p class="dim small"><b>Likely mistake:</b> ${esc(c.your_mistake)}</p>` : '');
+    setHTML(cur, `<div class="row"><b>${head}</b><span class="dim small">${esc(c.at || '')}${c.seconds ? ` · ${c.seconds} s` : ''}</span></div>` +
+      `<div class="rev-q">${esc(c.question)}</div>${opts}${body}`);
+  }
+  setHTML($('revHistory'), (r.history || []).map((h) => `<div class="item"><span>${h.n}. ${esc(h.topic || h.question)}</span>` +
+    `<span style="color:${h.ok ? 'var(--green)' : 'var(--red)'}">${h.ok ? '✓' : '✗'}</span></div>`).join('') || '<div class="empty">nothing yet</div>');
+  const topics = Object.entries(r.topics || {}).sort((a, b) => b[1] - a[1]);
+  setHTML($('revTopics'), topics.map(([t, n]) => `<div class="item"><span>${esc(t)}</span><span style="color:var(--amber)">${n}×</span></div>`).join('')
+    || '<div class="empty">no missed questions yet</div>');
+}
+
 function connect() {
   if (es) return;
   es = new EventSource('/api/stream');
