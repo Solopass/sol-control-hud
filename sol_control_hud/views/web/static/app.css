@@ -429,3 +429,5 @@ input.switch:checked::after { left:20px; }
 .chip.intel { color:var(--cyan); }
 .chip.bad { color:var(--red); border-color:var(--red); font-weight:700; }
 .chipline { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+
+.list .item button[data-op="now"] { margin-left:8px; vertical-align:1px; }

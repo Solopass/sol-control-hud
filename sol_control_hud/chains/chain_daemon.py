@@ -82,6 +82,17 @@ def queue_jobs_waiting() -> bool:
     return q.is_dir() and any(q.glob("*.json"))
 
 
+def skip_wait(path: Path) -> bool:
+    """`skip_wait: true` in a chain note (the dashboard's "Run now" on a waiting chain): one run that skips the polite
+    waits - the idle-10-min lane, the swap / at-your-desk waits before each model call, the retry delay after
+    `waiting`. Never the hard stops: the game guard (AI off), an Away queue job on the GPU, an Away-only model at your
+    desk. Cleared when that run finishes."""
+    try:
+        return str(front(Path(path)).get("skip_wait", "")).strip().lower() in ("true", "yes", "1")
+    except Exception:  # noqa: BLE001 - an unreadable note just doesn't skip
+        return False
+
+
 def front(path: Path) -> dict:
     try:
         with open(path, encoding="utf-8-sig") as f:
@@ -175,12 +186,16 @@ class Daemon:
             f.write(f"{datetime.now():%Y-%m-%dT%H:%M:%S} {msg}\n")
 
     # ---- lanes
-    def lane_open(self, lane: str) -> tuple[bool, str]:
+    def lane_open(self, lane: str, force: bool = False) -> tuple[bool, str]:
         mode = self.mode()
         if mode == "off":
             return False, "the game guard has the AI off"
         if queue_job_running():
             return False, "an Away queue job is running"
+        if force and lane in ("fast", "idle") and mode in ("desk", "away"):
+            return True, ""                      # "Run now": don't wait for 10 idle minutes
+        if force and lane == "away" and mode != "away":
+            return False, "needs an Away model, so it can't skip: it runs in the next Away session"
         if lane == "fast" and mode in ("desk", "away"):
             return True, ""
         if lane == "idle" and (mode == "away" or (mode == "desk" and self.idle() >= IDLE_MINUTES * 60)):
@@ -192,13 +207,16 @@ class Daemon:
         return False, {"idle": f"waits until you've been idle {IDLE_MINUTES} min (or Away mode)",
                        "away": "waits for Away mode"}.get(lane, f"engine is in {mode} mode")
 
-    def gate(self, client: RouterClient):
-        """Before each model call of a background chain: wait politely (plan pre-flight change 1)."""
+    def gate(self, client: RouterClient, path: Path | None = None):
+        """Before each model call of a background chain: wait politely (plan pre-flight change 1). `skip_wait` in the
+        note (checked every time, so "Run now" works on a chain that is already waiting) skips the polite part."""
         def wait_turn(run_id: int, model: str, stopping) -> None:
             told = None
             while not stopping():
-                why = self._turn_blocker(client, model)
+                why = self._turn_blocker(client, model, force=bool(path) and skip_wait(path))
                 if why is None:
+                    if self.current is not None:
+                        self.current.pop("waiting", None)
                     return
                 if why == "OFF":
                     raise ModelUnavailable("the game guard has the AI off; the chain continues after the game")
@@ -206,10 +224,13 @@ class Daemon:
                     raise ModelUnavailable("Away ended; the chain continues in the next Away session")
                 if why != told:
                     self.store.event(run_id, "waiting_for_turn", message=why); told = why
+                    if self.current is not None:
+                        self.current["waiting"] = why       # chains.json: the card shows it with a "Run now" button
+                        self._write_status()
                 time.sleep(5)
         return wait_turn
 
-    def _turn_blocker(self, client: RouterClient, model: str) -> str | None:
+    def _turn_blocker(self, client: RouterClient, model: str, force: bool = False) -> str | None:
         mode = self.mode()
         if mode == "off":
             return "OFF"
@@ -219,6 +240,8 @@ class Daemon:
             return None
         if model not in cn.DESK_MODELS:
             return "AWAY_ENDED"   # an Away model outside Away: pause (it resumes next Away), never load it at your desk
+        if force:
+            return None           # "Run now": no swap / at-your-desk politeness for this run
         main = "sol-fast" if model in cn.FAST_MODELS else DESK_FALLBACK.get(model, model)
         try:
             loaded = client.loaded()  # GET /models is answered by the router itself: it doesn't wake or keep any model
@@ -299,7 +322,7 @@ class Daemon:
                 self._enqueue(path, "status: queued", new=False, mark=False)
             elif status == "running":  # left running by a crash / sleep / restart: resume it
                 self._enqueue(path, "resume after an interruption", new=False, mark=False)
-            elif status == "waiting" and time.time() >= self.retry_at.get(key, 0) and key not in self._pending_paths():
+            elif status == "waiting" and (time.time() >= self.retry_at.get(key, 0) or skip_wait(path))                     and key not in self._pending_paths():
                 self._enqueue(path, "retry (was waiting)", new=False, mark=False)
             if status == cn.PAUSED:  # paused: no schedule, no watch (a queued run still works)
                 continue
@@ -398,7 +421,7 @@ class Daemon:
                 cn.write_error_result(path, str(e)); self._log(f"{path.name}: can't run: {e}")
                 return None
             lane = cn.lane(chain)
-            ok, why = self.lane_open(lane)
+            ok, why = self.lane_open(lane, force=skip_wait(path))
             if ok and lane == "away":  # every model must be served by this Away session, or it would just wait (and keep the PC up)
                 missing = self._not_served(chain)
                 if missing:
@@ -452,7 +475,7 @@ class Daemon:
 
         def make(on_step):
             holder["runner"] = Runner(client, self.store, tools=CHAIN_TOOLS(), gpu_lock=gpu_lock, on_step=on_step,
-                                      gate=self.gate(client))
+                                      gate=self.gate(client, path))
             return holder["runner"]
 
         def work():
@@ -462,6 +485,8 @@ class Daemon:
                 self._log(f"{path.name}: run {rid} {run['status']}{': ' + run['error'] if run.get('error') else ''}")
                 if run["status"] == "waiting":
                     self.retry_at[str(path)] = time.time() + RETRY_WAITING
+                elif skip_wait(path):                       # one run: the next ones wait politely again
+                    cn.set_note_props(path, {}, remove=("skip_wait",))
             except cn.ChainError as e:
                 cn.write_error_result(path, str(e)); self._log(f"{path.name}: can't run: {e}")
             except Exception as e:  # noqa: BLE001 - keep the daemon alive; the run itself is marked failed
@@ -505,6 +530,7 @@ class Daemon:
         status = {"updated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
                   "running": ({"chain": Path(self.current["path"]).stem, "run": self.current.get("run"),
                                "lane": self.current.get("lane"), "reason": self.current.get("reason"),
+                               "waiting": self.current.get("waiting"),
                                **self._progress()} if self.current else None),
                   "pending": [{"chain": Path(p["path"]).stem, "lane": p.get("lane"), "reason": p.get("reason"),
                                "blocked": p.get("blocked")} for p in self.state["pending"]],

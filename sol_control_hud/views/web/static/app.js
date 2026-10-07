@@ -398,9 +398,13 @@ function renderChains(p) {
     }).join(''));
     if (run.items) { setBar(bar, run.item / run.items, 'var(--cyan)'); bar.classList.add('live'); bar.title = `item ${run.item} of ${run.items}`; }
   }
+  // waiting chains get "Run now": one run that skips the polite waits (the runner still stops for the game guard,
+  // an Away queue job, or an Away-only model)
   const pend = c.pending || [];
-  setHTML($('chPending'), pend.length ? pend.map((x) => `<div class="item"><span>${esc(x.chain)}</span><span style="color:${x.blocked ? 'var(--amber)' : 'var(--cyan)'}">${esc(x.blocked || 'next')}</span></div>`).join('')
-    : '<div class="empty">nothing waiting</div>');
+  const skip = (name) => `<button class="mini go" data-chain="${esc(name)}" data-op="now" title="Skip the wait: run it now">⏭ Run now</button>`;
+  const held = run && run.waiting ? `<div class="item"><span>${esc(run.chain)} <span class="dim">(running)</span></span><span style="color:var(--amber)">${esc(run.waiting)}${skip(run.chain)}</span></div>` : '';
+  setHTML($('chPending'), held + pend.map((x) => `<div class="item"><span>${esc(x.chain)}</span><span style="color:${x.blocked ? 'var(--amber)' : 'var(--cyan)'}">${esc(x.blocked || 'next')}${x.blocked ? skip(x.chain) : ''}</span></div>`).join('')
+    || '<div class="empty">nothing waiting</div>');
   const sch = c.scheduled || [];
   setHTML($('chSched'), sch.length ? sch.map((x) => `<div class="item"><span>${esc(x.chain)}</span><span>${esc(nextLabel(x.next))}</span></div>`).join('')
     : '<div class="empty">no schedules</div>');
@@ -571,8 +575,8 @@ $('modalSaveBtn').onclick = async () => {
   }
 };
 
-const OPS = { queued: ['cancel'], running: ['cancel'], waiting: ['cancel'], paused: ['run', 'resume'], cancel: [], };
-const OP_LABEL = { run: 'Run now', pause: 'Pause', resume: 'Resume', cancel: 'Cancel' };
+const OPS = { queued: ['now', 'cancel'], running: ['cancel'], waiting: ['now', 'cancel'], paused: ['run', 'resume'], cancel: [], };
+const OP_LABEL = { run: 'Run now', now: '⏭ Run now', pause: 'Pause', resume: 'Resume', cancel: 'Cancel' };
 let control = null;
 async function loadControl() {
   if (document.hidden) return;

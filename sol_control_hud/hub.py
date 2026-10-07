@@ -267,7 +267,8 @@ class Hub:
                     return {"ok": True, "why": f"{target}: " + (f"runs {canon}" if canon else "no schedule"), "schedule": canon}
                 status = control.chain_op(target, str(b.get("op", "")))
                 log(f"chain {target}: status {status} (dashboard)")
-                return {"ok": True, "why": f"{target}: {status}", "status": status}
+                why = f"{target}: running now, skipping the wait" if b.get("op") == "now" else f"{target}: {status}"
+                return {"ok": True, "why": why, "status": status}
             except control.ControlError as e:
                 return {"ok": False, "why": str(e)}
         if action == "notify" and target in ("on", "off", "test"):

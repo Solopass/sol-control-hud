@@ -220,6 +220,15 @@ def chain_op(name: str, op: str, chains_dir: Path | None = None) -> str:
     paths = _chain_paths(chains_dir)
     if name not in paths:
         raise ControlError("no such chain")
+    if op == "now":
+        # "Run now" on a waiting chain: one run that skips the polite waits (chain_daemon.skip_wait). A running one keeps
+        # its status; anything else is queued as well.
+        meta = _front(paths[name])
+        if str(meta.get("status") or "").lower() == "running":
+            chain_note.set_note_props(paths[name], {"skip_wait": "true"})
+            return "running"
+        chain_note.set_chain_status(paths[name], "queued", skip_wait="true")
+        return "queued"
     if op not in CHAIN_OPS:
         raise ControlError(f"unknown action {op!r}")
     chain_note.set_chain_status(paths[name], CHAIN_OPS[op])

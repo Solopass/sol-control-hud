@@ -272,3 +272,40 @@ def test_watch_runs_once_per_new_stable_file_with_a_limit(env):
     assert all(j["new"] for j in jobs) and status(p) == "queued"
     d.state["pending"].clear(); cn.set_chain_status(p, "done"); d.scan()   # (as if both ran)
     assert d.state["pending"] == []                                   # the third waits for the hourly limit
+
+
+# ---- "Run now" on a waiting chain (2026-10-07): skip the polite waits, never the hard stops
+def test_skip_wait_skips_politeness_not_hard_stops(env):
+    chains, store, ctx, clock, make, tmp = env
+    d = make()
+    busy = FakeRouter(loaded="sol-fast")
+    assert "idle" in d._turn_blocker(busy, "sol-long")                       # normally: swap only when you're idle
+    assert d._turn_blocker(busy, "sol-long", force=True) is None             # Run now: go
+    assert d.lane_open("idle")[0] is False and d.lane_open("idle", force=True) == (True, "")
+    ok, why = d.lane_open("away", force=True)
+    assert not ok and "next Away session" in why                             # an Away-only model can't be skipped to
+    assert d._turn_blocker(FakeRouter(loaded=None), "sol-coder", force=True) == "AWAY_ENDED"
+    ctx["mode"] = "off"
+    assert d._turn_blocker(busy, "sol-long", force=True) == "OFF"           # the game guard still wins
+    assert d.lane_open("idle", force=True)[0] is False
+    ctx["mode"] = "desk"
+    (tmp / "queue" / "running").mkdir(parents=True); (tmp / "queue" / "running" / "job.json").write_text("{}")
+    assert d.lane_open("idle", force=True) == (False, "an Away queue job is running")
+
+
+def test_run_now_starts_a_waiting_chain_once(env):
+    from sol_control_hud import control
+    chains, store, ctx, clock, make, _ = env
+    p = note(chains, "Monthly digest", "status: queued\nmodel: sol-long\n")
+    ctx["router"] = FakeRouter(loaded=None)
+    d = make()
+    d.tick()
+    assert d.current is None and d.state["pending"][0]["blocked"]           # idle lane: waits for 10 idle minutes
+    assert control.chain_op("Monthly digest", "now") == "queued"
+    assert cd.skip_wait(p)
+    run_to_end(d)
+    assert status(p) == "done" and ctx["router"].calls == ["sol-long"]
+    assert not cd.skip_wait(p) and "skip_wait" not in p.read_text(encoding="utf-8")   # one run only
+    cn.set_chain_status(p, "queued")
+    d.tick()
+    assert d.current is None                                                # the next run waits politely again
