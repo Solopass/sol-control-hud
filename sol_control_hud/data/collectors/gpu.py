@@ -52,6 +52,18 @@ def process_name(pid: int, cache: dict[int, str]) -> str:
     return cache[pid]
 
 
+VENDORS = {0x1002: "amd", 0x8086: "intel", 0x10DE: "nvidia"}
+
+
+def chip_map() -> dict[str, str]:
+    """{counter luid: "amd" | "intel" | ...} for the real graphics chips (Microsoft's software renderer left out)."""
+    try:
+        from .budget import adapters
+        return {a["luid"].lower(): VENDORS[a["vendor"]] for a in adapters() if a.get("vendor") in VENDORS and a.get("luid")}
+    except Exception:  # noqa: BLE001 - without it the sampler falls back to "the adapter with the most memory"
+        return {}
+
+
 class GpuSampler:
     """Samples GPU utilization, adapter VRAM and per-process VRAM every `interval` seconds in a background thread.
 
@@ -82,6 +94,7 @@ class GpuSampler:
         self._stop.set()
 
     def _build(self):
+        self.info["chips"] = chip_map()          # each rescan: the Intel driver can arrive while the HUD runs (10-07)
         query = win32pdh.OpenQuery()
         handles = {c: [(p, win32pdh.AddCounter(query, p)) for p in self.expand(c)] for c in COUNTERS}
         win32pdh.CollectQueryData(query)  # utilization is a rate: needs a first sample before values are valid
@@ -141,7 +154,11 @@ def summarize(util: dict[str, float], adapter_mem: dict[str, float], proc_dedica
         vram[_luid(path)] = v
     if not vram:
         return {"available": False}
-    luid = max(vram, key=vram.get)  # the adapter holding the most dedicated memory is the discrete GPU
+    # The AMD card by its maker (10-07: with the Intel UHD 770 on and apps moved to it, "the adapter holding the most
+    # memory" could pick the wrong one); that guess is only the fallback when the chips aren't known.
+    chips = {k.lower(): v for k, v in (info.get("chips") or {}).items()}
+    amd = [l for l, c in chips.items() if c == "amd" and l in vram]
+    luid = amd[0] if amd else max(vram, key=vram.get)
 
     # sum per engine type across processes; like Task Manager, overall load = busiest engine type
     per_engine: dict[str, float] = {}
@@ -167,6 +184,29 @@ def summarize(util: dict[str, float], adapter_mem: dict[str, float], proc_dedica
                           "dedicated_gb": round(p["dedicated_gb"], 2), "shared_gb": round(p["shared_gb"], 2)})
     processes.sort(key=lambda p: p["dedicated_gb"], reverse=True)
 
+    # Which chip each app draws on (the dashboard's VRAM and Localhost cards). An app moved to the Intel chip keeps a
+    # sliver on the AMD card to show its windows (the monitors hang off it), often as big as its Intel memory
+    # (Discord 10-07: 0.09 GB each). An app that draws on the AMD card never touches the Intel chip, so any real
+    # memory on another chip means it draws there.
+    per: dict[int, dict[str, float]] = {}
+    for source in (proc_dedicated, proc_shared):
+        for path, v in source.items():
+            pid, chip = _pid(path), chips.get(_luid(path))
+            if pid is None or chip is None or v <= 0:
+                continue
+            per.setdefault(pid, {})[chip] = per.setdefault(pid, {}).get(chip, 0.0) + v / 1024**3
+    main = chips.get(luid, "amd")
+    pid_chips = {}
+    for pid, gb in per.items():
+        away = {c: v for c, v in gb.items() if c != main and v >= 0.02}
+        if away:
+            pid_chips[pid] = max(away, key=away.get)
+        elif gb.get(main, 0) >= 0.02:
+            pid_chips[pid] = main
+    other = [c for c in set(chips.values()) if c != main]
+    on_other = sorted(({"pid": pid, "name": name_of(pid), "chip": c, "gb": round(sum(per[pid].values()), 2)}
+                       for pid, c in pid_chips.items() if c in other), key=lambda p: p["gb"], reverse=True)
+
     return {
         "available": True,
         "name": info.get("name"),
@@ -175,6 +215,9 @@ def summarize(util: dict[str, float], adapter_mem: dict[str, float], proc_dedica
         "vram_used_gb": round(vram[luid] / 1024**3, 2),
         "vram_total_gb": info.get("vram_total_gb"),
         "processes": processes,
+        "pid_chips": pid_chips,          # pid -> "amd" / "intel": where that app draws
+        "on_other_chips": on_other,      # apps drawing on the Intel chip, biggest first
+        "chips": sorted(set(chips.values())),
         "sampled_at": time.time(),
     }
 

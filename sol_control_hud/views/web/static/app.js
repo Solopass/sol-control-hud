@@ -225,9 +225,12 @@ function render(p) {
 
   // services
   const ports = { Router: ':11440', Embed: ':11443', HUD: ':7900', Chains: 'runner', WSL: 'running' };   // WSL off is normal: its services start on demand
+  // the router's model process: which chip it's on (the AI should only ever be on the AMD card)
+  const llama = ((p.gpu || {}).processes || []).filter((x) => /llama-server/i.test(x.name) && x.dedicated_gb + x.shared_gb >= 0.5);
+  const aiChip = llama.map((x) => chipOf(p, x.pid)).find(Boolean);
   setHTML($('svcList'), Object.keys(ports).map((n) => {
     const up = s.services?.[n];
-    return `<div class="${up ? 'up' : n === 'WSL' ? '' : 'down'}"><i></i>${n}<small>${up ? ports[n] : n === 'WSL' ? 'off' : 'down'}</small></div>`;
+    return `<div class="${up ? 'up' : n === 'WSL' ? '' : 'down'}"><i></i>${n}<small>${up ? ports[n] : n === 'WSL' ? 'off' : 'down'}${n === 'Router' && up ? chipTag(aiChip, true) : ''}</small></div>`;
   }).join(''));
 
   // workspace
@@ -304,6 +307,22 @@ function renderVram(p) {
   const h = p.heal || {};                       // the watcher's spill auto-heal (OBVLT tools/sol-llm-watch.ps1)
   if (h.recent) notes.push(h.kind === 'waiting' ? `auto-heal waiting: ${h.text}` : `auto-heal reloaded the model ${agoShort(h.at)}`);
   $('vramNote').textContent = notes.join(' · ');
+  // apps drawn on the Intel chip (Settings → Graphics chip per app); they keep only a sliver here for the monitors
+  const g = p.gpu || {}, off = g.on_other_chips || [];
+  const box = $('vramIntel');
+  box.hidden = !(g.chips || []).includes('intel');
+  if (!box.hidden) {
+    const byName = {};
+    off.forEach((x) => { byName[x.name] = (byName[x.name] || 0) + x.gb; });
+    const list = Object.entries(byName).sort((a, b) => b[1] - a[1]).map(([n, gb]) => `${esc(n)} ${gb.toFixed(2)}`).join(' · ');
+    setHTML(box, `<span class="chip intel">Intel</span> ${list ? `drawn there, off this card: ${list} GB` : 'no apps on the Intel chip right now'}`);
+  }
+}
+function chipOf(p, pid) { return ((p?.gpu || {}).pid_chips || {})[pid]; }
+function chipTag(chip, warnIfIntel = false) {
+  if (!chip) return '';
+  const bad = warnIfIntel && chip !== 'amd';
+  return ` <span class="chip ${esc(chip)}${bad ? ' bad' : ''}" title="${bad ? 'should be on the AMD card' : `draws on the ${chip === 'amd' ? 'AMD card' : 'Intel chip'}`}">${chip === 'amd' ? 'AMD' : chip === 'intel' ? 'Intel' : esc(chip)}</span>`;
 }
 function agoShort(epoch) {
   if (!epoch) return '';
@@ -1079,7 +1098,7 @@ function portRow(r) {
     : `<span class="dim small" title="${esc(r.kind_words)}: this card keeps it read-only">🔒 ${esc(r.kind_words)}</span>`;
   const nics = r.everyone ? ' <span class="pill warn" title="Listening on every interface, not only this PC">all nics</span>' : '';
   return `<div class="prow"><b>:${r.port}</b>`
-    + `<span class="meta">${esc(r.name)}${r.label ? ` · ${esc(r.label)}` : ''}${nics}</span>`
+    + `<span class="meta">${esc(r.name)}${r.label ? ` · ${esc(r.label)}` : ''}${nics}${chipTag(r.chip, r.kind === 'ai')}</span>`
     + `<span class="meta" title="${r.started ? `up since ${new Date(r.started * 1000).toLocaleString()}` : 'start time unknown'}">${upWords(r.up_seconds)}</span>`
     + `<span class="acts">${act}</span></div>`;
 }

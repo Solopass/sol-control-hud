@@ -677,8 +677,12 @@ class Hub:
 
         @app.get("/api/ports")
         def localhost_ports() -> dict:
-            """What listens on this PC and what closed recently (the Localhost card polls this)."""
-            return {"ok": True, **(self.collectors["ports"].get() or {})}
+            """What listens on this PC and what closed recently (the Localhost card polls this), with the graphics chip
+            each one draws on when it uses one (the GPU sampler's pid_chips)."""
+            data = dict(self.collectors["ports"].get() or {})
+            chips = (self.collectors["gpu"].get() or {}).get("pid_chips") or {}
+            data["listening"] = [{**r, "chip": chips.get(r.get("pid"))} for r in data.get("listening") or []]
+            return {"ok": True, **data}
 
         @app.get("/api/settings")
         def settings_read() -> dict:

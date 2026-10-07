@@ -243,3 +243,27 @@ def test_apps_keep_their_own_numbers_when_dwm_reads_absurdly_high(tmp_path):
     g = gpu_block(dedicated={pm(100): 6.0, pm(300): 3.0, pm(500): 3.0}, shared={}, used=9.0)
     v = vram.VramGuard(needs=vram.NeedStore(tmp_path / "needs2.json"), confirm=1).update(g, {"up": False})
     assert abs(sum(t["gb"] for t in v["top_consumers"]) - 3.0) < 0.05
+
+
+def test_chip_per_app_and_the_amd_card_picked_by_maker():
+    """2026-10-07, Intel UHD 770 on: apps moved there keep a display sliver on the AMD card about as big as their
+    Intel memory, so 'any real memory on the other chip' decides; and the AMD card is chosen by vendor, not by which
+    adapter holds the most (with the apps moved and no model loaded, that could be the Intel side)."""
+    chips = {DGPU.removesuffix("_phys_0"): "amd", IGPU.removesuffix("_phys_0"): "intel"}   # as chip_map() spells them
+    block = gpu.summarize(
+        util={},
+        adapter_mem={rf"\GPU Adapter Memory({DGPU})\Dedicated Usage": 0.3 * GB,
+                     rf"\GPU Adapter Memory({IGPU})\Dedicated Usage": 0.5 * GB},      # Intel side "bigger"
+        proc_dedicated={pm(500): 0.07 * GB, pm(100): 0.2 * GB},                         # Discord sliver, llama-server
+        proc_shared={ps(500): 0.02 * GB, ps(500, IGPU): 0.09 * GB, ps(300, IGPU): 0.01 * GB},
+        name_of=lambda pid: NAMES.get(pid, f"pid {pid}"),
+        info={"name": "AMD Radeon RX 9070 XT", "vram_total_gb": 15.9, "chips": chips},
+    )
+    assert block["vram_used_gb"] == 0.3                                                 # the AMD adapter's total
+    assert block["pid_chips"][500] == "intel" and block["pid_chips"][100] == "amd"
+    assert 300 not in block["pid_chips"]                                                # 0.01 GB: noise
+    assert [p["name"] for p in block["on_other_chips"]] == ["Discord"] and block["chips"] == ["amd", "intel"]
+    legacy = gpu.summarize(util={}, adapter_mem={rf"\GPU Adapter Memory({DGPU})\Dedicated Usage": 9 * GB,
+                                                 rf"\GPU Adapter Memory({IGPU})\Dedicated Usage": 0.2 * GB},
+                           proc_dedicated={}, proc_shared={}, name_of=str, info={})
+    assert legacy["vram_used_gb"] == 9.0 and legacy["pid_chips"] == {}                  # chips unknown: old fallback

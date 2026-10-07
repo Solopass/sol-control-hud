@@ -67,7 +67,9 @@ def adapters() -> list[dict]:
                 break                                    # EnumAdapters1: DXGI_ERROR_NOT_FOUND ends the list
             desc = DXGI_ADAPTER_DESC1()
             _method(adapter, 10, ctypes.POINTER(DXGI_ADAPTER_DESC1))(adapter, ctypes.byref(desc))    # GetDesc1
-            out.append({"name": desc.Description, "vendor": int(desc.VendorId)})
+            raw = desc.AdapterLuid & 0xFFFFFFFFFFFFFFFF      # LUID = LowPart (low 32 bits) + HighPart (high 32)
+            out.append({"name": desc.Description, "vendor": int(desc.VendorId),
+                        "luid": f"luid_0x{raw >> 32:08x}_0x{raw & 0xFFFFFFFF:08x}"})   # as the GPU counters spell it
             _release(adapter)
             i += 1
     finally:
