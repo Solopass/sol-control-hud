@@ -30,10 +30,13 @@ def checks(status: dict) -> list[tuple[str, str, str]]:
     v = status.get("vram") or {}
     for m in o.get("loaded") or []:
         pct = m.get("gpu_percent")
+        if pct is None and v.get("ai", {}).get("dedicated_gb", 0) > 0.5 and not v.get("evicted"):
+            pct = 100
+        ctx_str = f", ctx {m.get('context')}" if m.get("context") else ""
         if v.get("available") and v.get("evicted"):
-            out.append((f"  model {m['name']}", WARN, f"{pct}% reported by Ollama, but {v['ai']['shared_gb']} GB is evicted to system RAM"))
+            out.append((f"  model {m['name']}", WARN, f"{pct or 0}% reported by Ollama, but {v['ai']['shared_gb']} GB is evicted to system RAM"))
         else:
-            out.append((f"  model {m['name']}", OK if (pct or 0) >= 60 else WARN, f"{pct}% on GPU, ctx {m.get('context')}"))
+            out.append((f"  model {m['name']}", OK if (pct or 0) >= 60 else WARN, f"{pct or 0}% on GPU{ctx_str}"))
 
     be = status.get("backend") or {}
     if be.get("known") is False:
