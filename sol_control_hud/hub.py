@@ -438,6 +438,12 @@ class Hub:
         except Exception:  # noqa: BLE001 - reading a shortcut must never stop the app
             self._login = False
         write_running_marker()
+        if self.settings.get("gpu_choices"):       # Discord moves to a new folder on update: put the choice on it
+            try:
+                from . import gpu_prefs
+                gpu_prefs.reapply(self.settings["gpu_choices"])
+            except Exception as e:  # noqa: BLE001 - a registry hiccup must never stop the app
+                log(f"gpu choices not re-applied: {type(e).__name__}: {e}")
         self._start_notifier()
         try:
             from .metrics import Metrics

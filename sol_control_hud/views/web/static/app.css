@@ -412,6 +412,8 @@ button.mini.on { border-color:var(--cyan); color:var(--cyan); background:color-m
 .srow.col { flex-direction:column; align-items:stretch; }
 .srow select, .srow .snum { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:7px; padding:4px 8px; font-size:12px; }
 .srow .snum { width:70px; }
+.srow.warnrow { border:1px solid color-mix(in srgb, var(--amber) 45%, var(--line)); }
+.srow.warnrow b { color:var(--amber); }
 .schips { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; }
 .schips label { display:inline-flex; gap:5px; align-items:center; }
 input.switch { appearance:none; width:38px; height:21px; border-radius:11px; background:var(--line); position:relative; cursor:pointer;

@@ -52,6 +52,29 @@ def _release(obj) -> None:
         ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)(vtbl[2])(obj)
 
 
+def adapters() -> list[dict]:
+    """Every graphics adapter Windows offers apps: [{name, vendor}] (vendor 0x8086 = Intel, 0x1002 = AMD,
+    0x1414 = Microsoft's software renderer). The Intel chip only shows up once it is enabled in the BIOS."""
+    factory = ctypes.c_void_p()
+    if ctypes.windll.dxgi.CreateDXGIFactory1(ctypes.byref(IID_IDXGIFactory1), ctypes.byref(factory)) != 0:
+        return []
+    out = []
+    try:
+        i = 0
+        while True:
+            adapter = ctypes.c_void_p()
+            if _method(factory, 12, wintypes.UINT, ctypes.POINTER(ctypes.c_void_p))(factory, i, ctypes.byref(adapter)) != 0:
+                break                                    # EnumAdapters1: DXGI_ERROR_NOT_FOUND ends the list
+            desc = DXGI_ADAPTER_DESC1()
+            _method(adapter, 10, ctypes.POINTER(DXGI_ADAPTER_DESC1))(adapter, ctypes.byref(desc))    # GetDesc1
+            out.append({"name": desc.Description, "vendor": int(desc.VendorId)})
+            _release(adapter)
+            i += 1
+    finally:
+        _release(factory)
+    return out
+
+
 def vram_budget() -> dict:
     """{name, vram_gb, budget_gb, usage_gb} for the adapter with the most dedicated VRAM (the RX 9070 XT). usage is this
     probe's own (~0); the budget is what Windows would let a background program keep in VRAM right now."""

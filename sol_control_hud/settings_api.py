@@ -51,7 +51,16 @@ def read(hub) -> dict:
             "slides": [{"tag": tag, "label": label, "on": bool(enabled.get(tag, True))} for tag, label in SLIDE_LABELS],
             **{k: bool(ts.get(k, d)) for k, d in TICKER_BOOLS.items()},
         },
+        "gpu": _gpu_state(),
     }
+
+
+def _gpu_state() -> dict:
+    from . import gpu_prefs
+    try:
+        return {"available": True, **gpu_prefs.state()}
+    except Exception as e:  # noqa: BLE001 - the rest of the panel must still load
+        return {"available": False, "error": f"{type(e).__name__}: {e}"}
 
 
 def _bool(value) -> bool:
@@ -113,6 +122,26 @@ def change(hub, key: str, value) -> dict:
     if key in TICKER_BOOLS:
         ticker_merge({key: _bool(value)})
         return {"ok": True, "why": f"{key.replace('_', ' ')}: {'on' if _bool(value) else 'off'}"}
+    if key.startswith("gpu:"):                 # which graphics chip an app uses (gpu_prefs.py)
+        from . import gpu_prefs
+        from .hub import save_settings
+        choice = str(value)
+        if choice not in gpu_prefs.CHOICES:
+            raise SettingError("pick intel, amd or auto")
+        if choice == "intel" and not gpu_prefs.intel_available():
+            raise SettingError("the Intel graphics chip is off: enable iGPU Multi-Monitor in the BIOS first")
+        target = key.split(":", 1)[1]
+        installed = [a["key"] for a in gpu_prefs.APPS if gpu_prefs.app_paths(a)]
+        keys = installed if target == "all" else [target]
+        if target != "all" and target not in installed:
+            raise SettingError(f"unknown or not installed app {target!r}")
+        labels = gpu_prefs.set_choice(keys, choice)
+        saved = dict(hub.settings.get("gpu_choices") or {})
+        saved.update({k: choice for k in keys})
+        hub.settings["gpu_choices"] = saved
+        save_settings(hub.settings)
+        chip = {"intel": "the Intel chip", "amd": "the AMD card", "auto": "Windows' choice"}[choice]
+        return {"ok": True, "why": f"{', '.join(labels)} → {chip}. Restart {'them' if len(labels) > 1 else 'it'} to switch."}
     if key.startswith("slide:"):
         tag = key.split(":", 1)[1]
         if tag not in dict(SLIDE_LABELS):

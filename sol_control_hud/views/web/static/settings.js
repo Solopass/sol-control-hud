@@ -38,6 +38,18 @@ async function loadSettings() {
       + t.slides.map((s) => `<label><input type="checkbox" data-setting="slide:${s.tag}"${s.on ? ' checked' : ''}>${esc(s.label)}</label>`).join('')
       + '</div></div></section>';
   }
+  const g = d.gpu || {};
+  if (g.available && (g.apps || []).length) {
+    const CHIP = { intel: 'Intel (frees the AMD card)', amd: 'AMD card', auto: 'Windows decides' };
+    html += '<section><h3>Graphics chip per app</h3>'
+      + (g.intel_available
+        ? '<div class="srow"><span><b>Move everyday apps to the Intel chip</b><span class="dim small">leaves the AMD card to the local AI and games; restart each app after a change</span></span><button class="mini go" data-gpu-all="intel">Move all to Intel</button></div>'
+        : '<div class="srow warnrow"><span><b>The Intel graphics chip is off</b><span class="dim small">enable iGPU Multi-Monitor in the BIOS first (Advanced → System Agent → Graphics Configuration). Until then these choices change nothing.</span></span></div>')
+      + g.apps.map((a) => `<div class="srow"><span><b>${esc(a.label)}</b><span class="dim small">${esc(a.about)}${a.running ? ' · running: restart it after a change' : ''}</span></span>`
+        + `<select data-setting="gpu:${a.key}">${['intel', 'amd', 'auto'].map((c) => `<option value="${c}"${a.choice === c ? ' selected' : ''}${c === 'intel' && !g.intel_available ? ' disabled' : ''}>${CHIP[c]}</option>`).join('')}`
+        + `${a.choice === 'mixed' ? '<option value="" selected disabled>mixed</option>' : ''}</select></div>`).join('')
+      + '</section>';
+  }
   html += '<section><h3>Local AI</h3>'
     + swRow('hud_heal', 'Let the HUD reload a spilled model too', a.hud_heal,
       'off by default: the AI watcher already does it, and waits while a chain or chat uses the model')
@@ -59,6 +71,15 @@ async function changeSetting(el) {
   setTimeout(loadSettings, 700);           // the ticker applies it on its own thread
 }
 
+$('settingsBody').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-gpu-all]');
+  if (!b) return;
+  if (!confirm('Move all listed apps to the Intel chip?\n\nEach one switches the next time it starts, so restart them afterwards. Games are not affected.')) return;
+  b.disabled = true;
+  const r = await post('/api/action', { action: 'setting', target: 'gpu:all', value: b.dataset.gpuAll });
+  toast(r.why || (r.ok ? 'saved' : 'that did not work'));
+  loadSettings();
+});
 $('settingsBody').addEventListener('change', (e) => {
   const el = e.target.closest('[data-setting]');
   if (el) changeSetting(el);
