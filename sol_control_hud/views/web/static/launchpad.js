@@ -6,7 +6,7 @@
 let projAll = false, projCache = [], mediaCache = [], fastUntil = 0;
 const pendingOpen = {};          // name -> started at (ms): open its page once it runs
 const liveOpen = {};             // media name -> last Live answer
-const OPEN_WAIT_MS = 90000;
+const OPEN_WAIT_MS = 300000;    // a start can include a build (OmniTools: ~1.5 min after its code changed)
 const TAGS = ['active', 'paused', 'idea', 'finished', 'archived', 'deprecated'];
 let menuFor = null;              // the project whose ⋯ menu is open
 

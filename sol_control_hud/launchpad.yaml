@@ -40,7 +40,8 @@ projects:
     title: OmniTools
     description: Self-hosted browser tools for images, video, audio, PDFs and text (a fork of iib0011/omni-tools).
     # its node_modules are Linux builds (esbuild/swc linux-x64), so it runs in WSL
-    start: {wsl: 'cd /mnt/d/Workspace/omni-tools && exec npm run dev'}
+    # a production build served with `vite preview` (starts in ~2 s; rebuilds only after its code changed, ~1.5 min)
+    start: {wsl: 'exec bash /mnt/d/Workspace/sol-control-hud/scripts/omni-tools-serve.sh'}
     stop: {wsl: 'pkill -f /mnt/d/Workspace/omni-tools/node_modules'}
     port: 8082
     runs_in: wsl

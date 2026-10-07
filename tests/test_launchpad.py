@@ -527,3 +527,14 @@ def test_hub_tag_and_note_actions(client_and_hub, monkeypatch, tmp_path):
     r = client.post("/api/action", json={"action": "media", "target": "media-api", "op": "note", "source": "https://youtu.be/a",
                                          "title": "T"}, headers=OURS).json()
     assert r["ok"] and started == [("https://youtu.be/a", "T")]
+
+
+def test_real_registry_serves_omni_tools_from_a_build():
+    """The Start button runs scripts/omni-tools-serve.sh (vite preview of a build), not the 20 s dev server."""
+    reg = projects.load_registry(user_file=Path("does-not-exist.json"))
+    cmd = reg["projects"]["omni-tools"]["start"]["wsl"]
+    assert "omni-tools-serve.sh" in cmd and "npm run dev" not in cmd
+    script = Path(__file__).resolve().parents[1] / "scripts" / "omni-tools-serve.sh"
+    raw = script.read_bytes()
+    assert b"\r\n" not in raw                       # bash in WSL chokes on CRLF
+    assert b"exec npx vite preview" in raw and b"npm run build" in raw
