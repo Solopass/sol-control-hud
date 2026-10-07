@@ -473,8 +473,9 @@ def make_runs_db(path: Path, note: Path) -> None:
     con.execute("INSERT INTO runs VALUES (2, 'transcript-note', 'running', ?, NULL, NULL, 30, 30, NULL)",
                 (json.dumps({"source": "https://www.youtube.com/watch?v=q", "title": ""}),))
     con.execute("INSERT INTO runs VALUES (3, 'chain: other', 'running', '{}', NULL, NULL, 40, 40, NULL)")
-    con.executemany("INSERT INTO events (run_id, at, step, kind) VALUES (?, ?, ?, ?)",
-                    [(2, 31, "transcribe", "step_succeeded"), (2, 32, "summary", "step_started")])
+    con.executemany("INSERT INTO events (run_id, at, step, kind, data) VALUES (?, ?, ?, ?, ?)",
+                    [(2, 31, "transcribe", "step_succeeded", "{}"), (2, 32, "part_notes", "step_started", '{"item": "3/5"}'),
+                     (2, 33, "part_notes", "attempt", '{"ok": true}')])     # the latest event has no item: use the start
     con.commit()
     con.close()
 
@@ -486,7 +487,7 @@ def test_note_runs_and_opening_a_note(tmp_path):
     make_runs_db(db, note)
     runs = launcher.note_runs(db=db)
     assert [r["id"] for r in runs] == [2, 1]                         # other workflows are not listed
-    assert runs[0]["step"] == "summary" and runs[0]["title"] == "youtube.com · watch?v=q"
+    assert runs[0]["step"] == "part_notes" and runs[0]["item"] == "3/5" and runs[0]["title"] == "youtube.com · watch?v=q"
     assert runs[1]["title"] == "Talk" and runs[1]["note"] == "2026-10-07 Talk" and runs[1]["has_note"]
     opened = []
     assert launcher.open_note_run(1, opener=opened.append, db=db)["ok"] and opened == [note]
@@ -538,3 +539,35 @@ def test_real_registry_serves_omni_tools_from_a_build():
     raw = script.read_bytes()
     assert b"\r\n" not in raw                       # bash in WSL chokes on CRLF
     assert b"exec npx vite preview" in raw and b"npm run build" in raw
+
+
+# ---------------------------------------------------------------- answer speed and the watcher's heal (logs only)
+ROUTER_LOG = """[49170] 1.08.306.174 I slot print_timing: id  0 | task 0 | prompt eval time =     353.76 ms /    60 tokens (    5.90 ms per token,   169.61 tokens per second)
+[49170] 1.08.306.180 I slot print_timing: id  0 | task 0 |        eval time =   64149.81 ms /  1463 tokens (   43.88 ms per token,    22.79 tokens per second)
+[51000] 1.09.000.000 I slot print_timing: id  0 | task 1 |        eval time =     100.00 ms /    12 tokens (    8.00 ms per token,   120.00 tokens per second)
+"""
+
+
+def test_answer_speed_names_the_model_by_port_and_flags_slow(tmp_path):
+    from sol_control_hud.data.collectors import speed
+    log = tmp_path / "router.log"
+    log.write_text(ROUTER_LOG, encoding="utf-8")
+    assert [x["tps"] for x in speed.parse_speeds(ROUTER_LOG)] == [22.8]     # prompt reading and tiny answers skipped
+    r = speed.answer_speed({"sol-fast": {"pid": 1, "port": 49170}}, path=log)
+    assert r["model"] == "sol-fast" and r["tps"] == 22.8 and r["usual"] == 140 and r["slow"] is True
+    r = speed.answer_speed({"sol-fast": {"pid": 1, "port": 1}}, path=log)  # restarted since: unknown process, no verdict
+    assert r["model"] is None and r["slow"] is False
+    assert speed.answer_speed({}, path=tmp_path / "missing.log") == {"available": False}
+
+
+def test_heal_status_reads_the_watchers_latest_line(tmp_path):
+    from datetime import datetime
+    from sol_control_hud.data.collectors import speed
+    log = tmp_path / "sol-llm.log"
+    log.write_text("\n".join([
+        "2026-10-07T04:00:00 [watch] Auto-heal trigger: model spilled (1.2 GB) and others dropped to 4000 MB -> reloading",
+        "2026-10-07T04:20:00 [watch] Auto-heal waiting: model spilled (1.3 GB) but a chain is running", ""]), encoding="utf-8")
+    now = datetime.fromisoformat("2026-10-07T04:25:00").timestamp()
+    h = speed.heal_status(log, now=now)
+    assert h["recent"] and h["kind"] == "waiting" and h["text"].endswith("but a chain is running")
+    assert speed.heal_status(log, now=now + 3600)["recent"] is False

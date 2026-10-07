@@ -206,13 +206,14 @@ $('mediaTiles').addEventListener('click', async (e) => {
 });
 
 // ---------- recording or link -> transcript note (runs the transcript-note workflow; progress from the run database)
-const STEP_WORDS = { transcribe: 'transcribing', summary: 'summarizing', note: 'writing the note' };
+const STEP_WORDS = { transcribe: 'transcribing', parts: 'splitting it into parts', part_notes: 'taking notes', summary: 'merging the notes', note: 'writing the note' };
 function noteRun(r) {
   const st = r.status;
   const cls = st === 'succeeded' ? 'ok' : /failed|cancelled|interrupted|needs_user/.test(st) ? 'bad' : 'run';
   const icon = cls === 'ok' ? '✓' : cls === 'bad' ? '✕' : '◔';
   const what = st === 'succeeded' ? (r.note ? `→ ${r.note}` : 'done')
-    : cls === 'run' ? (STEP_WORDS[r.step] || st) : st.replace('_', ' ');
+    : cls === 'run' ? (r.step === 'part_notes' && r.item ? `notes on part ${String(r.item).replace('/', ' of ')}` : (STEP_WORDS[r.step] || st))
+    : st.replace('_', ' ');
   const open = r.has_note ? `<button class="mini ghost" data-run="${r.id}">open note</button>` : '';
   return `<div class="mjob nrun" title="${esc(r.error || what)}"><span class="jicon ${cls}">${icon}</span>`
     + `<span class="jt">${esc(r.title)}</span><span class="dim">${esc(what)}</span><span class="dim">${ago(r.at)}</span>${open}</div>`;

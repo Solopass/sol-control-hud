@@ -48,7 +48,7 @@ def descriptions() -> dict[str, str]:
 
 
 def model_processes() -> dict[str, dict]:
-    """alias -> {pid, ram_gb} for the router's model processes (and the embedder)."""
+    """alias -> {pid, port, ram_gb} for the router's model processes (and the embedder)."""
     out = {}
     for p in psutil.process_iter(["name"]):
         if (p.info.get("name") or "").lower() != "llama-server.exe":
@@ -58,7 +58,8 @@ def model_processes() -> dict[str, dict]:
             if "--alias" not in cmd:
                 continue
             alias = cmd[cmd.index("--alias") + 1].split(",")[0]
-            out[alias] = {"pid": p.pid, "ram_gb": round(p.memory_info().rss / 1024**3, 2)}
+            port = int(cmd[cmd.index("--port") + 1]) if "--port" in cmd else None   # names its lines in router.log
+            out[alias] = {"pid": p.pid, "port": port, "ram_gb": round(p.memory_info().rss / 1024**3, 2)}
         except (psutil.Error, IndexError, ValueError):
             continue
     return out

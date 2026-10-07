@@ -191,6 +191,7 @@ function render(p) {
 
   renderVram(p);
   renderAi(p);
+  renderSpeed(p);
   renderChains(p);
 
   // Away & queue card
@@ -300,7 +301,36 @@ function renderVram(p) {
   if (v.need?.model) notes.push(`${v.need.model} needs ~${v.need.gb} GB${v.spare_gb != null ? ` · ${v.spare_gb.toFixed(1)} GB spare` : ''}`);
   if (v.evicted) notes.push('Windows pushed part of the model out to system RAM: it runs slow until VRAM frees up');
   if (v.suggest_free?.length && verdict !== 'OK') notes.push(`free up: ${v.suggest_free.map((t) => `${t.label} ${t.gb} GB`).join(', ')}`);
+  const h = p.heal || {};                       // the watcher's spill auto-heal (OBVLT tools/sol-llm-watch.ps1)
+  if (h.recent) notes.push(h.kind === 'waiting' ? `auto-heal waiting: ${h.text}` : `auto-heal reloaded the model ${agoShort(h.at)}`);
   $('vramNote').textContent = notes.join(' · ');
+}
+function agoShort(epoch) {
+  if (!epoch) return '';
+  const s = Date.now() / 1000 - epoch;
+  return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+}
+// Real answer speed: the VRAM verdict can say OK while part of the model sits in system RAM (below its 1 GB line)
+// and answers come 5x slower (10-07: 23-28 tok/s instead of ~140). The engine logs every answer's speed.
+function renderSpeed(p) {
+  const sp = p.speed || {}, el = $('aiSpeed'), note = $('aiSlow');
+  if (!sp.available) { el.textContent = '–'; note.hidden = true; return; }
+  const who = sp.model || 'an earlier model process';
+  el.textContent = `${sp.tps} tok/s${sp.usual ? ` · usual ~${sp.usual}` : ''} · ${who}${sp.at ? ` · ${agoShort(sp.at)}` : ''}`;
+  el.style.color = sp.slow ? 'var(--red)' : sp.usual ? 'var(--green)' : '';
+  if (!sp.slow) { note.hidden = true; return; }
+  const row = (p.models || []).find((m) => m.id === sp.model) || {}, v = p.vram_guard || {};
+  const hogs = (v.top_consumers || []).filter((t) => t.movable && t.gb >= 0.2 && !/llama-server|ollama/i.test(t.name)).slice(0, 4).map((t) => `${t.label} ${t.gb} GB`).join(', ');
+  let why;
+  if ((row.spilled_gb || 0) >= 0.05) {
+    why = `${row.spilled_gb.toFixed(2)} GB of ${sp.model} is in system RAM`
+      + (v.others_gb != null ? `: other apps hold ${v.others_gb.toFixed(1)} GB of the card${hogs ? ` (${hogs})` : ''}` : '')
+      + '. Closing some makes room; the watcher reloads it once they use under 4.6 GB.';
+  } else {
+    why = 'nothing is spilled right now, so the slow answer came earlier (or from a long prompt, or another program on the GPU).';
+  }
+  note.textContent = `Slow: ${why}`;
+  note.hidden = false;
 }
 
 function renderAi(p) {

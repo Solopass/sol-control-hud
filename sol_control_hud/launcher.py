@@ -406,7 +406,7 @@ def note_runs(limit: int = 4, db: Path | None = None) -> list[dict]:
         try:
             rows = con.execute("SELECT id, status, inputs, outputs, error, created_at, finished_at FROM runs "
                                "WHERE workflow = ? ORDER BY id DESC LIMIT ?", (NOTE_WORKFLOW, limit)).fetchall()
-            steps = {rid: con.execute("SELECT step FROM events WHERE run_id = ? AND step IS NOT NULL ORDER BY id DESC LIMIT 1",
+            steps = {rid: con.execute("SELECT step, data FROM events WHERE run_id = ? AND kind = 'step_started' ORDER BY id DESC LIMIT 1",
                                       (rid,)).fetchone() for rid, *_ in rows}
         finally:
             con.close()
@@ -426,8 +426,15 @@ def note_runs(limit: int = 4, db: Path | None = None) -> list[dict]:
         note = (o.get("note") or {}).get("path") if isinstance(o.get("note"), dict) else None
         tr = o.get("transcribe")
         title = i.get("title") or (tr.get("title") if isinstance(tr, dict) else None)
+        step, item = None, None
+        if status in ("queued", "running", "waiting") and steps.get(rid):
+            step = steps[rid][0]
+            try:
+                item = (_json.loads(steps[rid][1] or "{}") or {}).get("item")   # "3/5" while it takes notes on part 3
+            except (ValueError, AttributeError):
+                item = None
         out.append({"id": rid, "status": status, "title": title or _short_source(i.get("source", "")),
-                    "step": (steps.get(rid) or [None])[0] if status in ("queued", "running", "waiting") else None,
+                    "step": step, "item": item,
                     "note": Path(note).stem if note else None, "has_note": bool(note and Path(note).exists()),
                     "error": (error or "")[:200] or None, "at": created, "finished_at": finished})
     return out

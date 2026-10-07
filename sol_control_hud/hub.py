@@ -469,7 +469,8 @@ class Hub:
         return {**p, "cpu": c["cpu"].get(), "gpu": c["gpu"].get(), "vram_guard": c["vram"].get(),
                 "router": c["llama_swap"].get(), "wsl": c["wsl"].get(), "stability": c["stability"].get(),
                 "away": c["away"].get(), "chains": c["chains"].get(), "activity": c["activity"].get(),
-                "point": self.history.latest(), "models": self._model_rows()}
+                "point": self.history.latest(), "models": self._model_rows(),
+                "speed": c["speed"].get(), "heal": c["heal"].get()}
 
     def _model_rows(self) -> list[dict]:
         from .models_ctl import rows
@@ -507,6 +508,9 @@ class Hub:
                                         (self.collectors["wsl"].get() or {}).get("state"))
         self.collectors.update({"media_probe": Cached(probe, 10), "projects": Cached(self.projects_payload, 4),
                                 "media": Cached(self.media_payload, 4)})
+        from .data.collectors import speed           # real answer speed (router.log) and the watcher's spill auto-heal
+        self.collectors.update({"speed": Cached(lambda: speed.answer_speed(self.collectors["model_procs"].get()), 3),
+                                "heal": Cached(speed.heal_status, 10)})
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
