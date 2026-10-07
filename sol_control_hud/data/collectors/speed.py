@@ -20,8 +20,10 @@ WATCH_LOG = LLM_DIR / "sol-llm.log"
 TAIL_BYTES = 256 * 1024
 MIN_TOKENS = 64              # very short answers give noisy speeds
 SLOW_FRACTION = 0.5          # below half the usual speed: say so
-# usual generation speed with the model fully in VRAM (OBVLT CLAUDE.md, 2026-10-07)
-USUAL_TPS = {"sol-fast": 140, "sol-vision": 140, "sol-smart": 64, "sol-long": 60}
+# Typical generation speed with room on the card. sol-fast's MTP draft guesses code far better than prose: the A/B on
+# 2026-10-07 (reports\ai-v2-bench.md, ab-*) gave 127-138 tok/s on code and the same model 73 tok/s on a story, so 100
+# is the middle and "slow" (under half) is under 50. With the card crowded (12.3 GB in use) the story ran at 26.
+USUAL_TPS = {"sol-fast": 100, "sol-vision": 100, "sol-smart": 64, "sol-long": 60}
 HEAL_RECENT_S = 30 * 60      # a heal line older than this is history, not status
 
 _EVAL = re.compile(r"^\[(\d+)\].*?\|\s+eval time =\s+([\d.]+) ms /\s+(\d+) tokens.*?([\d.]+) tokens per second")

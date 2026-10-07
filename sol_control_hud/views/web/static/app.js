@@ -310,8 +310,10 @@ function agoShort(epoch) {
   const s = Date.now() / 1000 - epoch;
   return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
 }
-// Real answer speed: the VRAM verdict can say OK while part of the model sits in system RAM (below its 1 GB line)
-// and answers come 5x slower (10-07: 23-28 tok/s instead of ~140). The engine logs every answer's speed.
+// Real answer speed, from the engine's own log. "Slow" is judged by how full the card is, not by the model's
+// system-RAM share: sol-fast keeps ~0.6 GB there in every setup (A/B 2026-10-07), fast or slow. What made it slow
+// on 10-07 (26 tok/s on prose vs 73 later) was the card at 12.3 GB in use, past the ~12.2 GB Windows allows.
+const CARD_LIMIT_GB = 12.2;
 function renderSpeed(p) {
   const sp = p.speed || {}, el = $('aiSpeed'), note = $('aiSlow');
   if (!sp.available) { el.textContent = '–'; note.hidden = true; return; }
@@ -322,12 +324,12 @@ function renderSpeed(p) {
   const row = (p.models || []).find((m) => m.id === sp.model) || {}, v = p.vram_guard || {};
   const hogs = (v.top_consumers || []).filter((t) => t.movable && t.gb >= 0.2 && !/llama-server|ollama/i.test(t.name)).slice(0, 4).map((t) => `${t.label} ${t.gb} GB`).join(', ');
   let why;
-  if ((row.spilled_gb || 0) >= 0.05) {
-    why = `${row.spilled_gb.toFixed(2)} GB of ${sp.model} is in system RAM`
-      + (v.others_gb != null ? `: other apps hold ${v.others_gb.toFixed(1)} GB of the card${hogs ? ` (${hogs})` : ''}` : '')
-      + '. Closing some makes room; the watcher reloads it once they use under 4.6 GB.';
+  if (v.used_gb != null && v.used_gb >= CARD_LIMIT_GB - 0.7) {
+    why = `the card is nearly full (${v.used_gb.toFixed(1)} GB in use; Windows lets programs use about ${CARD_LIMIT_GB} GB)`
+      + (v.others_gb != null ? `, and other apps hold ${v.others_gb.toFixed(1)} GB of it${hogs ? ` (${hogs})` : ''}` : '')
+      + '. Closing some, or moving them to the Intel chip in Settings, makes room.';
   } else {
-    why = 'nothing is spilled right now, so the slow answer came earlier (or from a long prompt, or another program on the GPU).';
+    why = `the card has room now (${v.used_gb != null ? v.used_gb.toFixed(1) + ' GB in use' : 'no reading'}), so the slow answer came earlier, from a long prompt, or from another program using the GPU.`;
   }
   note.textContent = `Slow: ${why}`;
   note.hidden = false;
