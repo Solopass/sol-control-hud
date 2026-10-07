@@ -7,6 +7,8 @@ let projAll = false, projCache = [], mediaCache = [], fastUntil = 0;
 const pendingOpen = {};          // name -> started at (ms): open its page once it runs
 const liveOpen = {};             // media name -> last Live answer
 const OPEN_WAIT_MS = 90000;
+const TAGS = ['active', 'paused', 'idea', 'finished', 'archived', 'deprecated'];
+let menuFor = null;              // the project whose ⋯ menu is open
 
 function ago(epoch) {
   if (!epoch) return '';
@@ -44,7 +46,7 @@ function projDot(p) {
 function projRow(p) {
   const g = p.git || {};
   const chips = [];
-  if (p.status) chips.push(`<span class="pill ${p.status === 'paused' ? 'warn' : 'dim'}">${esc(p.status)}</span>`);
+  if (p.status) chips.push(`<span class="pill ${p.status === 'paused' ? 'warn' : p.status === 'active' ? 'ok' : 'dim'}" title="${p.status_from === 'you' ? 'your tag' : 'from its README'}">${esc(p.status)}${p.status_from === 'you' ? ' ✎' : ''}</span>`);
   if (p.running) chips.push(`<span class="pill ok" title="${p.running.where === 'wsl' ? 'runs in WSL' : `pid ${p.running.pid}`}">:${p.running.port}${p.running.up_seconds ? ` · ${upWords(p.running.up_seconds)}` : ''}</span>`);
   else if (p.busy_by) chips.push(`<span class="pill warn" title="Something else holds its port">:${p.port} taken · ${esc(p.busy_by)}</span>`);
   if (g.dirty_files) chips.push(`<span class="pill ${(g.dirty_days || 0) > 3 ? 'red' : 'warn'}" title="Uncommitted changes; the oldest is ${g.dirty_days ?? '?'} days old">${g.dirty_files} uncommitted${g.dirty_days ? ` · ${g.dirty_days}d` : ''}</span>`);
@@ -58,13 +60,24 @@ function projRow(p) {
   if (p.github) acts.push(`<button class="mini ghost" data-p="github" title="${esc(p.github)}">GitHub</button>`);
   acts.push(`<button class="mini ghost" data-p="editor" title="Open in VS Code">‹/›</button>`);
   acts.push(`<button class="mini ghost" data-p="folder" title="Open the folder">📁</button>`);
+  acts.push(`<button class="mini ghost${menuFor === p.name ? ' on' : ''}" data-p="menu" title="Tag or hide">⋯</button>`);
   const commit = g.last_commit ? `last commit ${ago(g.last_commit)}${g.subject ? ` · ${esc(g.subject)}` : ''}` : (p.git ? '' : 'not a git repo');
   return `<div class="jrow" data-name="${esc(p.name)}">`
     + `<i class="dot ${projDot(p)}"></i>`
     + `<div class="jmain"><div class="jtitle"><b>${esc(p.title)}</b>${p.title !== p.name ? `<span class="dim small">${esc(p.name)}</span>` : ''}${chips.join('')}</div>`
     + `<div class="meta" title="${esc(p.description)}">${esc(p.description || '')}</div>`
     + `<div class="meta small" title="${esc(g.subject || '')}">${commit}</div></div>`
-    + `<div class="acts">${acts.join('')}</div></div>`;
+    + `<div class="acts">${acts.join('')}</div>`
+    + (menuFor === p.name ? projMenu(p) : '') + `</div>`;
+}
+function projMenu(p) {
+  const mine = p.status_from === 'you' ? p.status : '';
+  const tags = TAGS.map((t) => `<button class="mini ${mine === t ? 'on' : 'ghost'}" data-p="tag" data-tag="${t}">${t}</button>`).join('');
+  return `<div class="jmenu"><span class="dim small">tag</span>${tags}`
+    + (mine ? `<button class="mini ghost" data-p="tag" data-tag="" title="Use the README's status again">clear</button>` : '')
+    + `<span class="sep"></span>`
+    + (p.hidden ? `<button class="mini" data-p="show">show again</button>` : `<button class="mini ghost" data-p="hide" title="Fold it into + hidden">hide</button>`)
+    + `<span class="dim small">archived / deprecated also hide it</span></div>`;
 }
 async function loadProjects() {
   let d;
@@ -90,6 +103,13 @@ $('projList').addEventListener('click', async (e) => {
   if (op === 'open') return openUrl(p.url);
   if (op === 'live') return openUrl(p.live);
   if (op === 'github') return openUrl(p.github);
+  if (op === 'menu') { menuFor = menuFor === name ? null : name; return loadProjects(); }
+  if (op === 'tag' || op === 'hide' || op === 'show') {
+    const r = await post('/api/action', { action: 'project', target: name, op, tag: b.dataset.tag || '' });
+    toast(r.why || (r.ok ? 'saved' : 'that did not work'));
+    if (op !== 'tag' || (b.dataset.tag && ['archived', 'deprecated'].includes(b.dataset.tag))) menuFor = null;
+    return loadProjects();
+  }
   if (op === 'stop' && !confirm(`Stop ${p.title}?\n\nIt is asked to stop first, then forced if it ignores that. Anything unsaved in it is lost.`)) return;
   b.disabled = true;
   await launch('project', name, op);
@@ -162,6 +182,7 @@ async function loadMedia() {
   const c = d.counts || {};
   $('mediaSummary').textContent = `${c.up} of ${c.total} running${d.wsl && d.wsl !== 'Running' ? ` · WSL ${String(d.wsl).toLowerCase()}` : ''}`;
   setHTML($('mediaTiles'), d.tiles.map(mediaTile).join(''));
+  renderNotes(d.notes);
   for (const t of d.tiles) openWhenUp(t.project || t.name, t.state === 'up' || t.state === 'busy', t.url);
 }
 $('mediaRefresh').onclick = () => loadMedia();
@@ -182,6 +203,38 @@ $('mediaTiles').addEventListener('click', async (e) => {
   b.disabled = true;
   await launch('media', name, op);
   b.disabled = false;
+});
+
+// ---------- recording or link -> transcript note (runs the transcript-note workflow; progress from the run database)
+const STEP_WORDS = { transcribe: 'transcribing', summary: 'summarizing', note: 'writing the note' };
+function noteRun(r) {
+  const st = r.status;
+  const cls = st === 'succeeded' ? 'ok' : /failed|cancelled|interrupted|needs_user/.test(st) ? 'bad' : 'run';
+  const icon = cls === 'ok' ? '✓' : cls === 'bad' ? '✕' : '◔';
+  const what = st === 'succeeded' ? (r.note ? `→ ${r.note}` : 'done')
+    : cls === 'run' ? (STEP_WORDS[r.step] || st) : st.replace('_', ' ');
+  const open = r.has_note ? `<button class="mini ghost" data-run="${r.id}">open note</button>` : '';
+  return `<div class="mjob nrun" title="${esc(r.error || what)}"><span class="jicon ${cls}">${icon}</span>`
+    + `<span class="jt">${esc(r.title)}</span><span class="dim">${esc(what)}</span><span class="dim">${ago(r.at)}</span>${open}</div>`;
+}
+function renderNotes(runs) {
+  setHTML($('noteRuns'), (runs || []).length ? `<div class="meta small">recent</div>${runs.map(noteRun).join('')}` : '');
+  if ((runs || []).some((r) => ['queued', 'running'].includes(r.status))) fastUntil = Math.max(fastUntil, Date.now() + 10000);
+}
+$('noteForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('noteForm').querySelector('button[type=submit]');
+  btn.disabled = true;
+  const r = await post('/api/action', { action: 'media', target: 'media-api', op: 'note', source: $('noteSource').value, title: $('noteTitle').value });
+  btn.disabled = false;
+  toast(r.why || (r.ok ? 'started' : 'that did not work'));
+  if (r.ok) { $('noteSource').value = ''; $('noteTitle').value = ''; fastUntil = Date.now() + 60000; setTimeout(loadMedia, 1500); }
+});
+$('noteRuns').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-run]');
+  if (!b) return;
+  const r = await post('/api/action', { action: 'media', target: 'media-api', op: 'open_note', run: Number(b.dataset.run) });
+  toast(r.why || (r.ok ? 'opened' : 'no note'));
 });
 
 // ---------- polling: every 10 s while visible, every 2 s for a minute after a start or stop

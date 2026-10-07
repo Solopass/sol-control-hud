@@ -377,7 +377,8 @@ def client_and_hub(tmp_path, monkeypatch):
     monkeypatch.setattr(hub, "SETTINGS_FILE", tmp_path / "hub-settings.json")
     ws = make_ws(tmp_path)
     reg = make_reg(ws)
-    monkeypatch.setattr(projects, "load_registry", lambda path=None: json.loads(json.dumps(reg)))
+    # like the real one: the registry plus your own tags and hides
+    monkeypatch.setattr(projects, "load_registry", lambda path=None: {**json.loads(json.dumps(reg)), "user": projects.load_user()})
     monkeypatch.setattr(projects, "cached_git", no_git)
     h = hub.Hub(dict(hub.DEFAULTS), False, False)
     h.collector = FakeCollector()
@@ -408,3 +409,121 @@ def test_actions_need_our_header_and_go_by_name(client_and_hub, monkeypatch):
     assert r["ok"] and opened == [ws / "alpha"]
     r = client.post("/api/action", json={"action": "project", "target": "alpha", "op": "format-c"}, headers=OURS).json()
     assert not r["ok"]
+
+
+# ---------------------------------------------------------------- your tags and hides (the ⋯ menu)
+def test_set_user_tags_hides_and_folds(tmp_path):
+    ws = make_ws(tmp_path)
+    f = tmp_path / "user.json"
+    assert projects.set_user("alpha", "tag", "paused", path=f, workspace=ws)["ok"]
+    assert projects.load_user(f)["alpha"] == {"tag": "paused"}
+    r = projects.set_user("alpha", "tag", "archived", path=f, workspace=ws)
+    assert r["ok"] and projects.load_user(f)["alpha"] == {"tag": "archived", "hidden": True}    # archived folds away
+    assert projects.set_user("alpha", "show", path=f, workspace=ws)["ok"]
+    assert projects.load_user(f)["alpha"]["hidden"] is False
+    assert projects.set_user("alpha", "tag", "", path=f, workspace=ws)["ok"]
+    assert "tag" not in projects.load_user(f)["alpha"]
+    assert not projects.set_user("alpha", "tag", "<script>", path=f, workspace=ws)["ok"]
+    assert not projects.set_user("..", "hide", path=f, workspace=ws)["ok"]
+    assert not projects.set_user("nope", "hide", path=f, workspace=ws)["ok"]
+    assert not projects.set_user("alpha", "delete", path=f, workspace=ws)["ok"]
+
+
+def test_your_choices_beat_the_readme_and_the_registry(tmp_path):
+    ws = make_ws(tmp_path)
+    reg = make_reg(ws)
+    reg["user"] = {"retired-one": {"hidden": False, "tag": "idea"}, "alpha": {"hidden": True}}
+    by = {r["name"]: r for r in projects.project_rows(reg, [], {}, git=no_git, paths=lambda pid: [])}
+    assert not by["retired-one"]["hidden"] and by["retired-one"]["status"] == "idea"
+    assert by["retired-one"]["status_from"] == "you"
+    assert by["alpha"]["hidden"] and by["alpha"]["why_hidden"] == "you hid it"
+
+
+# ---------------------------------------------------------------- recording or link -> transcript note
+def test_note_source_checks(tmp_path):
+    rec = tmp_path / "talk.m4a"
+    rec.write_bytes(b"x")
+    assert launcher.check_note_source(" https://youtu.be/abc ") == "https://youtu.be/abc"
+    assert launcher.check_note_source(f'"{rec}"') == str(rec)
+    for bad in ("", "--title=x", "https://a b", str(tmp_path / "missing.wav"), "relative.wav", str(tmp_path)):
+        with pytest.raises(launcher.LaunchError):
+            launcher.check_note_source(bad)
+    (tmp_path / "notes.txt").write_text("x")
+    with pytest.raises(launcher.LaunchError):
+        launcher.check_note_source(str(tmp_path / "notes.txt"))
+
+
+def test_start_transcript_note_runs_the_chains_cli(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher, "LOG_DIR", tmp_path / "logs")
+    r = launcher.start_transcript_note("https://youtu.be/abc", "  My   talk \n", popen=FakePopen)
+    assert r["ok"]
+    cmd, kw = FakePopen.calls[0]
+    assert cmd[1:] == ["-m", "sol_control_hud.chains", "note", "https://youtu.be/abc", "--title", "My talk"]
+    assert not launcher.start_transcript_note("ftp://x", popen=FakePopen)["ok"] and len(FakePopen.calls) == 1
+
+
+def make_runs_db(path: Path, note: Path) -> None:
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE runs (id INTEGER PRIMARY KEY, workflow TEXT, status TEXT, inputs TEXT, outputs TEXT, error TEXT,"
+                " created_at REAL, started_at REAL, finished_at REAL)")
+    con.execute("CREATE TABLE events (id INTEGER PRIMARY KEY, run_id INTEGER, at REAL, step TEXT, kind TEXT, data TEXT)")
+    con.execute("INSERT INTO runs VALUES (1, 'transcript-note', 'succeeded', ?, ?, NULL, 10, 10, 20)",
+                (json.dumps({"source": r"D:\a\talk.m4a", "title": ""}),
+                 json.dumps({"transcribe": {"title": "Talk"}, "note": {"path": str(note)}})))
+    con.execute("INSERT INTO runs VALUES (2, 'transcript-note', 'running', ?, NULL, NULL, 30, 30, NULL)",
+                (json.dumps({"source": "https://www.youtube.com/watch?v=q", "title": ""}),))
+    con.execute("INSERT INTO runs VALUES (3, 'chain: other', 'running', '{}', NULL, NULL, 40, 40, NULL)")
+    con.executemany("INSERT INTO events (run_id, at, step, kind) VALUES (?, ?, ?, ?)",
+                    [(2, 31, "transcribe", "step_succeeded"), (2, 32, "summary", "step_started")])
+    con.commit()
+    con.close()
+
+
+def test_note_runs_and_opening_a_note(tmp_path):
+    note = tmp_path / "2026-10-07 Talk.md"
+    note.write_text("# Talk")
+    db = tmp_path / "runs.sqlite"
+    make_runs_db(db, note)
+    runs = launcher.note_runs(db=db)
+    assert [r["id"] for r in runs] == [2, 1]                         # other workflows are not listed
+    assert runs[0]["step"] == "summary" and runs[0]["title"] == "youtube.com · watch?v=q"
+    assert runs[1]["title"] == "Talk" and runs[1]["note"] == "2026-10-07 Talk" and runs[1]["has_note"]
+    opened = []
+    assert launcher.open_note_run(1, opener=opened.append, db=db)["ok"] and opened == [note]
+    assert not launcher.open_note_run(2, opener=opened.append, db=db)["ok"]
+    assert not launcher.open_note_run("x", opener=opened.append, db=db)["ok"]
+
+
+# ---------------------------------------------------------------- ticker: the APPS slide
+def test_apps_slide():
+    from sol_control_hud.data.snapshot import Snapshot, format_slides
+    assert not [s for s in format_slides(Snapshot()) if s["tag"] == "APPS"]
+    snap = Snapshot(apps_running=["a :1", "b :2", "c :3", "d :4"], media_running=["SOL Media Studio"])
+    slide = next(s for s in format_slides(snap) if s["tag"] == "APPS")
+    assert slide["text"] == "▶ a :1  ·  ▶ b :2  ·  ▶ c :3  ·  +1 more  ·  SOL Media Studio up"
+
+
+def test_launchpad_summary_never_boots_wsl(tmp_path, monkeypatch):
+    ws = make_ws(tmp_path)
+    reg = make_reg(ws)
+    monkeypatch.setattr(projects, "load_registry", lambda path=None: json.loads(json.dumps(reg)))
+    from sol_control_hud.data.collectors import ports
+    monkeypatch.setattr(ports, "_rows", lambda own_pid=None: [])
+
+    def run(*a, **k):
+        raise AssertionError("no wsl.exe while WSL is off")
+    assert media_apis.launchpad_summary(False, run=run) == {"apps": [], "media": []}
+
+
+def test_hub_tag_and_note_actions(client_and_hub, monkeypatch, tmp_path):
+    client, h, ws = client_and_hub
+    monkeypatch.setattr(projects, "user_file_path", lambda: tmp_path / "user.json")
+    r = client.post("/api/action", json={"action": "project", "target": "alpha", "op": "tag", "tag": "idea"}, headers=OURS).json()
+    assert r["ok"]
+    alpha = next(p for p in client.get("/api/projects").json()["projects"] if p["name"] == "alpha")
+    assert alpha["status"] == "idea" and alpha["status_from"] == "you"
+    started = []
+    monkeypatch.setattr(launcher, "start_transcript_note", lambda src, title="": started.append((src, title)) or {"ok": True, "why": "x"})
+    r = client.post("/api/action", json={"action": "media", "target": "media-api", "op": "note", "source": "https://youtu.be/a",
+                                         "title": "T"}, headers=OURS).json()
+    assert r["ok"] and started == [("https://youtu.be/a", "T")]

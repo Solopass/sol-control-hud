@@ -313,7 +313,7 @@ class Hub:
             log("crashes acknowledged via web dashboard")
             return {"ok": True, "why": "Crash events acknowledged and cleared"}
         if action in ("project", "media"):
-            return self._launch(action, target, str((body or {}).get("op", "")))
+            return self._launch(action, target, str((body or {}).get("op", "")), body or {})
         if action == "close_port":
             # ports.close_listener looks the port up itself and refuses the AI stack, Windows services and us
             from .data.collectors import ports
@@ -343,7 +343,8 @@ class Hub:
         from .data.collectors import media_apis
         reg, probe, listening = self._launchpad()
         wsl_state = (self.collectors["wsl"].get() or {}).get("state") if hasattr(self, "collectors") else None
-        return media_apis.collect(reg, listening, wsl_state, probe=probe)
+        from . import launcher
+        return {**media_apis.collect(reg, listening, wsl_state, probe=probe), "notes": launcher.note_runs()}
 
     def _refresh_launchpad(self) -> None:
         """After a start / stop: look again on the next poll instead of serving the cached state."""
@@ -351,10 +352,26 @@ class Hub:
             if hasattr(self, "collectors") and key in self.collectors:
                 self.collectors[key].value = None
 
-    def _launch(self, kind: str, name: str, op: str) -> dict:
+    def _launch(self, kind: str, name: str, op: str, body: dict | None = None) -> dict:
         from . import launcher
         from .data.collectors import projects
         reg = projects.load_registry()
+        b = body or {}
+        # changes that need no current state: your tags / hides, and the transcript box
+        if kind == "project" and op in ("hide", "show", "tag"):
+            r = projects.set_user(name, op, str(b.get("tag") or ""), workspace=reg["workspace"])
+            if "projects" in getattr(self, "collectors", {}):
+                self.collectors["projects"].value = None
+            log(f"project {op} {name} {b.get('tag') or ''}: {r.get('why')}".strip())
+            return r
+        if kind == "media" and op == "note":
+            r = launcher.start_transcript_note(str(b.get("source") or ""), str(b.get("title") or ""))
+            log(f"transcript note {str(b.get('source') or '')[:120]}: {r.get('why')}")
+            if "media" in getattr(self, "collectors", {}):
+                self.collectors["media"].value = None
+            return r
+        if kind == "media" and op == "open_note":
+            return launcher.open_note_run(b.get("run"))
         self._refresh_launchpad()                     # act on the current state, not a cached one
         try:
             rows = self.projects_payload()["projects"]

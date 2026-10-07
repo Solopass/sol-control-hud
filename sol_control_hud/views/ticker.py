@@ -304,6 +304,7 @@ DEFAULT_SLIDES_ENABLED = {
     "GIT": True,
     "NET": True,
     "MEDIA": True,
+    "APPS": True,
 }
 
 # Available Color Themes (Curated for High Readability and Contrast)
@@ -1469,7 +1470,12 @@ class TickerApp:
 
     def _open_slide_target(self, tag: str) -> None:
         tag_u = (tag or "").upper()
-        if "AI" in tag_u:
+        if tag_u == "APPS":
+            if self.hub:
+                self.hub.open_dashboard()
+            else:
+                webbrowser.open("http://127.0.0.1:7900/")
+        elif "AI" in tag_u:
             webbrowser.open("http://127.0.0.1:11440")
         elif "MEDIA" in tag_u:
             from ..data.collectors.media import focus_media_app
@@ -1808,6 +1814,7 @@ class TickerApp:
             ("GIT", "Workspace Git Health"),
             ("NET", "Network Throughput"),
             ("MEDIA", "Media / Music Now-Playing"),
+            ("APPS", "Running Projects & Media APIs"),
         ]
         for tag, label in slide_labels:
             is_on = self.slides_enabled.get(tag, True)

@@ -376,3 +376,19 @@ button.go { background:color-mix(in srgb, var(--cyan) 20%, var(--card)); border-
 .mtile .acts { justify-content:flex-start; margin-top:8px; }
 #c-projects h2 { flex-wrap:wrap; row-gap:6px; }
 @media (max-width:760px) { #c-projects .mini-search, #c-projects .mini-search:focus { width:120px; } }
+/* Projects: the ⋯ menu (your tag, hide / show) spans the whole row */
+.jmenu { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:6px 0 1px;
+  border-top:1px dashed var(--line); margin-top:3px; }
+.jmenu .sep { width:10px; }
+button.mini.on { border-color:var(--cyan); color:var(--cyan); background:color-mix(in srgb, var(--cyan) 14%, var(--card)); }
+/* Media: recording or link -> transcript note */
+.notebox { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
+.notebox h3 { margin:0 0 6px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+.notebox h3 .dim { text-transform:none; letter-spacing:0; font-weight:400; font-size:11px; }
+.noterow { display:flex; gap:6px; flex-wrap:wrap; }
+.noterow input { flex:1 1 260px; min-width:0; background:var(--badge); border:1px solid var(--line); border-radius:9px;
+  padding:6px 10px; color:var(--text); font-size:12px; }
+.noterow input#noteTitle { flex:0 1 200px; }
+.noterow input:focus { outline:none; border-color:var(--cyan); }
+#noteRuns { margin-top:6px; }
+.mjob.nrun { grid-template-columns:14px minmax(0, 1fr) auto auto auto; }

@@ -338,3 +338,120 @@ def open_media_folder(reg: dict, name: str, opener=_open_path) -> dict:
         return {"ok": False, "why": f"{folder} doesn't exist yet"}
     opener(folder)
     return {"ok": True, "why": f"opened {folder}"}
+
+
+# ---------------------------------------------------------------- recording or URL -> transcript note
+# The Media card's box runs the existing transcript-note workflow (media-api transcribes, the local model summarizes,
+# the note lands in D:\AI\Vault\Transcripts) as its own detached process, the same as
+# `python -m sol_control_hud.chains note <source>`. Its progress is read back from the run database.
+NOTE_WORKFLOW = "transcript-note"
+NOTE_MEDIA_EXTS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".mp4", ".mkv", ".webm", ".mov", ".wma"}
+
+
+def check_note_source(source: str) -> str:
+    """A web address or an audio/video file that exists. Raises LaunchError with a plain reason otherwise."""
+    src = (source or "").strip().strip('"')
+    if not src:
+        raise LaunchError("paste a link or a file path first")
+    if src.startswith("-") or "\n" in src or len(src) > 2000:
+        raise LaunchError("that doesn't look like a link or a file path")
+    if src.startswith(("http://", "https://")):
+        if any(c.isspace() for c in src):
+            raise LaunchError("a link can't contain spaces")
+        return src
+    p = Path(src)
+    if not p.is_absolute() or not p.is_file():
+        raise LaunchError(f"no such file: {src}")
+    if p.suffix.lower() not in NOTE_MEDIA_EXTS:
+        raise LaunchError(f"{p.suffix or 'that file'} isn't an audio or video file")
+    return str(p)
+
+
+def _pythonw() -> str:
+    import sys
+    exe = Path(sys.executable)
+    w = exe.with_name("pythonw.exe")
+    return str(w if w.exists() else exe)
+
+
+def start_transcript_note(source: str, title: str = "", popen=subprocess.Popen) -> dict:
+    try:
+        src = check_note_source(source)
+    except LaunchError as e:
+        return {"ok": False, "why": str(e)}
+    title = " ".join((title or "").split())[:120]
+    from .paths import ROOT
+    cmd = [_pythonw(), "-m", "sol_control_hud.chains", "note", src] + (["--title", title] if title else [])
+    try:
+        pid = spawn(cmd, ROOT, NOTE_WORKFLOW, popen=popen)
+    except OSError as e:
+        return {"ok": False, "why": f"couldn't start it: {e}"}
+    return {"ok": True, "pid": pid,
+            "why": "transcribing: the note lands in AI\\Vault\\Transcripts (progress below; a long video takes a while)"}
+
+
+def _runs_db() -> Path:
+    from .paths import ROOT
+    return Path(os.environ.get("SOL_RUNS_DB", ROOT / "data" / "runs.sqlite"))
+
+
+def note_runs(limit: int = 4, db: Path | None = None) -> list[dict]:
+    """The latest transcript-note runs: what, how far, and the note it wrote. Read-only."""
+    import json as _json
+    p = Path(db or _runs_db())
+    if not p.exists():
+        return []
+    try:
+        con = sqlite3.connect(f"file:{p.as_posix()}?mode=ro", uri=True, timeout=2)
+        try:
+            rows = con.execute("SELECT id, status, inputs, outputs, error, created_at, finished_at FROM runs "
+                               "WHERE workflow = ? ORDER BY id DESC LIMIT ?", (NOTE_WORKFLOW, limit)).fetchall()
+            steps = {rid: con.execute("SELECT step FROM events WHERE run_id = ? AND step IS NOT NULL ORDER BY id DESC LIMIT 1",
+                                      (rid,)).fetchone() for rid, *_ in rows}
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+    from .data.collectors.media_apis import _short_source
+    out = []
+    for rid, status, inputs, outputs, error, created, finished in rows:
+        try:
+            i = _json.loads(inputs or "{}")
+        except ValueError:
+            i = {}
+        try:
+            o = _json.loads(outputs or "{}") or {}
+        except ValueError:
+            o = {}
+        note = (o.get("note") or {}).get("path") if isinstance(o.get("note"), dict) else None
+        tr = o.get("transcribe")
+        title = i.get("title") or (tr.get("title") if isinstance(tr, dict) else None)
+        out.append({"id": rid, "status": status, "title": title or _short_source(i.get("source", "")),
+                    "step": (steps.get(rid) or [None])[0] if status in ("queued", "running", "waiting") else None,
+                    "note": Path(note).stem if note else None, "has_note": bool(note and Path(note).exists()),
+                    "error": (error or "")[:200] or None, "at": created, "finished_at": finished})
+    return out
+
+
+def open_note_run(run_id, opener=_open_path, db: Path | None = None) -> dict:
+    """Open the note a run wrote. The path comes from the run database, never from the page."""
+    try:
+        rid = int(run_id)
+    except (TypeError, ValueError):
+        return {"ok": False, "why": "which run?"}
+    import json as _json
+    p = Path(db or _runs_db())
+    try:
+        con = sqlite3.connect(f"file:{p.as_posix()}?mode=ro", uri=True, timeout=2)
+        row = con.execute("SELECT outputs FROM runs WHERE id = ? AND workflow = ?", (rid, NOTE_WORKFLOW)).fetchone()
+        con.close()
+    except sqlite3.Error:
+        row = None
+    try:
+        note = ((_json.loads(row[0] or "{}") or {}).get("note") or {}).get("path") if row else None
+    except (ValueError, AttributeError):
+        note = None
+    if not note or not Path(note).exists():
+        return {"ok": False, "why": "that run has no note (yet)"}
+    opener(Path(note))
+    return {"ok": True, "why": f"opened {Path(note).name}"}

@@ -274,3 +274,21 @@ def wsl_port_list(registry: dict) -> list[int]:
     ports += [int(p["port"]) for p in (registry.get("projects") or {}).values()
               if (p or {}).get("runs_in") == "wsl" and (p or {}).get("port")]
     return sorted(set(ports))
+
+
+def launchpad_summary(wsl_up: bool, run=subprocess.run) -> dict:
+    """For the ticker's APPS slide: which projects and media services run right now. Cheap on purpose (no git, no
+    README reads beyond titles, no request to any service): one listener scan plus, while WSL already runs, the
+    same systemd/ss probe as the card."""
+    from . import ports, projects
+    reg = projects.load_registry()
+    listening = ports._rows()
+    probe = wsl_probe(reg["media"], wsl_port_list(reg), reg.get("wsl_distro", "Ubuntu-24.04"),
+                      "Running" if wsl_up else None, run=run)
+    rows = projects.project_rows(reg, listening, running_ports(reg, probe), git=lambda folder: None)
+    media_projects = {m.get("project") for m in reg["media"].values()}
+    apps = [f"{r['name']} :{r['running']['port']}" for r in rows
+            if r["running"] and not r["self"] and not r["hidden"] and r["name"] not in media_projects]
+    tiles = [tile(n, m, probe, listening) for n, m in reg["media"].items()]
+    media = [t["title"] + (" (working)" if t["state"] == "busy" else "") for t in tiles if t["state"] in ("up", "busy")]
+    return {"apps": apps, "media": media}

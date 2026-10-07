@@ -143,6 +143,8 @@ class Snapshot:
     note_path: str | None = None
     git_dirty_count: int = 0
     git_dirty_repos: list[str] = field(default_factory=list)
+    apps_running: list[str] = field(default_factory=list)      # "kiiy2k :5174" (the dashboard's Projects card)
+    media_running: list[str] = field(default_factory=list)     # media services that run right now
     git_total_repos: int = 0
     net_down_kb: float = 0.0
     net_up_kb: float = 0.0
@@ -846,6 +848,18 @@ def format_slides(s: Snapshot) -> list[dict]:
             "detail": f"All {s.git_total_repos} git repositories in D:\\Workspace clean",
         })
 
+    # Slide 7b: what runs from D:\Workspace (projects started from the dashboard, media services that are up)
+    if s.apps_running or s.media_running:
+        parts = [f"▶ {a}" for a in s.apps_running[:3]] + ([f"+{len(s.apps_running) - 3} more"] if len(s.apps_running) > 3 else [])
+        parts += [f"{m} up" for m in s.media_running]
+        slides.append({
+            "tag": "APPS",
+            "text": "  ·  ".join(parts),
+            "color": "#38bdf8",
+            "detail": "Running: " + ", ".join(s.apps_running + [f"{m} (media)" for m in s.media_running])
+                      + " · Click for the dashboard's Projects card",
+        })
+
     # Slide 8: Network Throughput
     net_col = "#4ade80" if (s.net_down_kb > 500 or s.net_up_kb > 500) else "#38bdf8"
     slides.append({
@@ -960,6 +974,8 @@ def _part_color(tag: str, part: str, s: Snapshot) -> str:
         return CYAN if max(s.net_down_kb, s.net_up_kb) >= 1024 else TEXT
     elif tag == "MEDIA":
         return GREEN if s.media_status == "Playing" else MUTED
+    elif tag == "APPS":
+        return MUTED if p.startswith("+") else CYAN
     elif tag == "AWAY":
         if p.endswith("%"):
             return GREEN
@@ -1161,6 +1177,9 @@ class TickerCollector:
         self._last_git = 0.0
         self._git_data: tuple[int, list[str], int] = (0, [], 0)
         self._git_thread: threading.Thread | None = None
+        self._last_apps = 0.0
+        self._apps: dict = {"apps": [], "media": []}
+        self._apps_thread: threading.Thread | None = None
         self._eta = away_screen.EtaTracker()
         self._disk_hist: list[tuple[float, dict[str, float]]] = []
         self._recent: list[tuple[float, float | None, float | None]] = []   # (t, vram GB, edge temp) for 10 min
@@ -1223,6 +1242,7 @@ class TickerCollector:
         self._last_stability = 0.0
         self._last_system = 0.0
         self._last_git = 0.0
+        self._last_apps = 0.0
 
     def collect_once(self) -> Snapshot:
         t_gather_start = time.perf_counter()
@@ -1335,6 +1355,20 @@ class TickerCollector:
             self._git_thread = threading.Thread(target=scan, name="ticker-git", daemon=True)
             self._git_thread.start()
         git_dirty_count, git_dirty_repos, git_total_repos = self._git_data
+
+        # 7b. What runs from the Projects / Media cards (every system_interval, in its own thread: one listener scan and,
+        # while WSL already runs, one systemd probe; never a request to a service, so it can't wake one)
+        if now - self._last_apps >= self.system_interval and not (self._apps_thread and self._apps_thread.is_alive()):
+            self._last_apps = now
+
+            def scan_apps():
+                try:
+                    from .collectors.media_apis import launchpad_summary
+                    self._apps = launchpad_summary(wsl_running())
+                except Exception:
+                    pass
+            self._apps_thread = threading.Thread(target=scan_apps, name="ticker-apps", daemon=True)
+            self._apps_thread.start()
 
         # 8. Daily Note
         note_exists, note_words, note_time, note_path = read_daily_note_status()
@@ -1454,6 +1488,8 @@ class TickerCollector:
             note_path=str(note_path) if note_path else None,
             git_dirty_count=git_dirty_count,
             git_dirty_repos=git_dirty_repos,
+            apps_running=list(self._apps.get("apps") or []),
+            media_running=list(self._apps.get("media") or []),
             git_total_repos=git_total_repos,
             net_down_kb=self._net_down_kb,
             net_up_kb=self._net_up_kb,

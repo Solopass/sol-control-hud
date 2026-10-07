@@ -14,11 +14,9 @@ wsl_distro: Ubuntu-24.04
 # Folded away behind "show hidden" on the card (the value says why).
 hidden:
   sol-hud: finished 2026-09-26, continued in sol-control-hud
-  sol-hud-away: a second clone of sol-hud
   solar-station: retired 2026-09-13
   Textdiff: not needed on the HUD
   suno-manager: not needed on the HUD
-  'D:': a stray folder from a bad path
   Ideas: notes, not a project
 
 projects:

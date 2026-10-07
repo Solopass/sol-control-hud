@@ -115,6 +115,15 @@
       <div class="notes-controls"><button class="mini ghost" id="mediaRefresh" title="Check again now">⟳</button></div>
     </h2>
     <div class="mtiles" id="mediaTiles"><div class="empty">loading…</div></div>
+    <form class="notebox" id="noteForm" autocomplete="off">
+      <h3>Recording or link → transcript note <span class="dim">media-api transcribes, the local model summarizes, the note lands in AI\Vault\Transcripts</span></h3>
+      <div class="noterow">
+        <input id="noteSource" placeholder="YouTube link, or D:\path\to\recording.m4a" required>
+        <input id="noteTitle" maxlength="120" placeholder="Title (optional)">
+        <button type="submit" class="go">Make note</button>
+      </div>
+      <div id="noteRuns"></div>
+    </form>
     <div class="note">Looking never wakes a service: state comes from systemd and their files on D:. <b>Live</b> asks a running one directly.</div>
   </article>
 

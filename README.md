@@ -19,7 +19,7 @@ Away screen and the doctor from here. Next: `D:\OBVLT\plans\SOL_CONTROL_HUD_NEXT
 | `sol_control_hud/views/web/` | the web dashboard (FastAPI on 127.0.0.1:7900 + one page) |
 | `sol_control_hud/away/` | the Away screen (black screens, progress, Enter to come back) and its corner panel |
 | `sol_control_hud/chains/` | prompt chains: the runner, chain notes, the chain daemon (schedules, file watches, lanes that take turns on one GPU), drafting chains from a description |
-| `sol_control_hud/launchpad.yaml`, `launcher.py` | the Projects and Media APIs cards: what can't be read from the project folders, and Start / Stop / Open by name (`data/collectors/projects.py`, `media_apis.py` collect; nothing they do wakes a socket-activated service) |
+| `sol_control_hud/launchpad.yaml`, `launcher.py` | the Projects and Media APIs cards: what can't be read from the project folders, and Start / Stop / Open by name (`data/collectors/projects.py`, `media_apis.py` collect; nothing they do wakes a socket-activated service). Your own tags and hides from the card's ⋯ menu live in `data/launchpad-user.json`; the Media card's box runs the transcript-note workflow |
 | `sol_control_hud/doctor.py` | health checks used by the morning briefing |
 | `sol_control_hud/paths.py` | where the app keeps its files (`data/`, override with `SOL_CONTROL_DATA`) |
 
