@@ -774,6 +774,7 @@ class Hub:
             ticker_on = bool(self.ticker and not self.ticker.user_hidden)
             return [("Show ticker", self.hide_ticker if ticker_on else self.show_ticker, ticker_on),
                     ("Open dashboard", self.open_dashboard, False),
+                    ("Unload AI models", lambda: self.do_action("models_unload_all", ""), False),
                     None,
                     ("Open the dashboard when SOL starts",
                      lambda: self.cmds.put(("dashboard_at_start", not self.settings["dashboard_at_start"])),

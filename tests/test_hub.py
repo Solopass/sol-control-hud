@@ -161,3 +161,22 @@ def test_tray_tooltip_alert_and_normal(the_hub):
     the_hub._tick()
     assert the_hub.tray.tip == "🟢 SOL: sol-smart · desk · GPU 45°C"
 
+
+def test_tray_menu_includes_unload_models(the_hub, monkeypatch):
+    menu_fn = None
+
+    class CaptureTray:
+        def __init__(self, tip, menu, *a, **k):
+            nonlocal menu_fn
+            menu_fn = menu
+
+        def start(self):
+            return True
+
+    monkeypatch.setattr("sol_control_hud.tray.Tray", CaptureTray)
+    the_hub._start_tray()
+    assert menu_fn is not None
+    items = menu_fn()
+    labels = [item[0] for item in items if item is not None]
+    assert "Unload AI models" in labels
+

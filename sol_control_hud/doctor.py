@@ -8,15 +8,25 @@ import json
 import sys
 import time
 
-from .data.collectors import engines, gpu, system, vram
+from .data.collectors import engines, gpu, speed, system, vram
 
 OK, WARN, FAIL = "OK", "WARN", "FAIL"
 
 
 def checks(status: dict) -> list[tuple[str, str, str]]:
     out: list[tuple[str, str, str]] = []
-    o = status["ollama"]
-    out.append(("AI engine (Ollama)", OK if o.get("up") else FAIL, f"v{o.get('version')}, {len(o.get('loaded') or [])} model(s) loaded" if o.get("up") else "not responding on 127.0.0.1:11434"))
+    ls = status.get("llama_swap") or {}
+    o = status.get("ollama") or {}
+    router_up = bool(ls.get("up"))
+    shim_up = bool(o.get("up"))
+    if router_up:
+        out.append(("AI engine (llama.cpp router)", OK,
+                    f":11440 up ({len(ls.get('running') or [])} model(s) served)" + (f", shim :11434 v{o.get('version')}" if shim_up else ", shim :11434 down")))
+    elif shim_up:
+        out.append(("AI engine (Ollama shim)", WARN, f":11434 up (v{o.get('version')}), but router :11440 not responding"))
+    else:
+        out.append(("AI engine", FAIL, "neither router :11440 nor shim :11434 responding"))
+
     v = status.get("vram") or {}
     for m in o.get("loaded") or []:
         pct = m.get("gpu_percent")
@@ -24,12 +34,24 @@ def checks(status: dict) -> list[tuple[str, str, str]]:
             out.append((f"  model {m['name']}", WARN, f"{pct}% reported by Ollama, but {v['ai']['shared_gb']} GB is evicted to system RAM"))
         else:
             out.append((f"  model {m['name']}", OK if (pct or 0) >= 60 else WARN, f"{pct}% on GPU, ctx {m.get('context')}"))
+
     be = status.get("backend") or {}
-    if not be.get("known"):
-        out.append(("  GPU backend", WARN, "no 'inference compute' line in Ollama server logs"))
+    if be.get("known") is False:
+        out.append(("  GPU backend", WARN, "unknown (no backend logs found)"))
+    elif be.get("known") and be.get("library"):
+        lib = be.get("library")
+        out.append(("  GPU backend", OK if lib == "Vulkan" else FAIL,
+                    f"library={lib} ({be.get('device', 'AMD Radeon RX 9070 XT')})" + ("" if lib == "Vulkan" else " - expected Vulkan; check sol-llm.ps1")))
+    elif router_up:
+        out.append(("  GPU backend", OK, "Vulkan (llama.cpp router on AMD Radeon RX 9070 XT)"))
     else:
-        out.append(("  GPU backend", OK if be["library"] == "Vulkan" else FAIL,
-                    f"library={be['library']} ({be['device']}) at {be['time'][:16]}" + ("" if be["library"] == "Vulkan" else " - expected Vulkan; run restart-ollama.ps1")))
+        out.append(("  GPU backend", WARN, "no GPU backend information available"))
+
+    sp = status.get("speed") or {}
+    if sp.get("available"):
+        slow = sp.get("slow", False)
+        out.append(("  Answer speed", WARN if slow else OK,
+                    f"{sp.get('model') or 'last model'}: {sp.get('tps')} tok/s (usual ~{sp.get('usual') or 100})" + (" - SLOW!" if slow else "")))
 
     g = status["gpu"]
     if g.get("available"):
@@ -98,6 +120,7 @@ def collect() -> dict:
     status = {
         "ollama": ollama, "backend": engines.ollama_backend(), "llama_swap": engines.llama_swap(), "gpu": sampler.latest,
         "vram": vram.VramGuard(confirm=1).update(sampler.latest, ollama),
+        "speed": speed.answer_speed(),
         "memory": system.memory(), "disks": system.disks(), "backups": system.backups(),
         "wsl": system.wsl(), "stability": system.stability(),
     }

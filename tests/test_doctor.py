@@ -1,9 +1,9 @@
 from sol_control_hud.doctor import FAIL, OK, WARN, checks
 
 HEALTHY = {
-    "ollama": {"up": True, "version": "0.34.0", "loaded": [{"name": "gpt-oss:20b", "gpu_percent": 100, "context": 8192}]},
-    "backend": {"known": True, "time": "2026-09-14T09:56:57", "library": "Vulkan", "device": "AMD Radeon RX 9070 XT"},
-    "llama_swap": {"up": False},
+    "llama_swap": {"up": True, "engine": "llama.cpp router", "running": [{"model": "sol-fast", "state": "loaded"}]},
+    "ollama": {"up": True, "version": "0.34.3-llamacpp-shim", "loaded": [{"name": "sol-fast", "gpu_percent": 100, "context": 8192}]},
+    "backend": {"known": True, "time": "2026-10-07T10:00:00", "library": "Vulkan", "device": "AMD Radeon RX 9070 XT"},
     "gpu": {"available": True, "name": "RX 9070 XT", "load_percent": 3.0, "vram_used_gb": 12.0, "vram_total_gb": 15.9},
     "memory": {"total_gb": 95.7, "used_gb": 20.0, "percent": 20.9},
     "disks": [{"drive": "C", "free_gb": 800, "total_gb": 930, "percent": 14}],
@@ -22,9 +22,9 @@ def test_healthy_machine_is_all_ok():
 
 
 def test_engine_down_and_hardware_errors_fail():
-    bad = {**HEALTHY, "ollama": {"up": False}, "stability": {**HEALTHY["stability"], "whea": 2}}
+    bad = {**HEALTHY, "llama_swap": {"up": False}, "ollama": {"up": False}, "stability": {**HEALTHY["stability"], "whea": 2}}
     lv = levels(bad)
-    assert lv["AI engine (Ollama)"] == FAIL and lv["Stability since baseline"] == FAIL
+    assert lv["AI engine"] == FAIL and lv["Stability since baseline"] == FAIL
 
 
 def test_spilled_model_and_stale_backup_warn():
@@ -38,6 +38,13 @@ def test_spilled_model_and_stale_backup_warn():
 def test_wrong_backend_fails_and_unknown_warns():
     assert levels({**HEALTHY, "backend": {**HEALTHY["backend"], "library": "ROCm"}})["GPU backend"] == FAIL
     assert levels({**HEALTHY, "backend": {"known": False}})["GPU backend"] == WARN
+
+
+def test_answer_speed_warns_when_slow():
+    slow = {**HEALTHY, "speed": {"available": True, "model": "sol-fast", "tps": 22.0, "usual": 100, "slow": True}}
+    fast = {**HEALTHY, "speed": {"available": True, "model": "sol-fast", "tps": 133.0, "usual": 100, "slow": False}}
+    assert levels(slow)["Answer speed"] == WARN
+    assert levels(fast)["Answer speed"] == OK
 
 
 def test_backend_parser_picks_newest_line_across_logs(tmp_path):

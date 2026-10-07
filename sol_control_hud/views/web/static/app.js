@@ -304,9 +304,20 @@ function renderVram(p) {
   if (v.need?.model) notes.push(`${v.need.model} needs ~${v.need.gb} GB${v.spare_gb != null ? ` · ${v.spare_gb.toFixed(1)} GB spare` : ''}`);
   if (v.evicted) notes.push('Windows pushed part of the model out to system RAM: it runs slow until VRAM frees up');
   if (v.suggest_free?.length && verdict !== 'OK') notes.push(`free up: ${v.suggest_free.map((t) => `${t.label} ${t.gb} GB`).join(', ')}`);
-  const h = p.heal || {};                       // the watcher's spill auto-heal (OBVLT tools/sol-llm-watch.ps1)
-  if (h.recent) notes.push(h.kind === 'waiting' ? `auto-heal waiting: ${h.text}` : `auto-heal reloaded the model ${agoShort(h.at)}`);
   $('vramNote').textContent = notes.join(' · ');
+
+  const h = p.heal || {};                       // the watcher's spill auto-heal (OBVLT tools/sol-llm-watch.ps1)
+  const hr = $('vramHeadroom');
+  if (hr) {
+    if (v.others_gb != null) {
+      const safe = v.others_gb <= 4.6;
+      const healText = h.recent ? ` · auto-heal ${h.kind === 'waiting' ? 'waiting: ' + esc(h.text) : 'reloaded ' + agoShort(h.at)}` : '';
+      setHTML(hr, `Watcher headroom: <b style="color:${safe ? 'var(--green)' : 'var(--amber)'}">${safe ? 'Safe' : 'Tight'}</b> (${v.others_gb.toFixed(1)} GB / 4.6 GB threshold)${healText}`);
+      hr.hidden = false;
+    } else {
+      hr.hidden = true;
+    }
+  }
   // apps drawn on the Intel chip (Settings → Graphics chip per app); they keep only a sliver here for the monitors
   const g = p.gpu || {}, off = g.on_other_chips || [];
   const box = $('vramIntel');
