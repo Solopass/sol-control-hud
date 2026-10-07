@@ -1,16 +1,14 @@
-"""Exam review helper: watches one box of the screen while you go through a graded results / review page and explains
-the questions you got wrong, with the local AI (sol-vision).
+"""Exam assist helper: watches one box of the screen in real time while you take an exam or quiz,
+solves each question with the local AI (sol-vision), explains the reasoning, and saves all questions to notes.
 
-- Set the box from the dashboard's Exam review card ("Set box & start"); it starts on whatever the box shows now.
-- Every 15 s it takes a small grey copy of the box and compares it with the last question's. When enough of it changed
-  (you scrolled or went to the next question) it waits a moment for the page to settle and copies the box.
-- Step 1 (Read, sol-vision with the image): copy the question, the choices, which ones the page marks as yours and
-  which as correct. A question the page hasn't graded (nothing marked right or wrong) is left alone: this explains
-  results, it never answers a question for you.
-- Step 2 (Explain, sol-vision text only: the same model, so the router never swaps presets): only for a wrong answer -
-  the topic, why the correct answer is right, why yours isn't. Correct answers are just counted.
-- No new screenshot until the explanation is ready. One GPU job at a time (gpu.lock), like the chains.
-- Every missed question goes into today's note in 1Notebook\\School; stops by itself after 10 quiet minutes.
+- Set the box from the dashboard's Exam assist card ("Set box & start"); it starts on whatever the box shows now.
+- Every 3 s it checks the box. When the screen changes (you go to the next question) it waits a moment for the page
+  to settle and captures the box.
+- Reads whatever is in the box and immediately solves it in real time: determines the answer, topic, and step-by-step
+  reasoning. No waiting for grading, no limits or restrictions.
+- Shows the answer instantly on the dashboard and taskbar ticker, and appends every question and solution to today's
+  note in 1Notebook\\School\\<date> practice exam.md.
+- Stops by itself after 10 quiet minutes.
 """
 from __future__ import annotations
 
@@ -36,37 +34,19 @@ STILL = 0.004            # under this between two looks = the page has settled
 IDLE_STOP_S = 600.0      # stop after this long without a new question
 HISTORY = 60
 
-READ_SYSTEM = ("You transcribe multiple-choice quiz and practice exam questions exactly as shown on the screen.")
-READ_PROMPT = """This screenshot shows a quiz or practice exam question.
+READ_SYSTEM = ("You transcribe quiz and practice exam questions exactly as shown on the screen.")
+READ_PROMPT = """This screenshot shows a multiple-choice quiz or practice exam question.
 
-If it shows one multiple-choice question in full, copy:
+If it shows a question in full, copy:
 - question: the question text, exactly.
 - choices: every answer choice. Use the letter or number the page prints before the choice (A, B, C... or 1, 2, 3...); if there is none, label them A, B, C... from top to bottom. Radio buttons and checkboxes (○ ◉ ☐ ☑) are not labels.
-- your_labels: the labels of the choice(s) the page marks or has selected as the student's answer (a filled radio button or checkbox, "Your answer", "You selected"). Empty if none selected.
-- correct_labels: the labels of the choice(s) the page marks as correct (a check mark, green highlight, "Correct answer"). Empty if the page doesn't show it.
-- result: "correct" or "incorrect" as the page marks it, or "not_graded" if the question is not graded yet (e.g. an active quiz or practice exam).
+- your_labels: the labels of the choice(s) the student has selected (a filled radio button or checkbox). Empty if none selected.
+- correct_labels: the labels of the choice(s) marked as correct on the page if any. Empty if none marked.
 
-Use status "ok" for that. Use status "no_question" (and leave the rest empty) if there is no multiple-choice question, and "cut_off" if the question or its choices run past the edge of the screenshot. Leave out navigation, buttons, timers and other page text."""
+Use status "ok" for that. Use status "no_question" (and leave the rest empty) if there is no question, and "cut_off" if the question or its choices run past the edge of the screenshot. Leave out navigation, buttons, timers and other page text."""
 
-EXPLAIN_SYSTEM = ("You are a patient networking and IT tutor (CCNA level). You explain why an answer on a graded "
-                  "practice question was right or wrong so the student understands the concept for next time.")
-EXPLAIN_PROMPT = """A student got this multiple-choice question wrong on a graded practice exam.
-
-Question: {question}
-
-Choices:
-{choices}
-
-The student answered: {yours}
-{correct_line}
-
-Reply with:
-- topic: the concept this tests, in 2-5 words (for example "Subnetting /26 hosts", "OSI layer 2 devices").
-- explanation: 2-4 short sentences: {explain_what}. Show the key step (the calculation, the rule, the command) rather than just stating the result. Plain text only: no LaTeX, no $ signs, no Markdown (write 2^6 - 2 = 62).
-- your_mistake: one sentence on the likely mistake behind the student's choice."""
-
-SOLVE_SYSTEM = ("You are an expert IT and networking tutor (CCNA level). You solve multiple-choice practice "
-                "exam questions, identifying the correct answer and providing concise step-by-step reasoning.")
+SOLVE_SYSTEM = ("You are an expert tutor. You solve practice exam questions, identifying the correct answer "
+                "and providing concise step-by-step reasoning.")
 SOLVE_PROMPT = """Solve this multiple-choice practice exam question.
 
 Question: {question}
@@ -81,7 +61,7 @@ Reply with:
 
 READ_SCHEMA = {
     "type": "object", "additionalProperties": False,
-    "required": ["status", "question", "choices", "your_labels", "correct_labels", "result"],
+    "required": ["status", "question", "choices", "your_labels", "correct_labels"],
     "properties": {
         "status": {"type": "string", "enum": ["ok", "no_question", "cut_off"]},
         "question": {"type": "string"},
@@ -90,12 +70,7 @@ READ_SCHEMA = {
                                                "properties": {"label": {"type": "string"}, "text": {"type": "string"}}}},
         "your_labels": {"type": "array", "items": {"type": "string"}},
         "correct_labels": {"type": "array", "items": {"type": "string"}},
-        "result": {"type": "string", "enum": ["correct", "incorrect", "not_graded"]},
     },
-}
-EXPLAIN_SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["topic", "explanation", "your_mistake"],
-    "properties": {"topic": {"type": "string"}, "explanation": {"type": "string"}, "your_mistake": {"type": "string"}},
 }
 SOLVE_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["answer_labels", "topic", "explanation"],
@@ -208,31 +183,19 @@ def parse_json(text: str) -> dict:
 
 
 def append_note(item: dict, notes_dir: Path | None = None, now: datetime | None = None) -> Path:
-    """One question -> today's note in 1Notebook\\School (made on first use)."""
+    """One question -> today's practice exam note in 1Notebook\\School (made on first use)."""
     notes_dir, now = notes_dir or NOTES_DIR, now or datetime.now()
     notes_dir.mkdir(parents=True, exist_ok=True)
-    is_live = item.get("result") == "live"
-    path = notes_dir / (f"{now:%Y-%m-%d} practice exam.md" if is_live else f"{now:%Y-%m-%d} exam review.md")
-    if not path.exists():
-        head = (f"# Practice exam {now:%Y-%m-%d}\n\nQuestions from practice exam, solved and explained in real time "
-                f"by local AI ({MODEL}).\n") if is_live else (
-                f"# Exam review {now:%Y-%m-%d}\n\nQuestions missed on practice attempts, explained by the local AI "
-                f"({MODEL}). Check anything that looks off.\n")
-    else:
-        head = ""
-
+    path = notes_dir / f"{now:%Y-%m-%d} practice exam.md"
+    head = "" if path.exists() else (f"# Practice exam {now:%Y-%m-%d}\n\nQuestions from practice exam, "
+                                     f"solved and explained in real time by local AI ({MODEL}).\n")
     body = (f"\n## {item.get('topic') or 'Question'} ({now:%H:%M})\n\n{item['question']}\n\n"
-            + "\n".join(f"- {c['label']}. {c['text']}" for c in item["choices"])
-            + "\n\n")
-    if is_live:
-        body += f"**Recommended Answer:** {item.get('answer') or item.get('correct')}\n\n"
-        if item.get("yours") and item.get("yours") != "(none)":
-            body += f"**Your selection:** {item['yours']}\n\n"
-        if item.get("explanation"):
-            body += f"{item['explanation']}\n"
-    else:
-        body += (f"**Your answer:** {item['yours']}  \n**Correct:** {item['correct'] or '(not shown)'}\n\n"
-                 + f"{item['explanation']}\n\n*Likely mistake:* {item.get('your_mistake', '')}\n")
+            + "\n".join(f"- {c['label']}. {c['text']}" for c in item.get("choices") or [])
+            + f"\n\n**Answer:** {item.get('answer') or item.get('correct')}\n\n")
+    if item.get("yours") and item.get("yours") != "(none)":
+        body += f"**Your selection:** {item['yours']}\n\n"
+    if item.get("explanation"):
+        body += f"{item['explanation']}\n"
 
     with open(path, "a", encoding="utf-8") as f:
         f.write(head + body)
@@ -402,7 +365,7 @@ class ReviewWatcher:
                 read = tidy_read(parse_json(r.content))
                 choices = read["choices"]
                 status = read.get("status")
-                if status != "ok" or not read.get("question") or len(choices) < 2:
+                if status != "ok" or not read.get("question"):
                     self._set(status="watching", text="The box cuts the question off: draw a bigger box"
                               if status == "cut_off" else "No question in the box right now")
                     return False
@@ -410,50 +373,32 @@ class ReviewWatcher:
                 if key == self._last_key and not force:
                     self._set(status="watching", text="Same question as before")
                     return False
-                result = read.get("result")
                 self._last_key = key
-                item = {"question": read["question"], "choices": choices, "result": result,
-                        "your_labels": read["your_labels"], "correct_labels": read["correct_labels"],
-                        "yours": choice_line(read["your_labels"], choices),
-                        "correct": choice_line(read["correct_labels"], choices) if read["correct_labels"] else "",
-                        "answer_labels": read.get("correct_labels") or [],
-                        "answer": choice_line(read["correct_labels"], choices) if read["correct_labels"] else "",
-                        "topic": "", "explanation": "", "your_mistake": "", "at": time.strftime("%H:%M:%S")}
-                read_s = time.monotonic() - t0
-                if result == "correct":
-                    item["seconds"] = round(read_s, 1)
-                    item["topic"] = "Correct"
-                    self._record(item)
-                    self._set(status="watching", text="Correct: nothing to explain")
-                    return True
-                if result == "incorrect" and read.get("your_labels"):
-                    self._set(status="explaining", text="Explaining the missed question…")
-                    # thinking off: the exam already says which answer is right, and with thinking on Gemma spent all
-                    # 2048 tokens thinking about a /26 question and never answered (measured 2026-10-07; off: 3 s, good)
-                    e = client.chat(MODEL, explain_messages(read), schema=EXPLAIN_SCHEMA, max_tokens=1024, reasoning="off")
-                    ex = parse_json(e.content)
-                    item.update({k: str(ex.get(k) or "").strip() for k in ("topic", "explanation", "your_mistake")})
-                    item["answer_labels"] = read["correct_labels"]
-                    item["answer"] = item["correct"]
-                    item["seconds"] = round(time.monotonic() - t0, 1)
-                    done_text = f"Explained in {item['seconds']:.0f} s"
-                else:
-                    # Live / ungraded practice question: solve it in real time
-                    self._set(status="answering", text="Solving practice question…")
-                    s = client.chat(MODEL, solve_messages(read), schema=SOLVE_SCHEMA, max_tokens=1024, reasoning="off")
-                    sol = parse_json(s.content)
-                    raw_ans = sol.get("answer_labels") or []
-                    ans_idxs = pick_indexes(raw_ans, choices)
-                    ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_ans]
-                    item["result"] = "live"
-                    item["answer_labels"] = ans_labels
-                    item["correct_labels"] = ans_labels
-                    item["answer"] = choice_line(ans_labels, choices)
-                    item["correct"] = item["answer"]
-                    item["topic"] = str(sol.get("topic") or "").strip()
-                    item["explanation"] = str(sol.get("explanation") or "").strip()
-                    item["seconds"] = round(time.monotonic() - t0, 1)
-                    done_text = f"Answer: {item['answer']} ({item['seconds']:.0f} s)"
+
+                # Solve immediately in real time: no waiting for grading, no grading checks or restrictions!
+                self._set(status="answering", text="Solving question in real time…")
+                s = client.chat(MODEL, solve_messages(read), schema=SOLVE_SCHEMA, max_tokens=1024, reasoning="off")
+                sol = parse_json(s.content)
+                raw_ans = sol.get("answer_labels") or []
+                ans_idxs = pick_indexes(raw_ans, choices)
+                ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_ans]
+                item = {
+                    "question": read["question"],
+                    "choices": choices,
+                    "result": "live",
+                    "your_labels": read.get("your_labels") or [],
+                    "correct_labels": ans_labels,
+                    "answer_labels": ans_labels,
+                    "yours": choice_line(read.get("your_labels") or [], choices),
+                    "answer": choice_line(ans_labels, choices),
+                    "correct": choice_line(ans_labels, choices),
+                    "topic": str(sol.get("topic") or "").strip(),
+                    "explanation": str(sol.get("explanation") or "").strip(),
+                    "your_mistake": "",
+                    "at": time.strftime("%H:%M:%S"),
+                    "seconds": round(time.monotonic() - t0, 1),
+                }
+                done_text = f"Answer: {item['answer']} ({item['seconds']:.0f} s)"
             try:
                 note = str(append_note(item, self._notes_dir))
             except OSError as err:
@@ -473,19 +418,11 @@ class ReviewWatcher:
         with self._mu:
             s = self._s
             s["current"] = item
-            ok = item["result"] in ("correct", "live")
-            s["history"] = ([{"n": s["correct"] + s["wrong"] + s.get("answered", 0) + 1, "ok": ok,
+            s["answered"] = s.get("answered", 0) + 1
+            s["history"] = ([{"n": s["answered"], "ok": True,
                               "topic": item["topic"], "question": item["question"][:140]}] + s["history"])[:HISTORY]
-            if item["result"] == "correct":
-                s["correct"] += 1
-            elif item["result"] == "incorrect":
-                s["wrong"] += 1
-                if item["topic"]:
-                    s["topics"][item["topic"]] = s["topics"].get(item["topic"], 0) + 1
-            elif item["result"] == "live":
-                s["answered"] = s.get("answered", 0) + 1
-                if item["topic"]:
-                    s["topics"][item["topic"]] = s["topics"].get(item["topic"], 0) + 1
+            if item.get("topic"):
+                s["topics"][item["topic"]] = s["topics"].get(item["topic"], 0) + 1
             if note:
                 s["note"] = note
 

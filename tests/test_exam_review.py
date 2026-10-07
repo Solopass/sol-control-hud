@@ -99,17 +99,17 @@ def test_read_messages_send_the_image_and_fit_counts_it_once():
 
 
 # ---- one look
-def test_missed_question_is_explained_and_noted(tmp_path):
+def test_question_is_solved_and_noted(tmp_path):
     w, client = make(tmp_path, [graded()])
     assert w._process(b"png", force=True) is True
     s = w.state()
-    assert s["wrong"] == 1 and s["topics"] == {"Subnetting": 1}
-    assert s["current"]["yours"] == "B. 255.255.255.128" and s["current"]["correct"] == "C. 255.255.255.192"
+    assert s["answered"] == 1 and s["topics"] == {"Subnetting": 1}
+    assert s["current"]["answer"] == "C. 255.255.255.192"
     assert [c[0] for c in client.calls] == ["sol-vision", "sol-vision"]      # one model: the router never swaps
-    explain_prompt = client.calls[1][1][-1]["content"]
-    assert "C. 255.255.255.192" in explain_prompt and "B. 255.255.255.128" in explain_prompt
-    note = (tmp_path / "School").glob("* exam review.md").__next__().read_text(encoding="utf-8")
-    assert "## Subnetting" in note and "**Correct:** C. 255.255.255.192" in note
+    solve_prompt = client.calls[1][1][-1]["content"]
+    assert "Which mask gives 50 hosts" in solve_prompt and "C. 255.255.255.192" in solve_prompt
+    note = (tmp_path / "School").glob("* practice exam.md").__next__().read_text(encoding="utf-8")
+    assert "## Subnetting" in note and "**Answer:** C. 255.255.255.192" in note
 
 
 def test_ungraded_question_is_answered_and_noted(tmp_path):
@@ -118,24 +118,16 @@ def test_ungraded_question_is_answered_and_noted(tmp_path):
     assert len(client.calls) == 2                                    # read then solve
     s = w.state()
     assert s["answered"] == 1 and s["topics"] == {"Subnetting": 1}
-    assert s["current"]["result"] == "live"
     assert s["current"]["answer"] == "C. 255.255.255.192"
     assert "C. 255.255.255.192" in s["text"]
     note = (tmp_path / "School").glob("* practice exam.md").__next__().read_text(encoding="utf-8")
-    assert "## Subnetting" in note and "**Recommended Answer:** C. 255.255.255.192" in note
+    assert "## Subnetting" in note and "**Answer:** C. 255.255.255.192" in note
 
 
-def test_wrong_without_marked_answer_is_solved_as_live_question(tmp_path):
+def test_any_question_is_solved_immediately_without_restrictions(tmp_path):
     w, client = make(tmp_path, [graded(result="incorrect", yours=(), correct=())])
     assert w._process(b"png", force=True) is True and len(client.calls) == 2
-    assert w.state()["answered"] == 1 and w.state()["current"]["result"] == "live"
-
-
-def test_correct_answer_is_counted_without_explaining(tmp_path):
-    w, client = make(tmp_path, [graded(result="correct", yours=("C",))])
-    assert w._process(b"png", force=True) is True
-    assert len(client.calls) == 1 and w.state()["correct"] == 1
-    assert not (tmp_path / "School").exists()
+    assert w.state()["answered"] == 1
 
 
 def test_same_question_twice_is_skipped_unless_forced(tmp_path):
@@ -143,13 +135,7 @@ def test_same_question_twice_is_skipped_unless_forced(tmp_path):
     assert w._process(b"png", force=True) is True
     assert w._process(b"png", force=False) is False and "Same question" in w.state()["text"]
     assert w._process(b"png", force=True) is True                   # Look now reads it again
-    assert w.state()["wrong"] == 2
-
-
-def test_wrong_hint_when_the_explanation_mentions_no_correct_answer(tmp_path):
-    w, client = make(tmp_path, [graded(correct=())])
-    w._process(b"png", force=True)
-    assert "didn't show the correct one" in client.calls[1][1][-1]["content"]
+    assert w.state()["answered"] == 2
 
 
 def test_cut_off_and_empty_box(tmp_path):
@@ -177,7 +163,7 @@ def test_loop_looks_only_on_change_and_never_while_busy(tmp_path):
     w, client = make(tmp_path, [graded(q="first question?"), graded(q="second question?")], interval=0.02, settle=0.001)
 
     def grab_thumb(rect):
-        assert not busy.is_set(), "looked at the screen while still explaining"
+        assert not busy.is_set(), "looked at the screen while still answering"
         events.append("look")
         return next(thumbs)
     w._grab_thumb = grab_thumb
@@ -195,7 +181,7 @@ def test_loop_looks_only_on_change_and_never_while_busy(tmp_path):
     w._process = process
     w.set_rect([0, 0, 400, 300], start=True)
     w._thread.join(timeout=5)
-    assert events.count("process") == 2 and w.state()["wrong"] == 2
+    assert events.count("process") == 2 and w.state()["answered"] == 2
     assert json.loads((tmp_path / "s.json").read_text())["rect"] == [0, 0, 400, 300]
 
 
@@ -216,12 +202,12 @@ def test_start_needs_a_box(tmp_path):
 
 # ---- ticker
 def test_review_slide_shows_the_last_result():
-    r = {"status": "watching", "text": "Explained in 9 s", "running": True, "correct": 3, "wrong": 1,
-         "current": {"result": "incorrect", "topic": "Subnetting", "your_labels": ["B"], "correct_labels": ["C"],
-                     "question": "Q?", "yours": "B. x", "correct": "C. y", "explanation": "Because."}}
+    r = {"status": "watching", "text": "Answer: C (3 s)", "running": True, "answered": 2,
+         "current": {"topic": "Subnetting", "answer_labels": ["C"],
+                     "question": "Q?", "answer": "C. 255.255.255.192", "explanation": "Because."}}
     sl = sn.review_slide(r)
     assert sl["tag"] == "REVIEW" and sl["level"] == "alert"
-    assert "✗ Subnetting" in sl["text"] and "you B" in sl["text"] and "correct C" in sl["text"] and "3 ✓ 1 ✗" in sl["text"]
+    assert "Ans: C" in sl["text"] and "Subnetting" in sl["text"] and "2 solved" in sl["text"]
     assert "Because." in sl["detail"]
     assert sn.review_slide({**r, "running": False})["level"] == "info"
 
@@ -229,13 +215,3 @@ def test_review_slide_shows_the_last_result():
 def test_rotation_takes_turns_between_two_alert_slides():
     slides = [{"level": "info"}, {"level": "info"}, {"level": "alert"}, {"level": "info"}, {"level": "alert"}]
     assert sn.rotation(slides) == [2, 0, 4, 1, 2, 3]
-
-
-def test_review_slide_shows_live_answer():
-    r = {"status": "watching", "text": "Answer: C (3 s)", "running": True, "correct": 0, "wrong": 0, "answered": 2,
-         "current": {"result": "live", "topic": "Subnetting", "answer_labels": ["C"], "answer": "C. 255.255.255.192",
-                     "question": "Q?", "explanation": "Because 2^6 - 2 = 62."}}
-    sl = sn.review_slide(r)
-    assert sl["tag"] == "REVIEW" and sl["level"] == "alert"
-    assert "Exam " in sl["text"] and "Ans: C" in sl["text"] and "Subnetting" in sl["text"] and "2 live" in sl["text"]
-    assert "Recommended: C. 255.255.255.192" in sl["detail"]

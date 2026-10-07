@@ -443,46 +443,37 @@ function renderFeed(items) {
 }
 
 // ---------- the stream (only while this tab is visible)
-// the Exam review card (exam_review.py): the last graded question, explained if you missed it
-const REV_PILL = { watching: 'ok', reading: '', explaining: '', answering: '', waiting: 'warn', paused: 'warn', error: 'bad', stopped: '' };
+// the Exam assist card (exam_review.py): solves practice exam questions in real time
+const REV_PILL = { watching: 'ok', reading: '', answering: '', waiting: 'warn', paused: 'warn', error: 'bad', stopped: '' };
 function renderReview(p) {
   const r = p.review; if (!r) return;
   const st = r.running ? r.status : 'stopped', pill = $('revStatus');
   pill.textContent = st; pill.className = `pill ${REV_PILL[st] ?? ''}`;
-  pill.style.color = ['reading', 'explaining', 'answering'].includes(st) ? 'var(--cyan)' : '';
+  pill.style.color = ['reading', 'answering'].includes(st) ? 'var(--cyan)' : '';
   const countParts = [];
-  if (r.correct || r.wrong) countParts.push(`${r.correct} ✓ · ${r.wrong} ✗`);
-  if (r.answered) countParts.push(`${r.answered} answered`);
+  if (r.answered) countParts.push(`${r.answered} solved`);
+  else if (r.correct || r.wrong) countParts.push(`${r.correct} ✓ · ${r.wrong} ✗`);
   $('revCount').textContent = countParts.join(' · ');
   const tg = $('revToggle'); tg.dataset.target = r.running ? 'stop' : 'start'; tg.textContent = r.running ? 'Stop' : 'Start';
   tg.disabled = !r.running && !r.rect; tg.title = r.rect ? '' : 'Set the box first';
   $('revText').textContent = (r.text || '') + (r.running && r.next_look && st === 'watching' ? ` · next look ${r.next_look}` : '');
-  $('revBox').textContent = r.rect ? `Box ${r.rect[2]}×${r.rect[3]} at (${r.rect[0]}, ${r.rect[1]}) · looks every 3 s, not while working · real-time exam solver & review` : 'No box yet: drag a box around the question area, then Set box & start.';
+  $('revBox').textContent = r.rect ? `Box ${r.rect[2]}×${r.rect[3]} at (${r.rect[0]}, ${r.rect[1]}) · looks every 3 s · real-time exam solver` : 'No box yet: drag a box around the question area, then Set box & start.';
   const c = r.current, cur = $('revCurrent');
   cur.hidden = !c;
   if (c) {
-    const isLive = c.result === 'live';
-    const mark = (lb) => (c.correct_labels || []).includes(lb) ? 'right' : (c.your_labels || []).includes(lb) ? 'mine' : '';
+    const mark = (lb) => (c.answer_labels || c.correct_labels || []).includes(lb) ? 'right' : (c.your_labels || []).includes(lb) ? 'mine' : '';
     const opts = (c.choices || []).map((o) => `<div class="rev-opt ${mark(o.label)}"><b>${esc(o.label)}.</b> ${esc(o.text)}` +
       `${(c.your_labels || []).includes(o.label) ? ' <span class="dim small">your selection</span>' : ''}` +
-      `${(c.correct_labels || []).includes(o.label) ? ` <span class="small" style="color:var(--green)">✓ ${isLive ? 'recommended' : 'correct'}</span>` : ''}</div>`).join('');
-    let head = '';
-    if (isLive) {
-      head = `<span style="color:var(--cyan)">💡 Recommended: ${esc(c.answer || (c.answer_labels || []).join(', '))} · ${esc(c.topic || 'Practice')}</span>`;
-    } else if (c.result === 'correct') {
-      head = '<span style="color:var(--green)">✓ Correct</span>';
-    } else {
-      head = `<span style="color:var(--red)">✗ ${esc(c.topic || 'Missed')}</span>`;
-    }
-    const body = (isLive || c.result !== 'correct') ? `<p class="rev-explain">${esc(c.explanation)}</p>` +
-      (c.your_mistake ? `<p class="dim small"><b>Likely mistake:</b> ${esc(c.your_mistake)}</p>` : '') : '';
+      `${(c.answer_labels || c.correct_labels || []).includes(o.label) ? ' <span class="small" style="color:var(--green)">✓ answer</span>' : ''}</div>`).join('');
+    const head = `<span style="color:var(--cyan)">💡 Answer: ${esc(c.answer || (c.answer_labels || []).join(', '))} · ${esc(c.topic || 'Solved')}</span>`;
+    const body = `<p class="rev-explain">${esc(c.explanation)}</p>`;
     setHTML(cur, `<div class="row"><b>${head}</b><span class="dim small">${esc(c.at || '')}${c.seconds ? ` · ${c.seconds} s` : ''}</span></div>` +
       `<div class="rev-q">${esc(c.question)}</div>${opts}${body}`);
   }
   setHTML($('revHistory'), (r.history || []).map((h) => `<div class="item"><span>${h.n}. ${esc(h.topic || h.question)}</span>` +
-    `<span style="color:${h.ok ? 'var(--green)' : 'var(--red)'}">${h.ok ? '✓' : '✗'}</span></div>`).join('') || '<div class="empty">nothing yet</div>');
+    `<span style="color:var(--green)">✓</span></div>`).join('') || '<div class="empty">nothing yet</div>');
   const topics = Object.entries(r.topics || {}).sort((a, b) => b[1] - a[1]);
-  setHTML($('revTopics'), topics.map(([t, n]) => `<div class="item"><span>${esc(t)}</span><span style="color:var(--amber)">${n}×</span></div>`).join('')
+  setHTML($('revTopics'), topics.map(([t, n]) => `<div class="item"><span>${esc(t)}</span><span style="color:var(--cyan)">${n}×</span></div>`).join('')
     || '<div class="empty">no topics recorded yet</div>');
 }
 

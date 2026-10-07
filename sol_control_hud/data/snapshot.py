@@ -937,39 +937,31 @@ def _review_state() -> dict | None:
 
 
 def review_slide(r: dict) -> dict:
-    """The exam review helper on the ticker: the last result while it watches (held like an alert so a glance finds
-    it), the full explanation in the tooltip. Click opens the dashboard's card."""
+    """The exam helper on the ticker: the last solved question while it watches, with full explanation in the tooltip.
+    Click opens the dashboard's card."""
     cur, busy = r.get("current") or {}, r.get("status") in ("reading", "explaining", "answering", "waiting")
-    prefix = "Exam " if cur and cur.get("result") == "live" else "Review "
+    prefix = "Exam "
     segs: list[tuple[str, str]] = [(prefix, MUTED)]
-    if cur and cur.get("result") == "correct":
-        segs += [("✓ correct", GREEN)]
-    elif cur and cur.get("result") == "live":
+    if cur:
         ans = "/".join(cur.get("answer_labels") or cur.get("correct_labels") or [])
-        segs += [(f"Ans: {ans or '?'}", GREEN), SEP, (cur.get("topic") or "practice", CYAN)]
-    elif cur:
-        segs += [(f"✗ {cur.get('topic') or 'missed'}", RED), SEP,
-                 (f"you {'/'.join(cur.get('your_labels') or []) or '?'}", AMBER), SEP,
-                 (f"correct {'/'.join(cur.get('correct_labels') or []) or '?'}", GREEN)]
+        segs += [(f"Ans: {ans or '?'}", GREEN), SEP, (cur.get("topic") or "solved", CYAN)]
     else:
         segs += [(r.get("text") or "watching", MUTED)]
-    count_str = (f"{r.get('answered', 0)} live" if r.get("answered") and not (r.get("correct") or r.get("wrong"))
-                 else f"{r.get('correct', 0)} ✓ {r.get('wrong', 0)} ✗")
-    segs += [SEP, (count_str, TEXT)]
+    count_str = (f"{r.get('answered', 0)} solved" if r.get("answered")
+                 else (f"{r.get('correct', 0)} ✓ {r.get('wrong', 0)} ✗" if (r.get("correct") or r.get("wrong")) else ""))
+    if count_str:
+        segs += [SEP, (count_str, TEXT)]
     if busy:
         segs += [SEP, (r.get("text") or r.get("status", ""), CYAN)]
     elif not r.get("running"):
         segs += [SEP, ("stopped", MUTED)]
-    if cur and cur.get("result") == "live":
-        detail = (f"{cur.get('question', '')}\nRecommended: {cur.get('answer', '')}\n"
-                  f"{cur.get('explanation', '')}")
-    elif cur and cur.get("result") != "correct":
-        detail = (f"{cur.get('question', '')}\nYou: {cur.get('yours', '')} · Correct: {cur.get('correct') or '(not shown)'}\n"
+    if cur:
+        detail = (f"{cur.get('question', '')}\nAnswer: {cur.get('answer', '')}\n"
                   f"{cur.get('explanation', '')}")
     else:
         detail = r.get("text") or ""
     return {"tag": "REVIEW", "text": plain(segs), "segments": segs, "color": CYAN if busy else MUTED,
-            "detail": detail + "\nClick to open the Exam review card", "level": "alert" if r.get("running") else "info"}
+            "detail": detail + "\nClick to open the Exam card", "level": "alert" if r.get("running") else "info"}
 
 
 def _part_color(tag: str, part: str, s: Snapshot) -> str:
