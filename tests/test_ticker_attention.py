@@ -171,3 +171,29 @@ def test_daily_note_reminder_after_eight(monkeypatch):
     assert note() == AMBER
     monkeypatch.setattr(td.time, "localtime", lambda *a: time.struct_time((2026, 9, 26, 14, 0, 0, 5, 269, 0)))
     assert note() == TEXT
+
+
+# ---- 2026-10-07: answer speed on the AI slide, and a warning when the card is nearly full
+def test_ai_slide_shows_answer_speed_colored_by_health():
+    from sol_control_hud.data.snapshot import GREEN, RED, Snapshot, colorize, format_slides
+    s = Snapshot(ai_model="sol-fast", ai_state="loaded", ai_tps=71.4)
+    ai = next(x for x in format_slides(s) if x["tag"] == "AI")
+    assert ai["text"].endswith("71 tok/s")
+    assert dict(colorize(ai, s))["71 tok/s"] == GREEN
+    s = Snapshot(ai_model="sol-fast", ai_state="loaded", ai_tps=26.0, ai_tps_slow=True)
+    ai = next(x for x in format_slides(s) if x["tag"] == "AI")
+    assert dict(colorize(ai, s))["26 tok/s"] == RED
+    s = Snapshot(ai_model="sol-fast", ai_state="loaded")                    # no recent answer: the port, as before
+    assert next(x for x in format_slides(s) if x["tag"] == "AI")["text"].endswith(":11440")
+
+
+def test_card_nearly_full_warning_names_the_biggest_app():
+    from sol_control_hud.data.snapshot import AMBER, Snapshot, attention
+    slow = Snapshot(ai_mode="desk", ai_state="loaded", ai_tps=26.0, ai_tps_slow=True, vram_card_full=True,
+                    vram_used_gb=12.3, vram_hog="brave 1.4 GB")
+    assert (AMBER, "AI slowed (26 tok/s): card 12.3 GB · brave 1.4 GB", "AI") in attention(slow)
+    full = Snapshot(ai_mode="desk", ai_state="sleeping", vram_card_full=True, vram_used_gb=11.8)
+    assert (AMBER, "card nearly full (11.8 GB): the AI may slow", "AI") in attention(full)
+    for quiet in (Snapshot(ai_mode="desk", ai_state="loaded", vram_used_gb=9.5),           # room on the card
+                  Snapshot(ai_mode="off", ai_state="unloaded", vram_card_full=True, vram_used_gb=12.0)):   # a game
+        assert not [a for a in attention(quiet) if "card" in a[1]]

@@ -90,6 +90,10 @@ class Snapshot:
     vram_tight: bool = False
     vram_top_process: str | None = None
     vram_processes: list[dict] = field(default_factory=list)
+    vram_card_full: bool = False               # in use >= CARD_FULL_GB: Windows starts squeezing the model past ~12.2
+    vram_hog: str | None = None                # the app holding the most of the card, e.g. "brave 1.4 GB"
+    ai_tps: float | None = None                # the last answer's generation speed (router.log), if from the loaded model
+    ai_tps_slow: bool = False                  # under half its usual speed (speed.USUAL_TPS)
     ram_used_gb: float = 0.0
     ram_total_gb: float = 0.0
     ram_percent: float = 0.0
@@ -395,6 +399,7 @@ def disk_trends_from(history: list[tuple[float, dict[str, float]]], now: float,
 VRAM_RISE_GB = 1.0          # VRAM grown this much in 10 min (at the desk): amber, something is eating it
 TEMP_RISE_C = 10            # GPU edge temperature up this much in 5 min: amber
 GIT_OLD_DAYS = 3.0          # a repo with changes older than this: red
+CARD_FULL_GB = 11.5         # card in use: Windows lets programs use ~12.2 GB, past it the model is squeezed (10-07: 26 tok/s)
 
 
 def rise(samples: list[tuple[float, float | None]], now: float, window: float) -> float | None:
@@ -502,6 +507,10 @@ def attention(s: "Snapshot") -> list[tuple[str, str, str]]:
         out.append((AMBER, f"chain failed: {s.chain_last_finished.removesuffix(' (failed)')}", "RUN"))
     if s.backup_stale:
         out.append((AMBER, "WSL backup is stale", "SYS"))
+    if s.ai_tps_slow and s.vram_card_full:
+        out.append((AMBER, f"AI slowed ({s.ai_tps:.0f} tok/s): card {s.vram_used_gb:.1f} GB" + (f" · {s.vram_hog}" if s.vram_hog else ""), "AI"))
+    elif s.vram_card_full and s.ai_mode == "desk" and s.ai_state in ("loaded", "sleeping"):
+        out.append((AMBER, f"card nearly full ({s.vram_used_gb:.1f} GB): the AI may slow" + (f" · {s.vram_hog}" if s.vram_hog else ""), "AI"))
     if s.vram_tight and not s.vram_evicted and s.ai_mode != "away":
         out.append((AMBER, "VRAM tight: the model may spill", "HW"))
     return out
@@ -712,7 +721,7 @@ def format_slides(s: Snapshot) -> list[dict]:
     model_part = f"{model_str}{bolt} ({state_str})" if s.ai_model or s.ai_state == "offline" else model_str
     slides.append({
         "tag": "AI",
-        "text": f"{model_part}  ·  {mode_str}{lock_flag}  ·  :11440",
+        "text": f"{model_part}  ·  {mode_str}{lock_flag}  ·  " + (f"{s.ai_tps:.0f} tok/s" if s.ai_tps else ":11440"),
         "color": ai_color,
         "detail": f"Active inference on {model_str}{ctx_info}" if s.ai_generating else (f"Reason: {s.ai_reason}" if s.ai_reason else f"llama.cpp router{ctx_info}")
     })
@@ -933,6 +942,8 @@ def _part_color(tag: str, part: str, s: Snapshot) -> str:
     elif tag == "AI":
         if p == ":11440":
             return MUTED
+        if p.endswith("tok/s"):
+            return RED if s.ai_tps_slow else GREEN
         if p.startswith(("Away", "Off", "Desk")):
             return CYAN if p.startswith("Away") else AMBER if p.startswith("Off") else TEXT
         if s.ai_generating or s.ai_state == "loaded":
@@ -1179,6 +1190,8 @@ class TickerCollector:
         self._git_thread: threading.Thread | None = None
         self._last_apps = 0.0
         self._apps: dict = {"apps": [], "media": []}
+        self._last_speed = 0.0
+        self._speed: dict = {}
         self._apps_thread: threading.Thread | None = None
         self._eta = away_screen.EtaTracker()
         self._disk_hist: list[tuple[float, dict[str, float]]] = []
@@ -1272,6 +1285,23 @@ class TickerCollector:
                 top_p = procs[0]
                 if top_p.get("dedicated_gb", 0.0) >= 0.1:
                     vram_top_process = f"{top_p['name']} {top_p['dedicated_gb']:.1f}G"
+
+        # 2a. Is the card nearly full, and who holds most of it (the guard's per-app numbers: dwm gets the remainder)
+        vram_card_full = bool(vram_used is not None and vram_used >= CARD_FULL_GB)
+        hogs = [t for t in (guard_res.get("top_consumers") or [])
+                if t.get("movable") and not str(t.get("name", "")).lower().startswith(("llama-server", "ollama"))]
+        vram_hog = f"{hogs[0]['label']} {hogs[0]['gb']:.1f} GB" if hogs and hogs[0].get("gb", 0) >= 0.2 else None
+
+        # 2a'. The last answer's real speed (every 10 s: one log tail + a llama-server process scan)
+        if time.monotonic() - self._last_speed >= 10:
+            self._last_speed = time.monotonic()
+            try:
+                from .collectors import speed as speed_mod
+                from .. import models_ctl
+                self._speed = speed_mod.answer_speed(models_ctl.model_processes())
+            except Exception:
+                self._speed = {}
+        sp = self._speed if self._speed.get("current_process") and time.time() - (self._speed.get("at") or 0) <= 1800 else {}
 
         # 2b. GPU Sensors (ADL: Edge/Hotspot/Mem Temp, Fan RPM)
         try:
@@ -1450,6 +1480,10 @@ class TickerCollector:
             vram_evicted=vram_evicted,
             vram_tight=vram_tight,
             vram_top_process=vram_top_process,
+            vram_card_full=vram_card_full,
+            vram_hog=vram_hog,
+            ai_tps=sp.get("tps"),
+            ai_tps_slow=bool(sp.get("slow")),
             vram_processes=vram_processes,
             ram_used_gb=mem.get("used_gb", 0.0),
             ram_total_gb=mem.get("total_gb", 0.0),
