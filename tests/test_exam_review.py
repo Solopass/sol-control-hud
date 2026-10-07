@@ -22,16 +22,20 @@ def graded(result="incorrect", yours=("B",), correct=("C",), q="Which mask gives
 
 
 class FakeClient:
-    def __init__(self, reads, explain=None):
+    def __init__(self, reads, explain=None, solve=None):
         self.reads, self.calls = list(reads), []
         self.explain = explain or {"topic": "Subnetting", "explanation": "2^6 - 2 = 62 >= 50, so /26.",
                                    "your_mistake": "Picked a mask with too many host bits."}
+        self.solve = solve or {"answer_labels": ["C"], "topic": "Subnetting",
+                               "explanation": "2^6 - 2 = 62 >= 50, so /26 (255.255.255.192)."}
 
     def chat(self, model, messages, **kw):
         self.calls.append((model, messages, kw))
         user = messages[-1]["content"]
         if isinstance(user, list):                       # the read step carries the image
             return ChatResult(content=json.dumps(self.reads.pop(0)), finish_reason="stop")
+        if "Solve this multiple-choice" in user:
+            return ChatResult(content=json.dumps(self.solve), finish_reason="stop")
         return ChatResult(content=json.dumps(self.explain), finish_reason="stop")
 
 
@@ -108,16 +112,23 @@ def test_missed_question_is_explained_and_noted(tmp_path):
     assert "## Subnetting" in note and "**Correct:** C. 255.255.255.192" in note
 
 
-def test_ungraded_question_is_never_answered(tmp_path):
+def test_ungraded_question_is_answered_and_noted(tmp_path):
     w, client = make(tmp_path, [graded(result="not_graded", yours=(), correct=())])
-    assert w._process(b"png", force=True) is False
-    assert len(client.calls) == 1                                    # read only: no explain / answer step
-    assert "isn't graded" in w.state()["text"] and w.state()["current"] is None
+    assert w._process(b"png", force=True) is True
+    assert len(client.calls) == 2                                    # read then solve
+    s = w.state()
+    assert s["answered"] == 1 and s["topics"] == {"Subnetting": 1}
+    assert s["current"]["result"] == "live"
+    assert s["current"]["answer"] == "C. 255.255.255.192"
+    assert "C. 255.255.255.192" in s["text"]
+    note = (tmp_path / "School").glob("* practice exam.md").__next__().read_text(encoding="utf-8")
+    assert "## Subnetting" in note and "**Recommended Answer:** C. 255.255.255.192" in note
 
 
-def test_wrong_without_marked_answer_is_treated_as_ungraded(tmp_path):
+def test_wrong_without_marked_answer_is_solved_as_live_question(tmp_path):
     w, client = make(tmp_path, [graded(result="incorrect", yours=(), correct=())])
-    assert w._process(b"png", force=True) is False and len(client.calls) == 1
+    assert w._process(b"png", force=True) is True and len(client.calls) == 2
+    assert w.state()["answered"] == 1 and w.state()["current"]["result"] == "live"
 
 
 def test_correct_answer_is_counted_without_explaining(tmp_path):
@@ -218,3 +229,13 @@ def test_review_slide_shows_the_last_result():
 def test_rotation_takes_turns_between_two_alert_slides():
     slides = [{"level": "info"}, {"level": "info"}, {"level": "alert"}, {"level": "info"}, {"level": "alert"}]
     assert sn.rotation(slides) == [2, 0, 4, 1, 2, 3]
+
+
+def test_review_slide_shows_live_answer():
+    r = {"status": "watching", "text": "Answer: C (3 s)", "running": True, "correct": 0, "wrong": 0, "answered": 2,
+         "current": {"result": "live", "topic": "Subnetting", "answer_labels": ["C"], "answer": "C. 255.255.255.192",
+                     "question": "Q?", "explanation": "Because 2^6 - 2 = 62."}}
+    sl = sn.review_slide(r)
+    assert sl["tag"] == "REVIEW" and sl["level"] == "alert"
+    assert "Exam " in sl["text"] and "Ans: C" in sl["text"] and "Subnetting" in sl["text"] and "2 live" in sl["text"]
+    assert "Recommended: C. 255.255.255.192" in sl["detail"]
