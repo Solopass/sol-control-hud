@@ -1160,3 +1160,20 @@ def test_media_collector_and_slides(monkeypatch, tmp_path):
 
 
 
+
+
+def test_switching_ai_mode_from_the_ticker_really_runs_the_script(monkeypatch, tmp_path):
+    """Regression (found 10-08 by pyflakes during the file split): ticker.py lost `import subprocess` on 09-26, and the
+    NameError was swallowed by the runner's `except Exception`, so Desk/Away from the ticker silently did nothing."""
+    import types
+    from sol_control_hud.views import ticker
+    script = tmp_path / "sol-llm.ps1"
+    script.write_text("# fake")
+    monkeypatch.setattr(ticker, "SOL_LLM", script)
+    monkeypatch.setattr(ticker, "threading", types.SimpleNamespace(Thread=lambda target, daemon: types.SimpleNamespace(start=target)))
+    ran = []
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **k: ran.append(cmd))
+    me = types.SimpleNamespace(trigger_alert=lambda *a: None, refresh_data_now=lambda: None)
+    ticker.TickerApp.switch_ai_mode(me, "away")
+    assert ran and ran[0][-2:] == [str(script), "away"]
