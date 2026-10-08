@@ -1,7 +1,10 @@
 #!/bin/sh
-# Runs the tests before every commit (Claude and Gemini both commit here). A failing test stops the commit.
+# Runs before every commit (Claude and Gemini both commit here). A failing check stops the commit.
 # Skip once, knowingly: git commit --no-verify
 cd "$(git rev-parse --show-toplevel)" || exit 1
+# 1. No new undefined names in staged Python files (scripts/check_names.py: the 09-26 lost-import bug, in a second)
+./.venv/Scripts/python.exe scripts/check_names.py || { echo "pre-commit: new undefined name(s) above, commit stopped"; exit 1; }
+# 2. The tests
 ./.venv/Scripts/python.exe -m pytest -q -x tests >/tmp/sol-control-hud-tests.log 2>&1
 status=$?
 tail -n 3 /tmp/sol-control-hud-tests.log

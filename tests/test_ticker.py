@@ -1163,8 +1163,9 @@ def test_media_collector_and_slides(monkeypatch, tmp_path):
 
 
 def test_switching_ai_mode_from_the_ticker_really_runs_the_script(monkeypatch, tmp_path):
-    """Regression (found 10-08 by pyflakes during the file split): ticker.py lost `import subprocess` on 09-26, and the
-    NameError was swallowed by the runner's `except Exception`, so Desk/Away from the ticker silently did nothing."""
+    """Regression (found 10-08 by pyflakes during the file split): ticker.py never imported `subprocess` (since its first
+    commit, 7b4de81), and the NameError was swallowed by the runner's `except Exception`, so Desk/Away from the ticker
+    silently did nothing."""
     import types
     from sol_control_hud.views import ticker
     script = tmp_path / "sol-llm.ps1"
