@@ -8,7 +8,7 @@ import json
 import sys
 import time
 
-from .data.collectors import decode, displays, engines, gpu, speed, system, vram
+from .data.collectors import displays, engines, gpu, speed, system, vram
 
 OK, WARN, FAIL = "OK", "WARN", "FAIL"
 
@@ -93,13 +93,6 @@ def checks(status: dict) -> list[tuple[str, str, str]]:
         elif dark:
             out.append(("  Rendering on the wrong GPU", OK, f"{dark[0]} drives no monitor, and nothing is rendering on it"))
 
-    dec = status.get("decode") or {}
-    if dec.get("available") and dec.get("suspects"):
-        s = dec["suspects"][0]
-        out.append(("  Video decoding on the CPU", WARN,
-                    f"{s['name']} is burning {s['cpu_percent']}% of a core while nothing uses the GPU's video "
-                    f"decoder — it looks like software decode (10-08: restarting the browser fixed it)"))
-
     m = status["memory"]
     out.append(("RAM", OK if m["percent"] < 90 else WARN, f"{m['used_gb']}/{m['total_gb']} GB ({m['percent']}%)"))
 
@@ -141,15 +134,11 @@ def collect() -> dict:
     sampler = gpu.GpuSampler(interval=1.0)
     sampler.start()
     time.sleep(2.5)  # two counter samples for a real utilization value
-    # the decode watch reports a CPU *rate*, so it needs a first reading to measure against
-    watch = decode.SoftwareDecodeWatch(needed=1)
-    watch.update(sampler.last_util)
     ollama = engines.ollama()
     status = {
         "ollama": ollama, "backend": engines.ollama_backend(), "llama_swap": engines.llama_swap(), "gpu": sampler.latest,
         "vram": vram.VramGuard(confirm=1).update(sampler.latest, ollama),
         "displays": displays.report(sampler.last_util, lambda pid: gpu.process_name(pid, {})),
-        "decode": watch.update(sampler.last_util),
         "speed": speed.answer_speed(),
         "memory": system.memory(), "disks": system.disks(), "backups": system.backups(),
         "wsl": system.wsl(), "stability": system.stability(),
