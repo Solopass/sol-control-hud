@@ -204,9 +204,7 @@ canvas.chart.short { height:56px; }
 footer { display:flex; flex-wrap:wrap; gap:6px 18px; padding:8px 22px 20px; font-size:11px; color:var(--dim); }
 footer span[style]::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; background:var(--c); }
 footer #foot { margin-left:8px; }
-footer .toggle + .toggle { margin-left:14px; }
-footer .toggle { margin-left:auto; display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--muted); }
-footer .toggle input { accent-color:var(--cyan); cursor:pointer; }
+footer #foot { margin-left:auto; }
 
 .toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); padding:10px 18px; border-radius:10px; background:var(--card);
   border:1px solid var(--cyan); animation:slidein .4s var(--ease); z-index:9; }

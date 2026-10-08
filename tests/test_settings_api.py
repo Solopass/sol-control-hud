@@ -74,6 +74,78 @@ def test_hud_heal_is_saved(the_hub):
     assert hub.load_settings().get("hud_heal") is True
 
 
+class FakeRegistry:
+    """Never the machine's own registry: these tests would otherwise repin the real apps."""
+
+    def __init__(self, values=None):
+        self.values = dict(values or {})
+        self.writes = []
+
+    def read(self):
+        return dict(self.values)
+
+    def write(self, name, value):
+        self.values[name] = value
+        self.writes.append((name, value))
+
+
+@pytest.fixture
+def fake_gpu(monkeypatch):
+    from sol_control_hud import gpu_prefs
+    reg = FakeRegistry()
+    apps = [{"key": "brave", "label": "Brave", "paths": [r"C:\x\brave.exe"], "about": "browser"},
+            {"key": "discord", "label": "Discord", "paths": [r"C:\x\Discord.exe"], "about": "chat"}]
+    monkeypatch.setattr(gpu_prefs, "APPS", apps)
+    monkeypatch.setattr(gpu_prefs, "app_paths", lambda a: list(a["paths"]))
+    monkeypatch.setattr(gpu_prefs, "Registry", lambda: reg)
+    monkeypatch.setattr(gpu_prefs, "intel_available", lambda adapters=None: True)
+    return reg
+
+
+def test_one_app_is_set_by_its_own_paths_and_remembered(the_hub, fake_gpu):
+    r = settings_api.change(the_hub, "gpu:brave", "amd")
+    assert r["ok"] and "Brave" in r["why"]
+    assert fake_gpu.writes == [(r"C:\x\brave.exe", "GpuPreference=2;")]
+    assert hub.load_settings()["gpu_choices"] == {"brave": "amd"}      # survives a restart: reapply() reads this
+
+
+def test_all_apps_at_once(the_hub, fake_gpu):
+    settings_api.change(the_hub, "gpu:all", "amd")
+    assert {n for n, _ in fake_gpu.writes} == {r"C:\x\brave.exe", r"C:\x\Discord.exe"}
+    assert hub.load_settings()["gpu_choices"] == {"brave": "amd", "discord": "amd"}
+
+
+def test_other_settings_in_the_value_string_survive(the_hub, fake_gpu):
+    """Windows keeps Auto HDR and the windowed-game toggle in the same value; 10-08 one was deleted by mistake."""
+    fake_gpu.values[r"C:\x\brave.exe"] = "AutoHDREnable=1;GpuPreference=1;"
+    settings_api.change(the_hub, "gpu:brave", "amd")
+    assert "AutoHDREnable=1" in fake_gpu.values[r"C:\x\brave.exe"]
+    assert "GpuPreference=2" in fake_gpu.values[r"C:\x\brave.exe"]
+
+
+def test_a_bad_app_or_choice_writes_nothing(the_hub, fake_gpu):
+    for key, value in (("gpu:brave", "radeon"), ("gpu:solitaire", "amd")):
+        with pytest.raises(settings_api.SettingError):
+            settings_api.change(the_hub, key, value)
+    assert fake_gpu.writes == []
+
+
+def test_intel_is_refused_when_the_chip_is_off(the_hub, fake_gpu, monkeypatch):
+    """The panel disables the option too, but the server decides: the open page may be stale."""
+    from sol_control_hud import gpu_prefs
+    monkeypatch.setattr(gpu_prefs, "intel_available", lambda adapters=None: False)
+    with pytest.raises(settings_api.SettingError, match="iGPU Multi-Monitor"):
+        settings_api.change(the_hub, "gpu:brave", "intel")
+    assert fake_gpu.writes == []
+
+
+def test_the_panel_reads_back_what_it_set(the_hub, fake_gpu):
+    settings_api.change(the_hub, "gpu:brave", "amd")
+    rows = {a["key"]: a for a in settings_api.read(the_hub)["gpu"]["apps"]}
+    assert rows["brave"]["choice"] == "amd" and rows["discord"]["choice"] == "auto"
+    assert "running" in rows["brave"]                                  # the panel's "applies on next start" marker
+
+
 def test_setting_action_needs_our_header(the_hub):
     from fastapi.testclient import TestClient
     from sol_control_hud.data.snapshot import Snapshot
