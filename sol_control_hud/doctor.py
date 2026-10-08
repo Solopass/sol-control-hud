@@ -8,7 +8,7 @@ import json
 import sys
 import time
 
-from .data.collectors import engines, gpu, speed, system, vram
+from .data.collectors import displays, engines, gpu, speed, system, vram
 
 OK, WARN, FAIL = "OK", "WARN", "FAIL"
 
@@ -78,6 +78,21 @@ def checks(status: dict) -> list[tuple[str, str, str]]:
                   "UNKNOWN": f"no size known for {v['need']['model']}"}.get(verdict, f"{spare} GB spare, other programs use {v['others_gb']} GB")
         out.append(("  VRAM headroom", level, detail))
 
+    d = status.get("displays") or {}
+    if d.get("available"):
+        dark, busy, pinned = d.get("dark") or [], d.get("busy") or [], d.get("power_saving_apps") or []
+        if busy:
+            who = ", ".join(f"{r['name']} {r['percent']}%" for r in busy[:4])
+            out.append(("  Rendering on the wrong GPU", WARN,
+                        f"{who} rendering on {busy[0]['adapter']}, which has no monitor: every frame is copied to the card "
+                        f"that does. Windows Settings > Display > Graphics -> 'Let Windows decide'"))
+        elif d.get("setting_problem"):
+            out.append(("  Rendering on the wrong GPU", WARN,
+                        f"{len(pinned)} app(s) set to power saving ({', '.join(pinned[:4])}) while {dark[0]} has no "
+                        f"monitor: they will render there and be copied across"))
+        elif dark:
+            out.append(("  Rendering on the wrong GPU", OK, f"{dark[0]} drives no monitor, and nothing is rendering on it"))
+
     m = status["memory"]
     out.append(("RAM", OK if m["percent"] < 90 else WARN, f"{m['used_gb']}/{m['total_gb']} GB ({m['percent']}%)"))
 
@@ -123,6 +138,7 @@ def collect() -> dict:
     status = {
         "ollama": ollama, "backend": engines.ollama_backend(), "llama_swap": engines.llama_swap(), "gpu": sampler.latest,
         "vram": vram.VramGuard(confirm=1).update(sampler.latest, ollama),
+        "displays": displays.report(sampler.last_util, lambda pid: gpu.process_name(pid, {})),
         "speed": speed.answer_speed(),
         "memory": system.memory(), "disks": system.disks(), "backups": system.backups(),
         "wsl": system.wsl(), "stability": system.stability(),

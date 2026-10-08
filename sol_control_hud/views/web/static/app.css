@@ -228,6 +228,10 @@ footer .toggle input { accent-color:var(--cyan); cursor:pointer; }
   padding:6px 10px; border-radius:8px; background:var(--badge); font-size:13px; }
 .crow .meta { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .crow .acts { display:flex; gap:4px; justify-content:flex-end; flex-wrap:wrap; }
+/* "rendering on a GPU with no monitor" warning under the GPU chart */
+.wrong-gpu { border-left:2px solid var(--amber); padding:5px 0 5px 8px; margin-top:8px; color:var(--text); line-height:1.45; }
+.wrong-gpu[hidden] { display:none; }
+
 /* Localhost card: one row per listening port (port · what it is · how long · close or why not) */
 .plist { display:flex; flex-direction:column; gap:4px; max-height:300px; overflow-y:auto; padding-right:2px; }
 .prow { display:grid; grid-template-columns:72px minmax(120px, 1fr) 62px auto; gap:10px; align-items:center;

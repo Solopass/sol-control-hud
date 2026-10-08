@@ -75,6 +75,7 @@ class GpuSampler:
         self.interval, self.rescan = interval, rescan
         self.expand = expand or win32pdh.ExpandCounterPath
         self.latest: dict = {"available": False}
+        self.last_util: dict[str, float] = {}   # raw engine values, for displays.misplaced (no second sampler)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._names: dict[int, str] = {}
@@ -129,6 +130,7 @@ class GpuSampler:
                 if len(self._names) > 2000:
                     self._names.clear()
                 values = {c: _read_all(handles[c], win32pdh.PDH_FMT_DOUBLE if c == UTIL else win32pdh.PDH_FMT_LARGE) for c in COUNTERS}
+                self.last_util = values[UTIL]
                 self.latest = summarize(values[UTIL], values[ADAPTER_MEM], values[PROC_DEDICATED], values[PROC_SHARED],
                                         lambda pid: process_name(pid, self._names), self.info)
             except Exception as e:

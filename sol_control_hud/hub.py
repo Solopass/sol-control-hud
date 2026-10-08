@@ -595,6 +595,10 @@ class Hub:
         from .data.collectors import speed           # real answer speed (router.log) and the watcher's spill auto-heal
         self.collectors.update({"speed": Cached(lambda: speed.answer_speed(self.collectors["model_procs"].get()), 3),
                                 "heal": Cached(speed.heal_status, 10)})
+        from .data.collectors import displays, gpu   # apps rendering on a GPU with no monitor (10-08)
+        gpu_names: dict[int, str] = {}
+        self.collectors["displays"] = Cached(
+            lambda: displays.report(self.collector._sampler.last_util, lambda p: gpu.process_name(p, gpu_names)), 10)
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -749,6 +753,11 @@ class Hub:
             chips = (self.collectors["gpu"].get() or {}).get("pid_chips") or {}
             data["listening"] = [{**r, "chip": chips.get(r.get("pid"))} for r in data.get("listening") or []]
             return {"ok": True, **data}
+
+        @app.get("/api/displays")
+        def display_adapters() -> dict:
+            """Which adapters drive a monitor, and what is rendering on one that doesn't (the GPU card polls this)."""
+            return {"ok": True, **(self.collectors["displays"].get() or {})}
 
         @app.get("/api/settings")
         def settings_read() -> dict:
