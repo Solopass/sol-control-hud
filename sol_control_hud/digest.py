@@ -116,8 +116,8 @@ def build(db: Path, end: datetime, disks_now: list[dict] | None = None) -> str:
                  + (f" ({', '.join(f'{k} x{n}' if n > 1 else k for k, n in failed_chains.items())})" if failed_chains else "") + ".")
     lines += ["", "## Local AI"]
     if speeds:
-        lines.append(f"- Typical answer speed: {statistics.median(speeds):.0f} tok/s over {len(speeds)} answers "
-                     f"(slowest {min(speeds):.0f}, fastest {max(speeds):.0f}).")
+        lines.append(f"- Typical answer speed: {statistics.median(speeds):.0f} tok/s over {len(speeds)} "
+                     f"answer{'s' if len(speeds) != 1 else ''} (slowest {min(speeds):.0f}, fastest {max(speeds):.0f}).")
     else:
         lines.append("- No answer speeds recorded this week.")
     lines.append(f"- VRAM spills: {this.get('spills', 0)}, of which {this.get('spills_slow', 0)} slowed answers.")
