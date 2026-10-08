@@ -1,8 +1,20 @@
 """Which graphics chip each everyday app uses: the Intel UHD 770 (power saving) or the AMD card (high performance).
 
-Why: the local AI needs ~7.2 GB of the AMD card and Windows lets it use about 12.2 GB in all. Browsers, Discord and
-Steam held ~5.7 GB on 2026-10-07, which pushed part of sol-fast into system RAM (26-38 tok/s instead of ~140).
-Drawing those apps on the CPU's Intel chip leaves the AMD card to the AI and to games.
+**Decided 2026-10-08: everything is set to `amd`.** Measured both ways (reports\\gpu-routing-trade-2026-10-08.md):
+pinning apps to the Intel chip changed sol-fast by nothing (87.2 vs 86.5 tok/s warm, no eviction either way) and
+left 0.1 GB *less* VRAM for the card, because it moves where an app **renders**, not where its **window surfaces**
+live - those have to sit on the adapter that drives the monitor. Unpinning Obsidian cost the Radeon 16 MB. The real
+non-AI consumers are `dwm` (3-3.9 GB, immovable) and Brave (~1 GB, and it was never on the Intel).
+
+The original case for pinning (2026-10-07) was that browsers, Discord and Steam held ~5.7 GB and pushed part of
+sol-fast into system RAM. That spill is real, but app routing does not fix it: the levers that work are closing
+Brave and the uptime/engine VRAM ceiling (reports\\vram-cap-2026-09-27.md - the Vulkan path caps near 12.2 GB at
+60 h uptime where ROCm reaches 14.4 GB). That 10-07 note also quoted "~140 tok/s" as healthy for sol-fast; the
+HUD's own baseline is **100** (`speed.answer_speed()`), which made the spill look worse than it was.
+
+Prefer `amd` over `auto` for anything that matters: on this hybrid machine "let Windows decide" still left Discord
+partly on the Intel after a restart, and the Intel drives no monitor here - everything drawn on it is rendered on
+the weaker chip and copied back across to be shown (`data\\collectors\\displays.py` warns when that happens).
 
 This writes the same per-app choice as Windows Settings > System > Display > Graphics: a value per program path
 under HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences, "GpuPreference=N;" (0 = let Windows decide,
