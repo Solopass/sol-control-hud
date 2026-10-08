@@ -34,48 +34,162 @@ STILL = 0.004            # under this between two looks = the page has settled
 IDLE_STOP_S = 600.0      # stop after this long without a new question
 HISTORY = 60
 
-READ_SYSTEM = ("You transcribe quiz and practice exam questions exactly as shown on the screen.")
-READ_PROMPT = """This screenshot shows a multiple-choice quiz or practice exam question.
+READ_SYSTEM = "You transcribe quiz and practice exam questions exactly as shown on the screen."
+READ_PROMPT = """This screenshot shows a multiple-choice, drag-and-drop matching, fill-in-the-blank, or step ordering quiz or practice exam question.
 
-If it shows a question in full, copy:
-- question: the question text, exactly.
-- choices: every answer choice. Use the letter or number the page prints before the choice (A, B, C... or 1, 2, 3...); if there is none, label them A, B, C... from top to bottom. Radio buttons and checkboxes (○ ◉ ☐ ☑) are not labels.
-- your_labels: the labels of the choice(s) the student has selected (a filled radio button or checkbox). Empty if none selected.
-- correct_labels: the labels of the choice(s) marked as correct on the page if any. Empty if none marked.
+Transcribe the question:
+- question_type: "multiple_choice", "matching" (drag-and-drop), "fill_in_the_blank" (CLI command or text/numeric value), or "ordering" (sequencing steps).
+- question: the question prompt or instructions, verbatim.
+- exhibit_text: transcript of any network diagram labels, routing table, CLI output, or exhibit table visible in the question. Empty string if none.
 
-Use status "ok" for that. Use status "no_question" (and leave the rest empty) if there is no question, and "cut_off" if the question or its choices run past the edge of the screenshot. Leave out navigation, buttons, timers and other page text."""
+For multiple_choice:
+- choices: every answer choice as [{"label": "A", "text": "..."}]. Use the letter or number shown (A, B, C... or 1, 2, 3...); if none, label A, B, C... from top to bottom.
+- select_count: number of options to select (e.g. 1, 2, 3).
+- your_labels: labels of choice(s) selected by the student if any.
+- correct_labels: labels of choice(s) marked correct on the screen if any.
 
-SOLVE_SYSTEM = ("You are an expert tutor. You solve practice exam questions, identifying the correct answer "
-                "and providing concise step-by-step reasoning.")
-SOLVE_PROMPT = """Solve this multiple-choice practice exam question.
+For matching:
+- matching_items: {"sources": ["Draggable item 1", ...], "targets": ["Drop target description 1", ...]}. Leave choices empty.
+
+For fill_in_the_blank:
+- blank_answers: any answers already typed into the blank(s). Leave choices empty.
+
+For ordering:
+- ordered_items: list of items/steps to be arranged in order. Leave choices empty.
+
+Use status "ok" if complete. Use status "no_question" if no question is visible, and "cut_off" if text or choices are cut off at the edge. Leave out navigation, buttons, timers and other page text."""
+
+SOLVE_SYSTEM = (
+    "You are an expert tutor. You solve practice exam questions across multiple formats: "
+    "multiple-choice, drag-and-drop matching, fill-in-the-blank CLI commands, and step sequencing. "
+    "You identify the correct answer and provide concise step-by-step reasoning."
+)
+
+SOLVE_PROMPT_MC = """Solve this multiple-choice practice exam question.
 
 Question: {question}
-
+{exhibit}
 Choices:
 {choices}
 
 Reply with:
-- answer_labels: array of labels for the correct choice(s) (e.g. ["C"]).
+- question_type: "multiple_choice"
+- answer_labels: array of labels for the correct choice(s) (e.g. ["C"] or ["A", "D"]).
 - topic: the concept this tests, in 2-5 words (for example "Subnetting /26 hosts", "OSI layer 2 devices").
 - explanation: 2-4 short sentences explaining why this answer is correct and showing the key calculation, rule, or concept. Plain text only: no LaTeX, no $ signs, no Markdown (write 2^6 - 2 = 62)."""
 
+SOLVE_PROMPT_MATCHING = """Solve this drag-and-drop matching practice exam question.
+
+Question: {question}
+{exhibit}
+Draggable items:
+{sources}
+
+Drop targets:
+{targets}
+
+Reply with:
+- question_type: "matching"
+- matching_pairs: array of objects with "source" (draggable item) and "target" (matching slot/description).
+- answer_text: concise summary of the matches (e.g. "5 pairs matched").
+- topic: the concept this tests, in 2-5 words.
+- explanation: 2-4 short sentences explaining the pairings and underlying rules."""
+
+SOLVE_PROMPT_BLANK = """Solve this fill-in-the-blank / CLI command practice exam question.
+
+Question: {question}
+{exhibit}
+
+Reply with:
+- question_type: "fill_in_the_blank"
+- blank_answers: array of strings containing the exact command syntax or value to type into the prompt/blank.
+- answer_text: the primary command or value string.
+- topic: the concept this tests, in 2-5 words.
+- explanation: 2-4 short sentences explaining the command syntax or value."""
+
+SOLVE_PROMPT_ORDERING = """Solve this step-ordering / sequencing practice exam question.
+
+Question: {question}
+{exhibit}
+Items to arrange:
+{items}
+
+Reply with:
+- question_type: "ordering"
+- ordered_sequence: array of strings in correct chronological or procedural sequence (e.g. ["1. De-encapsulate frame", "2. Inspect IP header", ...]).
+- answer_text: concise summary of the sequence.
+- topic: the concept this tests, in 2-5 words.
+- explanation: 2-4 short sentences explaining why this sequence is correct."""
+
+# Backwards compatibility alias
+SOLVE_PROMPT = SOLVE_PROMPT_MC
+
 READ_SCHEMA = {
-    "type": "object", "additionalProperties": False,
+    "type": "object",
+    "additionalProperties": False,
     "required": ["status", "question", "choices", "your_labels", "correct_labels"],
     "properties": {
         "status": {"type": "string", "enum": ["ok", "no_question", "cut_off"]},
+        "question_type": {
+            "type": "string",
+            "enum": ["multiple_choice", "matching", "fill_in_the_blank", "ordering"],
+        },
         "question": {"type": "string"},
-        "choices": {"type": "array", "items": {"type": "object", "additionalProperties": False,
-                                               "required": ["label", "text"],
-                                               "properties": {"label": {"type": "string"}, "text": {"type": "string"}}}},
+        "exhibit_text": {"type": "string"},
+        "choices": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["label", "text"],
+                "properties": {"label": {"type": "string"}, "text": {"type": "string"}},
+            },
+        },
+        "select_count": {"type": "integer"},
+        "matching_items": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "sources": {"type": "array", "items": {"type": "string"}},
+                "targets": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "ordered_items": {"type": "array", "items": {"type": "string"}},
+        "blank_answers": {"type": "array", "items": {"type": "string"}},
         "your_labels": {"type": "array", "items": {"type": "string"}},
         "correct_labels": {"type": "array", "items": {"type": "string"}},
     },
 }
+
 SOLVE_SCHEMA = {
-    "type": "object", "additionalProperties": False, "required": ["answer_labels", "topic", "explanation"],
-    "properties": {"answer_labels": {"type": "array", "items": {"type": "string"}},
-                   "topic": {"type": "string"}, "explanation": {"type": "string"}},
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["topic", "explanation"],
+    "properties": {
+        "question_type": {
+            "type": "string",
+            "enum": ["multiple_choice", "matching", "fill_in_the_blank", "ordering"],
+        },
+        "topic": {"type": "string"},
+        "explanation": {"type": "string"},
+        "answer_labels": {"type": "array", "items": {"type": "string"}},
+        "answer_text": {"type": "string"},
+        "matching_pairs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["source", "target"],
+                "properties": {
+                    "source": {"type": "string"},
+                    "target": {"type": "string"},
+                },
+            },
+        },
+        "blank_answers": {"type": "array", "items": {"type": "string"}},
+        "ordered_sequence": {"type": "array", "items": {"type": "string"}},
+        "why_previous_wrong": {"type": "string"},
+    },
 }
 
 
@@ -97,7 +211,15 @@ def save_settings(s: dict, path: Path | None = None) -> None:
 
 def question_key(read: dict) -> str:
     """The same question read twice (the page redrew, you scrolled a little) gives the same key."""
-    text = read.get("question", "") + "|" + "|".join(c.get("text", "") for c in read.get("choices") or [])
+    parts = [read.get("question", "")]
+    for c in read.get("choices") or []:
+        parts.append(c.get("text", ""))
+    m_items = read.get("matching_items") or {}
+    for s in m_items.get("sources", []):
+        parts.append(str(s))
+    for o in read.get("ordered_items") or []:
+        parts.append(str(o))
+    text = "|".join(parts)
     return re.sub(r"[^a-z0-9]+", "", text.lower())[:400]
 
 
@@ -128,16 +250,26 @@ def pick_indexes(labels, choices) -> list[int]:
 
 def tidy_read(read: dict) -> dict:
     """Fix the labels: odd or repeated ones (radio circles, bullets) become A, B, C... in order; yours/correct become
-    those labels."""
+    those labels. Also normalizes question_type and non-multiple-choice fields."""
+    read = dict(read)
+    q_type = read.get("question_type") or "multiple_choice"
+    read["question_type"] = q_type
     choices = [dict(c) for c in read.get("choices") or [] if str(c.get("text", "")).strip()]
-    yours, correct = pick_indexes(read.get("your_labels"), choices), pick_indexes(read.get("correct_labels"), choices)
-    labels = [str(c.get("label", "")).strip().rstrip(".)") for c in choices]
-    if len(set(labels)) != len(labels) or not all(re.fullmatch(r"[A-Za-z]|\d{1,2}", lb) for lb in labels):
-        labels = [chr(65 + i) if i < 26 else str(i + 1) for i in range(len(choices))]
-    for c, lb in zip(choices, labels):
-        c["label"] = lb.upper()
-    return {**read, "choices": choices, "your_labels": [choices[i]["label"] for i in yours],
-            "correct_labels": [choices[i]["label"] for i in correct]}
+    if choices:
+        yours, correct = pick_indexes(read.get("your_labels"), choices), pick_indexes(read.get("correct_labels"), choices)
+        labels = [str(c.get("label", "")).strip().rstrip(".)") for c in choices]
+        if len(set(labels)) != len(labels) or not all(re.fullmatch(r"[A-Za-z]|\d{1,2}", lb) for lb in labels):
+            labels = [chr(65 + i) if i < 26 else str(i + 1) for i in range(len(choices))]
+        for c, lb in zip(choices, labels):
+            c["label"] = lb.upper()
+        read["choices"] = choices
+        read["your_labels"] = [choices[i]["label"] for i in yours]
+        read["correct_labels"] = [choices[i]["label"] for i in correct]
+    else:
+        read["choices"] = []
+        read["your_labels"] = [str(x) for x in read.get("your_labels") or []]
+        read["correct_labels"] = [str(x) for x in read.get("correct_labels") or []]
+    return read
 
 
 def choice_line(labels: list[str], choices: list[dict]) -> str:
@@ -146,7 +278,7 @@ def choice_line(labels: list[str], choices: list[dict]) -> str:
 
 
 def explain_messages(read: dict) -> list[dict]:
-    choices = read["choices"]
+    choices = read.get("choices") or []
     yours, correct = read.get("your_labels") or [], read.get("correct_labels") or []
     if correct:
         correct_line = f"The correct answer (as marked by the exam): {choice_line(correct, choices)}"
@@ -155,16 +287,48 @@ def explain_messages(read: dict) -> list[dict]:
         correct_line = "The exam marked the student's answer wrong but didn't show the correct one."
         what = ("why the student's answer is wrong and which idea to review; don't guess which choice is correct, "
                 "the student will check it on the next attempt")
-    prompt = EXPLAIN_PROMPT.format(question=read["question"], yours=choice_line(yours, choices),
-                                   choices="\n".join(f"{c['label']}. {c['text']}" for c in choices),
-                                   correct_line=correct_line, explain_what=what)
-    return [{"role": "system", "content": EXPLAIN_SYSTEM}, {"role": "user", "content": prompt}]
+    prompt = (
+        f"Question: {read.get('question')}\n"
+        f"Student selection: {choice_line(yours, choices)}\n"
+        f"Choices:\n" + "\n".join(f"{c['label']}. {c['text']}" for c in choices) + "\n"
+        f"{correct_line}\nExplain {what}."
+    )
+    return [{"role": "system", "content": "You are an expert exam tutor explaining mistakes."}, {"role": "user", "content": prompt}]
 
 
 def solve_messages(read: dict) -> list[dict]:
-    choices = read["choices"]
-    prompt = SOLVE_PROMPT.format(question=read["question"],
-                                 choices="\n".join(f"{c['label']}. {c['text']}" for c in choices))
+    q_type = read.get("question_type", "multiple_choice")
+    exhibit_str = f"\nExhibit / Diagram:\n{read['exhibit_text']}\n" if read.get("exhibit_text") else ""
+
+    if q_type == "matching":
+        m_items = read.get("matching_items") or {}
+        sources = "\n".join(f"- {s}" for s in m_items.get("sources", [])) or "(see question)"
+        targets = "\n".join(f"- {t}" for t in m_items.get("targets", [])) or "(see question)"
+        prompt = SOLVE_PROMPT_MATCHING.format(
+            question=read["question"],
+            exhibit=exhibit_str,
+            sources=sources,
+            targets=targets,
+        )
+    elif q_type == "fill_in_the_blank":
+        prompt = SOLVE_PROMPT_BLANK.format(
+            question=read["question"],
+            exhibit=exhibit_str,
+        )
+    elif q_type == "ordering":
+        items = "\n".join(f"- {item}" for item in read.get("ordered_items", [])) or "(see question)"
+        prompt = SOLVE_PROMPT_ORDERING.format(
+            question=read["question"],
+            exhibit=exhibit_str,
+            items=items,
+        )
+    else:  # multiple_choice
+        choices = read.get("choices") or []
+        prompt = SOLVE_PROMPT_MC.format(
+            question=read["question"],
+            exhibit=exhibit_str,
+            choices="\n".join(f"{c['label']}. {c['text']}" for c in choices),
+        )
     return [{"role": "system", "content": SOLVE_SYSTEM}, {"role": "user", "content": prompt}]
 
 
@@ -189,9 +353,42 @@ def append_note(item: dict, notes_dir: Path | None = None, now: datetime | None 
     path = notes_dir / f"{now:%Y-%m-%d} practice exam.md"
     head = "" if path.exists() else (f"# Practice exam {now:%Y-%m-%d}\n\nQuestions from practice exam, "
                                      f"solved and explained in real time by local AI ({MODEL}).\n")
-    body = (f"\n## {item.get('topic') or 'Question'} ({now:%H:%M})\n\n{item['question']}\n\n"
-            + "\n".join(f"- {c['label']}. {c['text']}" for c in item.get("choices") or [])
-            + f"\n\n**Answer:** {item.get('answer') or item.get('correct')}\n\n")
+
+    q_type = item.get("question_type", "multiple_choice")
+    type_tag = ""
+    if q_type == "matching":
+        type_tag = " (Matching)"
+    elif q_type == "fill_in_the_blank":
+        type_tag = " (Fill in Blank)"
+    elif q_type == "ordering":
+        type_tag = " (Ordering)"
+
+    topic_title = item.get("topic") or "Question"
+    body = f"\n## {topic_title}{type_tag} ({now:%H:%M})\n\n{item['question']}\n\n"
+
+    if item.get("exhibit_text"):
+        body += f"> [!NOTE] **Exhibit / Diagram**\n> ```\n> " + item["exhibit_text"].replace("\n", "\n> ") + "\n> ```\n\n"
+
+    if q_type == "matching" and item.get("matching_pairs"):
+        body += "| Item | Target / Category |\n| :--- | :--- |\n"
+        for p in item["matching_pairs"]:
+            body += f"| **{p.get('source', '')}** | {p.get('target', '')} |\n"
+        body += f"\n**Answer:** {item.get('answer') or item.get('correct')}\n\n"
+    elif q_type == "fill_in_the_blank" and item.get("blank_answers"):
+        body += "**Command / Value:**\n```cisco\n" + "\n".join(item["blank_answers"]) + "\n```\n\n"
+        body += f"**Answer:** {item.get('answer') or item.get('correct')}\n\n"
+    elif q_type == "ordering" and item.get("ordered_sequence"):
+        body += "**Correct Sequence:**\n"
+        for idx, step in enumerate(item["ordered_sequence"], 1):
+            line = step if re.match(r"^\d+\.", step) else f"{idx}. {step}"
+            body += f"{line}\n"
+        body += f"\n**Answer:** {item.get('answer') or item.get('correct')}\n\n"
+    else:
+        choices = item.get("choices") or []
+        if choices:
+            body += "\n".join(f"- {c['label']}. {c['text']}" for c in choices) + "\n\n"
+        body += f"**Answer:** {item.get('answer') or item.get('correct')}\n\n"
+
     if item.get("yours") and item.get("yours") != "(none)":
         body += f"**Your selection:** {item['yours']}\n\n"
     if item.get("explanation"):
@@ -208,10 +405,23 @@ def append_gemini_retry(item: dict, notes_dir: Path | None = None, now: datetime
     notes_dir.mkdir(parents=True, exist_ok=True)
     path = notes_dir / f"{now:%Y-%m-%d} practice exam.md"
     why_wrong = f"> **Why previous answer was wrong:** {item['why_previous_wrong']}\n" if item.get("why_previous_wrong") else ""
+    q_type = item.get("question_type", "multiple_choice")
+    type_info = f"> **Format:** {q_type.replace('_', ' ').title()}\n" if q_type != "multiple_choice" else ""
+
+    extra = ""
+    if q_type == "matching" and item.get("matching_pairs"):
+        extra = "> \n> | Item | Target |\n> | :--- | :--- |\n" + "".join(f"> | **{p.get('source')}** | {p.get('target')} |\n" for p in item["matching_pairs"]) + "> \n"
+    elif q_type == "fill_in_the_blank" and item.get("blank_answers"):
+        extra = "> \n> **Command:**\n> ```cisco\n> " + "\n> ".join(item["blank_answers"]) + "\n> ```\n> \n"
+    elif q_type == "ordering" and item.get("ordered_sequence"):
+        extra = "> \n> **Sequence:**\n" + "".join(f"> {s}\n" for s in item["ordered_sequence"]) + "> \n"
+
     body = (
         f"\n> [!WARNING] **Marked Bad · Re-attempt via Gemini 3.8 Flash** ({now:%H:%M})\n"
+        f"{type_info}"
         f"> **Revised Answer:** {item.get('answer') or item.get('correct')}\n"
         f"> **Topic:** {item.get('topic') or 'Exam Revision'}\n"
+        f"{extra}"
         f"> **Explanation:** {item.get('explanation') or ''}\n"
         f"{why_wrong}\n"
     )
@@ -358,19 +568,37 @@ class ReviewWatcher:
                 question_text=(cur or {}).get("question"),
                 model=model,
             )
+            q_type = sol.get("question_type") or (cur or {}).get("question_type") or "multiple_choice"
             raw_labels = sol.get("answer_labels") or []
             choices = (cur or {}).get("choices") or []
             ans_idxs = pick_indexes(raw_labels, choices) if choices else []
             ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_labels]
 
-            answer_text = sol.get("answer_text") or (choice_line(ans_labels, choices) if choices else ", ".join(ans_labels))
+            matching_pairs = sol.get("matching_pairs") or (cur or {}).get("matching_pairs") or []
+            blank_answers = sol.get("blank_answers") or (cur or {}).get("blank_answers") or []
+            ordered_sequence = sol.get("ordered_sequence") or (cur or {}).get("ordered_sequence") or []
+
+            if q_type == "matching" and matching_pairs:
+                answer_text = "; ".join(f"{p.get('source')} ➔ {p.get('target')}" for p in matching_pairs)
+            elif q_type == "fill_in_the_blank" and blank_answers:
+                answer_text = "\n".join(blank_answers)
+            elif q_type == "ordering" and ordered_sequence:
+                answer_text = " ➔ ".join(ordered_sequence)
+            elif q_type == "multiple_choice" and choices:
+                answer_text = choice_line(ans_labels, choices)
+            else:
+                answer_text = sol.get("answer_text") or (choice_line(ans_labels, choices) if choices else ", ".join(ans_labels))
             if not answer_text and ans_labels:
                 answer_text = ", ".join(ans_labels)
 
             revised_item = dict(cur or {})
             revised_item.update({
+                "question_type": q_type,
                 "answer_labels": ans_labels,
                 "correct_labels": ans_labels,
+                "matching_pairs": matching_pairs,
+                "blank_answers": blank_answers,
+                "ordered_sequence": ordered_sequence,
                 "answer": answer_text,
                 "correct": answer_text,
                 "topic": sol.get("topic") or (cur or {}).get("topic") or "Exam Revision",
@@ -495,26 +723,59 @@ class ReviewWatcher:
                 self._set(status="answering", text="Solving question in real time…")
                 s = client.chat(MODEL, solve_messages(read), schema=SOLVE_SCHEMA, max_tokens=1024, reasoning="off")
                 sol = parse_json(s.content)
+                q_type = sol.get("question_type") or read.get("question_type") or "multiple_choice"
+
                 raw_ans = sol.get("answer_labels") or []
-                ans_idxs = pick_indexes(raw_ans, choices)
+                ans_idxs = pick_indexes(raw_ans, choices) if choices else []
                 ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_ans]
+
+                matching_pairs = sol.get("matching_pairs") or []
+                blank_answers = sol.get("blank_answers") or []
+                ordered_sequence = sol.get("ordered_sequence") or []
+
+                if q_type == "matching" and matching_pairs:
+                    answer_text = "; ".join(f"{p.get('source')} ➔ {p.get('target')}" for p in matching_pairs)
+                elif q_type == "fill_in_the_blank" and blank_answers:
+                    answer_text = "\n".join(blank_answers)
+                elif q_type == "ordering" and ordered_sequence:
+                    answer_text = " ➔ ".join(ordered_sequence)
+                elif q_type == "multiple_choice" and choices:
+                    answer_text = choice_line(ans_labels, choices)
+                else:
+                    answer_text = sol.get("answer_text") or (choice_line(ans_labels, choices) if choices else ", ".join(ans_labels))
+                if not answer_text and ans_labels:
+                    answer_text = ", ".join(ans_labels)
+
                 item = {
+                    "question_type": q_type,
                     "question": read["question"],
+                    "exhibit_text": read.get("exhibit_text") or "",
                     "choices": choices,
+                    "matching_pairs": matching_pairs,
+                    "blank_answers": blank_answers,
+                    "ordered_sequence": ordered_sequence,
                     "result": "live",
                     "your_labels": read.get("your_labels") or [],
                     "correct_labels": ans_labels,
                     "answer_labels": ans_labels,
-                    "yours": choice_line(read.get("your_labels") or [], choices),
-                    "answer": choice_line(ans_labels, choices),
-                    "correct": choice_line(ans_labels, choices),
+                    "yours": choice_line(read.get("your_labels") or [], choices) if choices else "",
+                    "answer": answer_text,
+                    "correct": answer_text,
                     "topic": str(sol.get("topic") or "").strip(),
                     "explanation": str(sol.get("explanation") or "").strip(),
                     "your_mistake": "",
                     "at": time.strftime("%H:%M:%S"),
                     "seconds": round(time.monotonic() - t0, 1),
                 }
-                done_text = f"Answer: {item['answer']} ({item['seconds']:.0f} s)"
+
+                if q_type == "matching" and matching_pairs:
+                    done_text = f"Matched: {len(matching_pairs)} pairs ({item['seconds']:.0f} s)"
+                elif q_type == "fill_in_the_blank" and blank_answers:
+                    done_text = f"Command: {blank_answers[0][:30]} ({item['seconds']:.0f} s)"
+                elif q_type == "ordering" and ordered_sequence:
+                    done_text = f"Ordered: {len(ordered_sequence)} steps ({item['seconds']:.0f} s)"
+                else:
+                    done_text = f"Answer: {item['answer']} ({item['seconds']:.0f} s)"
             try:
                 note = str(append_note(item, self._notes_dir))
             except OSError as err:

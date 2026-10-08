@@ -32,10 +32,25 @@ SOLVE_PROMPT_TEMPLATE = """You are an expert exam tutor. Re-examine this practic
 
 {multi_part_note}
 
+Format instructions:
+- The question may be multiple-choice, drag-and-drop matching, fill-in-the-blank (CLI command or numeric/text value), or step ordering.
+- If there is an exhibit, diagram, routing table (e.g. show ip route), or topology, analyze it thoroughly.
+- Classify the question and return the appropriate response fields.
+
 Required Response Schema (JSON only):
 {{
+  "question_type": "multiple_choice | matching | fill_in_the_blank | ordering",
   "answer_labels": ["A"],
-  "answer_text": "text of the correct choice",
+  "answer_text": "human-readable summary of the answer",
+  "matching_pairs": [
+    {{"source": "item", "target": "slot/definition"}}
+  ],
+  "blank_answers": [
+    "exact command or value"
+  ],
+  "ordered_sequence": [
+    "1. First step", "2. Second step"
+  ],
   "topic": "Concept tested (2-5 words)",
   "explanation": "2-4 concise sentences explaining why this answer is correct and the underlying rule or calculation.",
   "why_previous_wrong": "Explanation of why the previous attempt was incorrect, if applicable (or empty string)."

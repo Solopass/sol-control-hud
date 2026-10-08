@@ -944,8 +944,20 @@ def review_slide(r: dict) -> dict:
     prefix = "Exam ✨ " if is_gemini else "Exam "
     segs: list[tuple[str, str]] = [(prefix, CYAN if is_gemini else MUTED)]
     if cur:
-        ans = "/".join(cur.get("answer_labels") or cur.get("correct_labels") or [])
-        segs += [(f"Ans: {ans or '?'}", CYAN if is_gemini else GREEN), SEP, (cur.get("topic") or "solved", CYAN)]
+        q_type = cur.get("question_type", "multiple_choice")
+        if q_type == "matching":
+            pairs_count = len(cur.get("matching_pairs") or [])
+            ans_str = f"Match: {pairs_count} pairs" if pairs_count else "Match"
+        elif q_type == "fill_in_the_blank":
+            blanks = cur.get("blank_answers") or []
+            ans_str = f"Input: {blanks[0][:20]}" if blanks else (cur.get("answer", "")[:20] or "Input")
+        elif q_type == "ordering":
+            steps_count = len(cur.get("ordered_sequence") or [])
+            ans_str = f"Order: {steps_count} steps" if steps_count else "Order"
+        else:
+            ans = "/".join(cur.get("answer_labels") or cur.get("correct_labels") or [])
+            ans_str = f"Ans: {ans or '?'}"
+        segs += [(ans_str, CYAN if is_gemini else GREEN), SEP, (cur.get("topic") or "solved", CYAN)]
     else:
         segs += [(r.get("text") or "watching", MUTED)]
     count_str = (f"{r.get('answered', 0)} solved" if r.get("answered")
@@ -959,7 +971,8 @@ def review_slide(r: dict) -> dict:
     if cur:
         model_line = f"[{cur.get('model', 'sol-vision')}]\n" if cur.get("model") else ""
         why_wrong = f"\nPrevious attempt issue: {cur['why_previous_wrong']}\n" if cur.get("why_previous_wrong") else ""
-        detail = (f"{model_line}{cur.get('question', '')}\nAnswer: {cur.get('answer', '')}\n"
+        exhibit = f"\n[Exhibit]:\n{cur['exhibit_text']}\n" if cur.get("exhibit_text") else ""
+        detail = (f"{model_line}{cur.get('question', '')}{exhibit}\nAnswer: {cur.get('answer', '')}\n"
                   f"{cur.get('explanation', '')}{why_wrong}")
     else:
         detail = r.get("text") or ""

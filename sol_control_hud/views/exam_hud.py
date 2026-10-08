@@ -27,6 +27,14 @@ class ExamHudWindow:
         self.on_retry_gemini = on_retry_gemini
         self.on_add_snip = on_add_snip
         self.win: tk.Toplevel | None = None
+        self.title_lbl: tk.Label | None = None
+        self.badge_lbl: tk.Label | None = None
+        self.topic_lbl: tk.Label | None = None
+        self.ans_lbl: tk.Label | None = None
+        self.bad_btn: tk.Button | None = None
+        self.snip_btn: tk.Button | None = None
+        self.copy_btn: tk.Button | None = None
+        self.txt: tk.Text | None = None
         self._visible = False
         self._last_item: dict | None = None
 
@@ -162,6 +170,21 @@ class ExamHudWindow:
         )
         self.snip_btn.pack(side=tk.LEFT, padx=8)
 
+        self.copy_btn = tk.Button(
+            btn_frame,
+            text="📋 Copy Command",
+            command=self._on_click_copy,
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            activeforeground="#ffffff",
+            bd=0,
+            padx=8,
+            pady=4,
+            font=("Segoe UI", 9, "bold"),
+            cursor="hand2",
+        )
+
         hint_lbl = tk.Label(
             btn_frame,
             text="Esc: hide",
@@ -196,25 +219,52 @@ class ExamHudWindow:
             self.show()
 
     def update_item(self, item: dict) -> None:
+        import re
         self._last_item = item
         w = self._ensure_window()
 
+        q_type = item.get("question_type", "multiple_choice")
         topic = item.get("topic") or "Exam Question"
-        ans = item.get("answer") or item.get("correct") or "–"
         is_gemini = bool(item.get("gemini_retried") or item.get("model") == "gemini-3.8-flash")
 
-        self.topic_lbl.config(text=f"Topic: {topic}")
+        if q_type == "matching":
+            pairs = item.get("matching_pairs") or []
+            ans_display = f"{len(pairs)} Pairs Matched" if pairs else (item.get("answer") or "–")
+            type_label = "Matching"
+        elif q_type == "fill_in_the_blank":
+            blanks = item.get("blank_answers") or []
+            ans_display = blanks[0] if blanks else (item.get("answer") or "–")
+            type_label = "Fill-in-Blank"
+        elif q_type == "ordering":
+            steps = item.get("ordered_sequence") or []
+            ans_display = f"{len(steps)} Steps Sequenced" if steps else (item.get("answer") or "–")
+            type_label = "Ordering"
+        else:
+            ans_display = item.get("answer") or item.get("correct") or "–"
+            type_label = "Multiple Choice"
+
+        self.topic_lbl.config(text=f"Topic: {topic} · {type_label}")
         self.ans_lbl.config(
-            text=f"Ans: {ans}",
+            text=f"Ans: {ans_display}",
             fg="#38bdf8" if is_gemini else "#4ade80",
         )
 
         if is_gemini:
-            self.badge_lbl.config(text="✨ Gemini 3.8 Flash", fg="#38bdf8")
+            self.badge_lbl.config(text=f"✨ Gemini 3.8 Flash ({type_label})", fg="#38bdf8")
             self.bad_btn.config(state=tk.DISABLED, text="✓ Gemini Checked")
         else:
-            self.badge_lbl.config(text="⚡ sol-vision (local)", fg="#94a3b8")
+            self.badge_lbl.config(text=f"⚡ sol-vision ({type_label})", fg="#94a3b8")
             self.bad_btn.config(state=tk.NORMAL, text="🔍 Verify / Retry (Gemini)")
+
+        # Show Copy Command button for fill_in_the_blank, otherwise hide it
+        if self.copy_btn:
+            if q_type == "fill_in_the_blank":
+                if self.snip_btn:
+                    self.copy_btn.pack(side=tk.LEFT, padx=8, before=self.snip_btn)
+                else:
+                    self.copy_btn.pack(side=tk.LEFT, padx=8)
+            else:
+                self.copy_btn.pack_forget()
 
         self.txt.config(state=tk.NORMAL)
         self.txt.delete("1.0", tk.END)
@@ -223,12 +273,39 @@ class ExamHudWindow:
         if q:
             self.txt.insert(tk.END, f"{q}\n\n", "question")
 
-        choices = item.get("choices") or []
-        for c in choices:
-            lb, txt = c.get("label", ""), c.get("text", "")
-            self.txt.insert(tk.END, f"  {lb}. {txt}\n")
-        if choices:
-            self.txt.insert(tk.END, "\n")
+        exhibit = item.get("exhibit_text") or ""
+        if exhibit:
+            self.txt.insert(tk.END, f"--- EXHIBIT / DIAGRAM ---\n{exhibit}\n-------------------------\n\n")
+
+        if q_type == "matching":
+            pairs = item.get("matching_pairs") or []
+            if pairs:
+                self.txt.insert(tk.END, "MATCHING PAIRS:\n")
+                for p in pairs:
+                    self.txt.insert(tk.END, f"  • {p.get('source', '')} ➔ {p.get('target', '')}\n")
+                self.txt.insert(tk.END, "\n")
+        elif q_type == "fill_in_the_blank":
+            blanks = item.get("blank_answers") or []
+            if blanks:
+                self.txt.insert(tk.END, "COMMAND / INPUT:\n")
+                for b in blanks:
+                    self.txt.insert(tk.END, f"  >>> {b}\n")
+                self.txt.insert(tk.END, "\n")
+        elif q_type == "ordering":
+            steps = item.get("ordered_sequence") or []
+            if steps:
+                self.txt.insert(tk.END, "ORDERED SEQUENCE:\n")
+                for idx, s in enumerate(steps, 1):
+                    line = s if re.match(r"^\d+\.", s) else f"{idx}. {s}"
+                    self.txt.insert(tk.END, f"  {line}\n")
+                self.txt.insert(tk.END, "\n")
+        else:
+            choices = item.get("choices") or []
+            for c in choices:
+                lb, txt = c.get("label", ""), c.get("text", "")
+                self.txt.insert(tk.END, f"  {lb}. {txt}\n")
+            if choices:
+                self.txt.insert(tk.END, "\n")
 
         exp = item.get("explanation") or ""
         if exp:
@@ -242,6 +319,21 @@ class ExamHudWindow:
 
         # Show if not already visible
         self.show()
+
+    def _on_click_copy(self) -> None:
+        if not self._last_item or not self.win:
+            return
+        blanks = self._last_item.get("blank_answers") or []
+        cmd = blanks[0] if blanks else (self._last_item.get("answer") or "")
+        if cmd:
+            try:
+                self.win.clipboard_clear()
+                self.win.clipboard_append(cmd)
+                if self.copy_btn:
+                    self.copy_btn.config(text="✓ Copied!")
+                    self.win.after(1500, lambda: self.copy_btn.config(text="📋 Copy Command") if self.copy_btn else None)
+            except Exception:
+                pass
 
     def _on_click_retry(self) -> None:
         if self.on_retry_gemini:
