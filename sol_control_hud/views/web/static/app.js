@@ -1180,6 +1180,12 @@ async function loadDisplays() {
     html = `⚠ ${pinned.length} app(s) set to power saving (${esc(pinned.slice(0, 4).join(', '))}) while ${esc(dark)}`
          + ` has no monitor — they will render there and be copied across.`;
   }
+  // the other way the chip gets used wrong: a browser decoding video on the CPU (10-08, Brave)
+  for (const s of (d.decode || {}).suspects || []) {
+    html += `${html ? '<br>' : ''}⚠ <b>${esc(s.name)}</b> is burning ${s.cpu_percent}% of a core while nothing uses`
+         + ` the GPU's video decoder — that looks like software decode.`
+         + ` <span class="dim">Restarting the browser fixed it on 10-08.</span>`;
+  }
   if (html) setHTML(box, html);
   box.hidden = !html;
 }
