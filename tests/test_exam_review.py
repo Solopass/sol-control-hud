@@ -281,3 +281,49 @@ def test_review_slide_shows_gemini_badge():
     assert "Ans: B" in sl["text"]
     assert "gemini-3.8-flash" in sl["detail"]
     assert "Ping tests ICMP echo" in sl["detail"]
+
+
+def test_review_watcher_on_item_callback(tmp_path, monkeypatch):
+    items_received = []
+
+    def on_item(item):
+        items_received.append(item)
+
+    w, client = make(tmp_path, [graded("incorrect", yours=["B"], correct=["C"])], on_item=on_item)
+    assert w._process(b"png", force=True) is True
+    assert len(items_received) == 1
+    assert items_received[0]["answer_labels"] == ["C"]
+
+    # Now verify retry_gemini also fires on_item
+    mock_solve = {
+        "answer_labels": ["D"],
+        "answer": "D. 255.255.255.240",
+        "topic": "Subnetting",
+        "explanation": "Gemini verified choice D is correct.",
+        "why_previous_wrong": "Wrong bits",
+    }
+    monkeypatch.setattr("sol_control_hud.gemini_solver.solve_with_gemini", lambda *a, **k: mock_solve)
+    res = w.retry_gemini()
+    assert res["ok"] is True
+    assert len(items_received) == 2
+    assert items_received[1]["answer"] == "D. 255.255.255.240"
+    assert items_received[1]["gemini_retried"] is True
+
+
+def test_review_slide_fallback_answer():
+    # If answer_labels and correct_labels are empty, but answer has a string
+    r = {
+        "status": "watching",
+        "running": True,
+        "answered": 1,
+        "current": {
+            "topic": "CLI Configuration",
+            "question_type": "multiple_choice",
+            "question": "What command configures OSPF?",
+            "answer": "router ospf 1",
+            "explanation": "Enters router config mode",
+        },
+    }
+    sl = sn.review_slide(r)
+    assert "Ans: router ospf 1" in sl["text"]
+

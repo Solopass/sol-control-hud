@@ -124,3 +124,48 @@ def test_solve_with_gemini_mocked(monkeypatch):
     assert parts[0]["inline_data"]["mime_type"] == "image/png"
     assert parts[1]["inline_data"]["mime_type"] == "image/png"
     assert "scrolling" in parts[2]["text"]
+
+
+def test_solve_with_gemini_multipart_and_preamble(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-key")
+
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "candidates": [{
+            "content": {
+                "parts": [
+                    {"text": "Here is the verified solution after analyzing both images:\n```json\n"},
+                    {"text": json.dumps({"answer": "C", "explanation": "Detailed explanation."})},
+                    {"text": "\n```\nHope that helps!"}
+                ]
+            }
+        }]
+    }
+    mock_client.post.return_value = mock_resp
+
+    jpeg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 20
+    res = gemini_solver.solve_with_gemini([jpeg_bytes], client=mock_client)
+    assert res["answer"] == "C"
+    assert res["explanation"] == "Detailed explanation."
+
+    args, kwargs = mock_client.post.call_args
+    parts = kwargs["json"]["contents"][0]["parts"]
+    assert parts[0]["inline_data"]["mime_type"] == "image/jpeg"
+
+
+def test_call_with_retry_network_timeout():
+    attempts = 0
+
+    def work():
+        nonlocal attempts
+        attempts += 1
+        if attempts < 2:
+            raise httpx.TimeoutException("Connection timed out")
+        return "success_after_timeout"
+
+    res = gemini_solver.call_with_retry(work, max_retries=3, base_delay=0.01)
+    assert res == "success_after_timeout"
+    assert attempts == 2
+

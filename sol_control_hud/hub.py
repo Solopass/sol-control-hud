@@ -509,6 +509,11 @@ class Hub:
             log(f"metrics off: {type(e).__name__}: {e}")
         log(f"start (pid {os.getpid()}, dashboard {self.url}, ticker {'on' if self.start_ticker else 'hidden'}, "
             f"start at login {'on' if self._login else 'off'})")
+        try:
+            from . import exam_review
+            exam_review.watcher().set_on_item(lambda item: self.cmds.put(("review_update_hud", item)))
+        except Exception as e:
+            log(f"exam review wire failed: {e}")
         self.root.after(250, self._pump)
         self.root.after(2000, self._tick)
         try:
@@ -836,6 +841,7 @@ class Hub:
                     ("Open dashboard", self.open_dashboard, False),
                     ("Unload AI models", lambda: self.do_action("models_unload_all", ""), False),
                     review_item(),
+                    ("Exam HUD (floating)", lambda: self.review_action("hud"), False),
                     None,
                     ("Open the dashboard when SOL starts",
                      lambda: self.cmds.put(("dashboard_at_start", not self.settings["dashboard_at_start"])),
@@ -890,8 +896,16 @@ class Hub:
                 elif name == "review_pick_snip":
                     from . import exam_review
                     from .views.box_picker import pick_box
-                    pick_box(self.root, lambda rect: (exam_review.watcher().add_snip(rect),
-                                                      log(f"exam review: added scroll snip {rect}")))
+                    def _on_snip(rect):
+                        r = exam_review.watcher().add_snip(rect)
+                        log(f"exam review: added scroll snip {rect} -> {r.get('why')}")
+                        if r.get("ok"):
+                            self.cmds.put(("review_snip_added", r.get("count", 2)))
+                    pick_box(self.root, _on_snip)
+                elif name == "review_snip_added":
+                    if self.exam_hud and getattr(self.exam_hud, "snip_btn", None):
+                        count = arg or 2
+                        self.exam_hud.snip_btn.config(text=f"➕ Add Snip ({count} parts)")
                 elif name == "review_toggle_hud":
                     self._ensure_exam_hud()
                     if self.exam_hud:
@@ -900,6 +914,9 @@ class Hub:
                     self._ensure_exam_hud()
                     if self.exam_hud:
                         self.exam_hud.update_item(arg)
+                    ans = arg.get("answer") or ""
+                    if ans:
+                        self.notify_now("Exam Solution", f"Ans: {ans[:80]}")
                 elif name == "exit":
                     self._shutdown(arg)
                     return

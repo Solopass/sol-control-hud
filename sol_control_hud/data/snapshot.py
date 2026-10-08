@@ -956,6 +956,8 @@ def review_slide(r: dict) -> dict:
             ans_str = f"Order: {steps_count} steps" if steps_count else "Order"
         else:
             ans = "/".join(cur.get("answer_labels") or cur.get("correct_labels") or [])
+            if not ans and cur.get("answer"):
+                ans = str(cur["answer"])[:15]
             ans_str = f"Ans: {ans or '?'}"
         segs += [(ans_str, CYAN if is_gemini else GREEN), SEP, (cur.get("topic") or "solved", CYAN)]
     else:

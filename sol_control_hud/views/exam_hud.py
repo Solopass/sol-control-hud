@@ -116,6 +116,10 @@ class ExamHudWindow:
             justify=tk.LEFT,
         )
         self.ans_lbl.pack(fill=tk.X, pady=(4, 0))
+        self.ans_frame.bind(
+            "<Configure>",
+            lambda e: self.ans_lbl.config(wraplength=max(200, e.width - 20)) if self.ans_lbl else None,
+        )
 
         # Explanation Text Area
         txt_frame = tk.Frame(self.win, bg="#0f172a", padx=12, pady=4)
@@ -133,6 +137,11 @@ class ExamHudWindow:
             font=("Segoe UI", 10),
         )
         self.txt.pack(fill=tk.BOTH, expand=True)
+        self.txt.tag_configure("question", font=("Segoe UI", 10, "bold"), foreground="#f8fafc")
+        self.txt.tag_configure("bold", font=("Segoe UI", 10, "bold"), foreground="#e2e8f0")
+        self.txt.tag_configure("cyan", foreground="#38bdf8")
+        self.txt.tag_configure("green", foreground="#4ade80")
+        self.txt.tag_configure("code", font=("Consolas", 10), foreground="#38bdf8")
 
         # Bottom Action Bar
         btn_frame = tk.Frame(self.win, bg="#0f172a", padx=12, pady=8)
@@ -256,6 +265,9 @@ class ExamHudWindow:
             self.badge_lbl.config(text=f"⚡ sol-vision ({type_label})", fg="#94a3b8")
             self.bad_btn.config(state=tk.NORMAL, text="🔍 Verify / Retry (Gemini)")
 
+        if self.snip_btn:
+            self.snip_btn.config(text="➕ Add Snip (Scroll)")
+
         # Show Copy Command button for fill_in_the_blank, otherwise hide it
         if self.copy_btn:
             if q_type == "fill_in_the_blank":
@@ -275,26 +287,33 @@ class ExamHudWindow:
 
         exhibit = item.get("exhibit_text") or ""
         if exhibit:
-            self.txt.insert(tk.END, f"--- EXHIBIT / DIAGRAM ---\n{exhibit}\n-------------------------\n\n")
+            self.txt.insert(tk.END, "--- EXHIBIT / DIAGRAM ---\n", "cyan")
+            self.txt.insert(tk.END, f"{exhibit}\n")
+            self.txt.insert(tk.END, "-------------------------\n\n", "cyan")
 
         if q_type == "matching":
             pairs = item.get("matching_pairs") or []
             if pairs:
-                self.txt.insert(tk.END, "MATCHING PAIRS:\n")
+                self.txt.insert(tk.END, "MATCHING PAIRS:\n", "bold")
                 for p in pairs:
-                    self.txt.insert(tk.END, f"  • {p.get('source', '')} ➔ {p.get('target', '')}\n")
+                    src = p.get("source", "")
+                    tgt = p.get("target", "")
+                    self.txt.insert(tk.END, f"  • {src} ")
+                    self.txt.insert(tk.END, "➔", "cyan")
+                    self.txt.insert(tk.END, f" {tgt}\n", "green")
                 self.txt.insert(tk.END, "\n")
         elif q_type == "fill_in_the_blank":
             blanks = item.get("blank_answers") or []
             if blanks:
-                self.txt.insert(tk.END, "COMMAND / INPUT:\n")
+                self.txt.insert(tk.END, "COMMAND / INPUT:\n", "bold")
                 for b in blanks:
-                    self.txt.insert(tk.END, f"  >>> {b}\n")
+                    self.txt.insert(tk.END, "  >>> ", "cyan")
+                    self.txt.insert(tk.END, f"{b}\n", "code")
                 self.txt.insert(tk.END, "\n")
         elif q_type == "ordering":
             steps = item.get("ordered_sequence") or []
             if steps:
-                self.txt.insert(tk.END, "ORDERED SEQUENCE:\n")
+                self.txt.insert(tk.END, "ORDERED SEQUENCE:\n", "bold")
                 for idx, s in enumerate(steps, 1):
                     line = s if re.match(r"^\d+\.", s) else f"{idx}. {s}"
                     self.txt.insert(tk.END, f"  {line}\n")
@@ -303,7 +322,8 @@ class ExamHudWindow:
             choices = item.get("choices") or []
             for c in choices:
                 lb, txt = c.get("label", ""), c.get("text", "")
-                self.txt.insert(tk.END, f"  {lb}. {txt}\n")
+                self.txt.insert(tk.END, f"  {lb}. ", "cyan")
+                self.txt.insert(tk.END, f"{txt}\n")
             if choices:
                 self.txt.insert(tk.END, "\n")
 

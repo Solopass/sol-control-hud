@@ -341,9 +341,21 @@ def read_messages(png: bytes) -> list[dict]:
 
 def parse_json(text: str) -> dict:
     text = (text or "").strip()
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
     if text.startswith("```"):
         text = re.sub(r"^```[a-z]*\s*|\s*```$", "", text)
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise
 
 
 def append_note(item: dict, notes_dir: Path | None = None, now: datetime | None = None) -> Path:
@@ -435,7 +447,8 @@ class ReviewWatcher:
 
     def __init__(self, *, grab_thumb=None, grab_png=None, client_factory=None, lock=None, mode_fn=None,
                  settings_path: Path | None = None, notes_dir: Path | None = None, interval: float = INTERVAL_S,
-                 settle: float = SETTLE_S, idle_stop: float = IDLE_STOP_S, clock=time.monotonic):
+                 settle: float = SETTLE_S, idle_stop: float = IDLE_STOP_S, clock=time.monotonic,
+                 on_item: Callable[[dict], None] | None = None):
         from . import quiz_capture
         self._grab_thumb = grab_thumb or quiz_capture.grab_thumb
         self._grab_png = grab_png or quiz_capture.grab_png
@@ -445,6 +458,7 @@ class ReviewWatcher:
         self._mode_fn = mode_fn
         self._settings_path, self._notes_dir = settings_path, notes_dir
         self.interval, self.settle, self.idle_stop, self._clock = interval, settle, idle_stop, clock
+        self._on_item = on_item
         self._mu = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -458,6 +472,9 @@ class ReviewWatcher:
                    "rect": rect if isinstance(rect, list) and len(rect) == 4 else None,
                    "current": None, "history": [], "correct": 0, "wrong": 0, "answered": 0, "topics": {},
                    "note": None, "since": None, "next_look": None}
+
+    def set_on_item(self, cb: Callable[[dict], None] | None) -> None:
+        self._on_item = cb
 
     # ---- what the views read
     def state(self) -> dict:
@@ -622,6 +639,11 @@ class ReviewWatcher:
             done_text = f"✨ Gemini Answer: {revised_item['answer']}"
             self._set(status="watching", text=done_text)
             self._additional_snips = []
+            if self._on_item:
+                try:
+                    self._on_item(revised_item)
+                except Exception:
+                    pass
             return {"ok": True, "why": done_text, "item": revised_item}
         except Exception as e:
             err_msg = f"Gemini retry failed: {type(e).__name__}: {str(e)[:160]}"
@@ -782,6 +804,11 @@ class ReviewWatcher:
                 note = f"(not saved: {err})"
             self._record(item, note)
             self._set(status="watching", text=done_text)
+            if self._on_item:
+                try:
+                    self._on_item(item)
+                except Exception:
+                    pass
             return True
         except LockTimeout:
             return False

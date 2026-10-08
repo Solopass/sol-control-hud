@@ -88,7 +88,7 @@ def get_api_key(settings_path: Path | None = None) -> str | None:
                 pass
 
     # Check exam-review.json
-    paths_to_check = [settings_path] if settings_path else [DATA_DIR / "exam-review.json", DATA_DIR / "hub-settings.json"]
+    paths_to_check = ([settings_path] if settings_path else []) + [DATA_DIR / "exam-review.json", DATA_DIR / "hub-settings.json"]
     for p in paths_to_check:
         if p and p.exists():
             try:
@@ -102,7 +102,7 @@ def get_api_key(settings_path: Path | None = None) -> str | None:
 
 
 def call_with_retry(func: Callable[[], Any], max_retries: int = 3, base_delay: float = 3.0) -> Any:
-    """Executes func with exponential backoff on 429 rate limit errors."""
+    """Executes func with exponential backoff on 429 rate limit errors and network glitches."""
     for attempt in range(max_retries):
         try:
             return func()
@@ -121,6 +121,12 @@ def call_with_retry(func: Callable[[], Any], max_retries: int = 3, base_delay: f
                     raise GeminiRateLimitError(f"Gemini API rate limit exceeded (429): {e}") from e
             else:
                 raise GeminiError(f"HTTP error {e.response.status_code}: {e}") from e
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            if attempt < max_retries - 1:
+                wait_time = (2 ** attempt) * base_delay
+                time.sleep(wait_time)
+            else:
+                raise GeminiError(f"Network error communicating with Gemini API: {e}") from e
         except Exception as e:
             err_str = str(e).lower()
             if ("429" in err_str or "resource_exhausted" in err_str or "quota" in err_str) and attempt < max_retries - 1:
@@ -199,9 +205,10 @@ def solve_with_gemini(
 
     parts: list[dict] = []
     for img in images:
+        mime = "image/jpeg" if img.startswith(b"\xff\xd8") else "image/png"
         parts.append({
             "inline_data": {
-                "mime_type": "image/png",
+                "mime_type": mime,
                 "data": image_to_base64(img),
             }
         })
@@ -229,7 +236,8 @@ def solve_with_gemini(
             candidates = data.get("candidates") or []
             if not candidates:
                 raise GeminiError(f"No response candidates returned: {data}")
-            raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            cand_parts = candidates[0].get("content", {}).get("parts", [])
+            raw_text = "".join(p.get("text", "") for p in cand_parts if isinstance(p, dict) and p.get("text"))
             return _clean_and_parse_json(raw_text)
         finally:
             if client is None:
@@ -241,6 +249,12 @@ def solve_with_gemini(
 def _clean_and_parse_json(text: str) -> dict:
     """Strips markdown fences and parses JSON securely."""
     clean = text.strip()
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", clean, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
     if clean.startswith("```"):
         clean = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", clean)
         clean = re.sub(r"\s*```$", "", clean)
@@ -249,5 +263,8 @@ def _clean_and_parse_json(text: str) -> dict:
     except json.JSONDecodeError as e:
         match = re.search(r"\{.*\}", clean, re.DOTALL)
         if match:
-            return json.loads(match.group(0))
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
         raise GeminiError(f"Failed to parse Gemini response as JSON: {text[:200]}") from e
