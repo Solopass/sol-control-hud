@@ -67,18 +67,20 @@ def chip_map() -> dict[str, str]:
 class GpuSampler:
     """Samples GPU utilization, adapter VRAM and per-process VRAM every `interval` seconds in a background thread.
 
-    Wildcard counters only expand to instances that exist when the query is built, so a process that starts later
-    (e.g. llama-server when a model loads) would never be sampled. The query is rebuilt every `rescan` seconds."""
+    Each counter is added once as a wildcard and read as an array, which PDH re-enumerates on every collect: a process
+    that starts later (llama-server when a model loads) shows up in the next sample. Until 10-08 every instance was
+    expanded and added one by one (~780 counters, 157 ms) and the query rebuilt every 15 s to catch new ones; tested
+    10-08 with a WPF window started mid-query, the wildcard array saw its 8 engine + 1 memory instances like a fresh
+    expansion did. The query is still rebuilt every `rescan` s (now cheap) to refresh the chip map."""
 
-    def __init__(self, interval: float = 2.0, rescan: float = 15.0,
-                 expand: Callable[[str], list[str]] | None = None):
+    def __init__(self, interval: float = 2.0, rescan: float = 15.0):
         self.interval, self.rescan = interval, rescan
-        self.expand = expand or win32pdh.ExpandCounterPath
         self.latest: dict = {"available": False}
         self.last_util: dict[str, float] = {}   # raw engine values, for displays.misplaced (no second sampler)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._names: dict[int, str] = {}
+        self._last_values: dict[str, dict[str, float]] = {}
         self._rescan_requested = threading.Event()
         self.info = adapter_info()
 
@@ -97,7 +99,7 @@ class GpuSampler:
     def _build(self):
         self.info["chips"] = chip_map()          # each rescan: the Intel driver can arrive while the HUD runs (10-07)
         query = win32pdh.OpenQuery()
-        handles = {c: [(p, win32pdh.AddCounter(query, p)) for p in self.expand(c)] for c in COUNTERS}
+        handles = {c: win32pdh.AddCounter(query, c) for c in COUNTERS}
         win32pdh.CollectQueryData(query)  # utilization is a rate: needs a first sample before values are valid
         return query, handles
 
@@ -129,7 +131,9 @@ class GpuSampler:
                 win32pdh.CollectQueryData(query)
                 if len(self._names) > 2000:
                     self._names.clear()
-                values = {c: _read_all(handles[c], win32pdh.PDH_FMT_DOUBLE if c == UTIL else win32pdh.PDH_FMT_LARGE) for c in COUNTERS}
+                values = {c: _read_all(c, handles[c], win32pdh.PDH_FMT_DOUBLE if c == UTIL else win32pdh.PDH_FMT_LARGE,
+                                       self._last_values.get(c, {})) for c in COUNTERS}
+                self._last_values = values
                 self.last_util = values[UTIL]
                 self.latest = summarize(values[UTIL], values[ADAPTER_MEM], values[PROC_DEDICATED], values[PROC_SHARED],
                                         lambda pid: process_name(pid, self._names), self.info)
@@ -138,14 +142,15 @@ class GpuSampler:
                     self.latest = {"available": False, "error": str(e)}
 
 
-def _read_all(handles, fmt) -> dict[str, float]:
-    out = {}
-    for path, h in handles:
-        try:
-            out[path] = win32pdh.GetFormattedCounterValue(h, fmt)[1]
-        except Exception:  # instance went away (process exited) since the query was built
-            continue
-    return out
+def _read_all(counter: str, handle, fmt, previous: dict[str, float]) -> dict[str, float]:
+    r"""{full counter path: value} for every instance of a wildcard counter, keyed exactly like the expanded paths
+    (`\GPU Engine(pid_1_..._engtype_3D)\Utilization Percentage`) so _pid / _luid / _engtype parse them as before.
+    If the whole array can't be read this once, the last good values stand in (one sample, not a blank card)."""
+    head, tail = counter.split("(*)")
+    try:
+        return {f"{head}({inst}){tail}": v for inst, v in win32pdh.GetFormattedCounterArray(handle, fmt).items()}
+    except Exception:  # noqa: BLE001 - e.g. a rate counter whose instance appeared between two collects
+        return previous
 
 
 def summarize(util: dict[str, float], adapter_mem: dict[str, float], proc_dedicated: dict[str, float],

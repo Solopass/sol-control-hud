@@ -170,34 +170,39 @@ def test_guard_loop_requests_rescan_on_model_change(tmp_path):
 
 
 class FakePdh:
-    """Stands in for win32pdh: counter paths come from an expander whose instances change over time."""
+    """Stands in for win32pdh: a wildcard counter read as an array whose instances change over time (PDH
+    re-enumerates them on every collect)."""
     PDH_FMT_DOUBLE, PDH_FMT_LARGE = 1, 2
 
-    def __init__(self, values):
-        self.values = values
+    def __init__(self, arrays):
+        self.arrays = arrays            # counter -> () -> {instance: value}
+        self.builds = 0
 
-    def OpenQuery(self): return object()
+    def OpenQuery(self):
+        self.builds += 1
+        return object()
     def CloseQuery(self, q): pass
     def CollectQueryData(self, q): pass
     def AddCounter(self, q, path): return path
-    def GetFormattedCounterValue(self, h, fmt): return (0, self.values[h])
+    def GetFormattedCounterArray(self, h, fmt): return self.arrays.get(h, dict)()
 
 
-def test_sampler_picks_up_a_process_that_starts_later(monkeypatch):
-    values = {rf"\GPU Adapter Memory({DGPU})\Dedicated Usage": 12 * GB, pm(200): 2 * GB, pm(100): 10 * GB}
-    monkeypatch.setattr(gpu, "win32pdh", FakePdh(values))
-    monkeypatch.setattr(gpu, "adapter_info", lambda: {"name": "RX 9070 XT", "vram_total_gb": 15.9})
+def _instance(path):
+    return path[path.index("(") + 1:path.rindex(")")]
+
+
+def test_sampler_picks_up_a_process_that_starts_later_without_rebuilding(monkeypatch):
     started = time.monotonic()
+    late = lambda: time.monotonic() - started > 0.15      # noqa: E731 - llama-server "starts" after the first samples
+    pdh = FakePdh({
+        gpu.ADAPTER_MEM: lambda: {DGPU: 12 * GB},
+        gpu.PROC_DEDICATED: lambda: {_instance(pm(200)): 2 * GB, **({_instance(pm(100)): 10 * GB} if late() else {})},
+    })
+    monkeypatch.setattr(gpu, "win32pdh", pdh)
+    monkeypatch.setattr(gpu, "adapter_info", lambda: {"name": "RX 9070 XT", "vram_total_gb": 15.9})
+    monkeypatch.setattr(gpu, "chip_map", dict)
 
-    def expand(counter):
-        late = time.monotonic() - started > 0.15          # llama-server "starts" after the first build
-        if counter == gpu.ADAPTER_MEM:
-            return [rf"\GPU Adapter Memory({DGPU})\Dedicated Usage"]
-        if counter == gpu.PROC_DEDICATED:
-            return [pm(200)] + ([pm(100)] if late else [])
-        return []
-
-    s = gpu.GpuSampler(interval=0.02, rescan=0.2, expand=expand)
+    s = gpu.GpuSampler(interval=0.02, rescan=3600)         # no rebuild during the test: the array alone must see it
     monkeypatch.setattr(gpu, "process_name", lambda pid, cache: NAMES[pid])
     s.start()
     try:
@@ -213,6 +218,30 @@ def test_sampler_picks_up_a_process_that_starts_later(monkeypatch):
     finally:
         s.stop()
     assert seen_before and seen_after
+    assert pdh.builds == 1
+
+
+class _ArrayPdh:
+    def __init__(self, result):
+        self.result = result
+
+    def GetFormattedCounterArray(self, h, fmt):
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def test_array_entries_get_the_full_counter_path(monkeypatch):
+    monkeypatch.setattr(gpu, "win32pdh", _ArrayPdh({"pid_7_luid_0x00000000_0x0000d1e5_phys_0_eng_0_engtype_3D": 12.5}))
+    (path, v), = gpu._read_all(gpu.UTIL, "h", 1, {}).items()
+    assert path == r"\GPU Engine(pid_7_luid_0x00000000_0x0000d1e5_phys_0_eng_0_engtype_3D)\Utilization Percentage"
+    assert (gpu._pid(path), gpu._engtype(path), gpu._luid(path), v) == (7, "3D", "luid_0x00000000_0x0000d1e5", 12.5)
+
+
+def test_a_failed_array_read_keeps_the_last_values(monkeypatch):
+    monkeypatch.setattr(gpu, "win32pdh", _ArrayPdh(RuntimeError("PDH_CALC_NEGATIVE_DENOMINATOR")))
+    prev = {pm(1): 5.0}
+    assert gpu._read_all(gpu.PROC_DEDICATED, "h", 2, prev) is prev
 
 
 def test_learned_sizes_are_written_atomically(tmp_path):
