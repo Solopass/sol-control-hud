@@ -459,19 +459,25 @@ function renderReview(p) {
   $('revText').textContent = (r.text || '') + (r.running && r.next_look && st === 'watching' ? ` · next look ${r.next_look}` : '');
   $('revBox').textContent = r.rect ? `Box ${r.rect[2]}×${r.rect[3]} at (${r.rect[0]}, ${r.rect[1]}) · looks every 3 s · real-time exam solver` : 'No box yet: drag a box around the question area, then Set box & start.';
   const c = r.current, cur = $('revCurrent');
+  const retryTop = $('revRetryBtn'); if (retryTop) retryTop.disabled = !c;
+  const snipBtn = $('revSnipBtn'); if (snipBtn) { snipBtn.textContent = r.parts_count > 1 ? `➕ Add Snip (${r.parts_count} parts)` : '➕ Add Snip (Scroll)'; }
   cur.hidden = !c;
   if (c) {
+    const isGemini = !!(c.gemini_retried || c.model === 'gemini-3.8-flash');
     const mark = (lb) => (c.answer_labels || c.correct_labels || []).includes(lb) ? 'right' : (c.your_labels || []).includes(lb) ? 'mine' : '';
     const opts = (c.choices || []).map((o) => `<div class="rev-opt ${mark(o.label)}"><b>${esc(o.label)}.</b> ${esc(o.text)}` +
       `${(c.your_labels || []).includes(o.label) ? ' <span class="dim small">your selection</span>' : ''}` +
-      `${(c.answer_labels || c.correct_labels || []).includes(o.label) ? ' <span class="small" style="color:var(--green)">✓ answer</span>' : ''}</div>`).join('');
-    const head = `<span style="color:var(--cyan)">💡 Answer: ${esc(c.answer || (c.answer_labels || []).join(', '))} · ${esc(c.topic || 'Solved')}</span>`;
-    const body = `<p class="rev-explain">${esc(c.explanation)}</p>`;
+      `${(c.answer_labels || c.correct_labels || []).includes(o.label) ? ` <span class="small" style="color:${isGemini ? 'var(--cyan)' : 'var(--green)'}">✓ answer</span>` : ''}</div>`).join('');
+    const modelBadge = isGemini ? ' <span class="pill" style="background:#0284c7;color:#fff;font-size:0.75rem;padding:2px 6px">✨ Gemini 3.8 Flash</span>' : '';
+    const head = `<span style="color:${isGemini ? 'var(--cyan)' : 'var(--green)'}">💡 Answer: ${esc(c.answer || (c.answer_labels || []).join(', '))} · ${esc(c.topic || 'Solved')}</span>${modelBadge}`;
+    const whyWrong = c.why_previous_wrong ? `<p class="rev-explain" style="color:var(--amber);margin-bottom:6px"><b>Previous attempt issue:</b> ${esc(c.why_previous_wrong)}</p>` : '';
+    const body = `${whyWrong}<p class="rev-explain">${esc(c.explanation)}</p>`;
+    const retryBtn = isGemini ? '' : `<button class="mini danger" style="margin-top:8px" data-act="review" data-target="retry_gemini" title="Mark this answer incorrect and re-solve with Gemini">👎 Mark Bad (Gemini)</button>`;
     setHTML(cur, `<div class="row"><b>${head}</b><span class="dim small">${esc(c.at || '')}${c.seconds ? ` · ${c.seconds} s` : ''}</span></div>` +
-      `<div class="rev-q">${esc(c.question)}</div>${opts}${body}`);
+      `<div class="rev-q">${esc(c.question)}</div>${opts}${body}${retryBtn}`);
   }
   setHTML($('revHistory'), (r.history || []).map((h) => `<div class="item"><span>${h.n}. ${esc(h.topic || h.question)}</span>` +
-    `<span style="color:var(--green)">✓</span></div>`).join('') || '<div class="empty">nothing yet</div>');
+    `<span style="color:${h.gemini ? 'var(--cyan)' : 'var(--green)'}">${h.gemini ? '✨' : '✓'}</span></div>`).join('') || '<div class="empty">nothing yet</div>');
   const topics = Object.entries(r.topics || {}).sort((a, b) => b[1] - a[1]);
   setHTML($('revTopics'), topics.map(([t, n]) => `<div class="item"><span>${esc(t)}</span><span style="color:var(--cyan)">${n}×</span></div>`).join('')
     || '<div class="empty">no topics recorded yet</div>');

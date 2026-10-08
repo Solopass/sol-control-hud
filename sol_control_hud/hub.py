@@ -179,7 +179,7 @@ class Hub:
         self.cmds: queue.Queue = queue.Queue()
         self.last_web = -1e9
         self.pace = ACTIVE_PACE
-        self.ticker = self.server = self.tray = self.root = None
+        self.ticker = self.server = self.tray = self.root = self.exam_hud = None
         self._login = False          # the Startup entry exists (read at start, changed through do_action)
         self.notifier = None
         self._prev_snap = None
@@ -359,6 +359,23 @@ class Hub:
                 return {"ok": False, "why": "no review note yet: it's made with the first missed question"}
             os.startfile(note)
             return {"ok": True, "why": "opening today's review note"}
+        if target in ("retry_gemini", "bad"):
+            r = w.retry_gemini()
+            if r.get("ok") and r.get("item"):
+                self.notify_now("Gemini Solution", f"Ans: {r['item'].get('answer')}")
+                self.cmds.put(("review_update_hud", r["item"]))
+            log(f"exam review: retry_gemini -> {r.get('why')}")
+            return r
+        if target == "add_snip":
+            r = w.add_snip()
+            log(f"exam review: add_snip -> {r.get('why')}")
+            return r
+        if target in ("pick_snip", "pick_part2"):
+            self.cmds.put(("review_pick_snip", None))
+            return {"ok": True, "why": "drag a box around the scrolled section (Esc cancels)"}
+        if target in ("hud", "popup"):
+            self.cmds.put(("review_toggle_hud", None))
+            return {"ok": True, "why": "toggled floating exam HUD"}
         ops = {"start": w.start, "stop": w.stop, "look": w.look_now, "clear": w.clear}
         if target not in ops:
             return {"ok": False, "why": f"unknown review action {target!r}"}
@@ -860,6 +877,19 @@ class Hub:
                     from .views.box_picker import pick_box
                     pick_box(self.root, lambda rect: (exam_review.watcher().set_rect(rect, start=True),
                                                       log(f"exam review: box {rect}, watching")))
+                elif name == "review_pick_snip":
+                    from . import exam_review
+                    from .views.box_picker import pick_box
+                    pick_box(self.root, lambda rect: (exam_review.watcher().add_snip(rect),
+                                                      log(f"exam review: added scroll snip {rect}")))
+                elif name == "review_toggle_hud":
+                    self._ensure_exam_hud()
+                    if self.exam_hud:
+                        self.exam_hud.toggle()
+                elif name == "review_update_hud":
+                    self._ensure_exam_hud()
+                    if self.exam_hud:
+                        self.exam_hud.update_item(arg)
                 elif name == "exit":
                     self._shutdown(arg)
                     return
@@ -949,6 +979,20 @@ class Hub:
             except Exception as e:  # noqa: BLE001 - reported by the guard on the next tick
                 log(f"heal: loading {name} again failed: {type(e).__name__}: {e}")
         threading.Thread(target=_load_again, name="heal-load", daemon=True).start()
+
+    def _ensure_exam_hud(self):
+        if getattr(self, "exam_hud", None) is None and getattr(self, "root", None):
+            try:
+                from .views.exam_hud import ExamHudWindow
+                self.exam_hud = ExamHudWindow(
+                    self.root,
+                    on_retry_gemini=lambda: self.review_action("retry_gemini"),
+                    on_add_snip=lambda: self.review_action("pick_snip"),
+                )
+            except Exception as e:
+                log(f"exam hud init failed: {e}")
+                self.exam_hud = None
+        return self.exam_hud
 
     @staticmethod
     def _stop_review() -> None:

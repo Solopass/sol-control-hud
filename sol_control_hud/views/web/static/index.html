@@ -90,6 +90,9 @@
       <button class="mini go" data-act="review" data-target="pick" title="Drag a box around the question area; it starts watching and answering at once">▣ Set box &amp; start</button>
       <button class="mini" id="revToggle" data-act="review" data-target="start">Start</button>
       <button class="mini" data-act="review" data-target="look" title="Read the box again now">Look now</button>
+      <button class="mini danger" data-act="review" data-target="retry_gemini" id="revRetryBtn" title="Mark current answer as incorrect and re-solve with Gemini 3.8 Flash">👎 Mark Bad (Gemini)</button>
+      <button class="mini" data-act="review" data-target="pick_snip" id="revSnipBtn" title="Drag a box around the scrolled section for tall questions">➕ Add Snip (Scroll)</button>
+      <button class="mini ghost" data-act="review" data-target="hud" title="Toggle floating corner HUD window">🗖 HUD</button>
       <button class="mini ghost" data-act="review" data-target="open_note">Open notes</button>
       <button class="mini ghost" data-act="review" data-target="clear" data-confirm="Clear this session's list? (The notes file stays.)">Clear</button>
     </div>

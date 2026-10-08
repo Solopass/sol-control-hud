@@ -202,6 +202,24 @@ def append_note(item: dict, notes_dir: Path | None = None, now: datetime | None 
     return path
 
 
+def append_gemini_retry(item: dict, notes_dir: Path | None = None, now: datetime | None = None) -> Path:
+    """Appends Gemini API re-evaluation to today's note after user marks an answer as bad."""
+    notes_dir, now = notes_dir or NOTES_DIR, now or datetime.now()
+    notes_dir.mkdir(parents=True, exist_ok=True)
+    path = notes_dir / f"{now:%Y-%m-%d} practice exam.md"
+    why_wrong = f"> **Why previous answer was wrong:** {item['why_previous_wrong']}\n" if item.get("why_previous_wrong") else ""
+    body = (
+        f"\n> [!WARNING] **Marked Bad · Re-attempt via Gemini 3.8 Flash** ({now:%H:%M})\n"
+        f"> **Revised Answer:** {item.get('answer') or item.get('correct')}\n"
+        f"> **Topic:** {item.get('topic') or 'Exam Revision'}\n"
+        f"> **Explanation:** {item.get('explanation') or ''}\n"
+        f"{why_wrong}\n"
+    )
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(body)
+    return path
+
+
 class ReviewWatcher:
     """The watch loop and its state. Thread-safe: the dashboard, the ticker and the tray read `state()`."""
 
@@ -223,6 +241,8 @@ class ReviewWatcher:
         self._thread: threading.Thread | None = None
         self._force = False
         self._last_key: str | None = None
+        self._last_png_bytes: bytes | None = None
+        self._additional_snips: list[bytes] = []
         rect = load_settings(settings_path).get("rect")
         self._s = {"status": "stopped", "text": "Set a box around the question area, then start.",
                    "rect": rect if isinstance(rect, list) and len(rect) == 4 else None,
@@ -234,6 +254,7 @@ class ReviewWatcher:
         with self._mu:
             s = json.loads(json.dumps(self._s))
         s["running"] = bool(self._thread and self._thread.is_alive())
+        s["parts_count"] = len(self._additional_snips) + (1 if self._last_png_bytes else 0)
         return s
 
     def _set(self, **kw) -> None:
@@ -283,8 +304,96 @@ class ReviewWatcher:
 
     def clear(self) -> dict:
         self._last_key = None
+        self._last_png_bytes = None
+        self._additional_snips = []
         self._set(current=None, history=[], correct=0, wrong=0, answered=0, topics={})
         return {"ok": True, "why": "cleared this session's list"}
+
+    def add_snip(self, rect: list[int] | None = None) -> dict:
+        """Capture an additional in-memory snip for tall/scrolled multi-page questions."""
+        target_rect = rect or self._s.get("rect")
+        if not target_rect:
+            return {"ok": False, "why": "No capture box set"}
+        try:
+            png = self._grab_png(target_rect)
+            self._additional_snips.append(png)
+            count = len(self._additional_snips) + (1 if self._last_png_bytes else 0)
+            msg = f"Added scroll snip #{len(self._additional_snips)} ({count} parts in memory)"
+            self._set(text=msg)
+            return {"ok": True, "why": msg, "count": count}
+        except Exception as e:
+            return {"ok": False, "why": f"Failed to capture scroll snip: {e}"}
+
+    def retry_gemini(self, model: str = "gemini-3.8-flash") -> dict:
+        """User marked current answer bad: send in-memory images to Gemini API for a new answer."""
+        cur = self._s.get("current")
+        if not cur and not self._last_png_bytes:
+            return {"ok": False, "why": "No active question to re-solve"}
+
+        images = []
+        if self._last_png_bytes:
+            images.append(self._last_png_bytes)
+        elif self._s.get("rect"):
+            try:
+                png = self._grab_png(self._s["rect"])
+                self._last_png_bytes = png
+                images.append(png)
+            except Exception:
+                pass
+        images.extend(self._additional_snips)
+        if not images:
+            return {"ok": False, "why": "No screenshot in memory"}
+
+        self._set(status="answering", text=f"Re-solving with Gemini ({model})…")
+        try:
+            from . import gemini_solver
+            sol = gemini_solver.solve_with_gemini(
+                images,
+                previous_item=cur,
+                question_text=(cur or {}).get("question"),
+                model=model,
+            )
+            raw_labels = sol.get("answer_labels") or []
+            choices = (cur or {}).get("choices") or []
+            ans_idxs = pick_indexes(raw_labels, choices) if choices else []
+            ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_labels]
+
+            answer_text = sol.get("answer_text") or (choice_line(ans_labels, choices) if choices else ", ".join(ans_labels))
+            if not answer_text and ans_labels:
+                answer_text = ", ".join(ans_labels)
+
+            revised_item = dict(cur or {})
+            revised_item.update({
+                "answer_labels": ans_labels,
+                "correct_labels": ans_labels,
+                "answer": answer_text,
+                "correct": answer_text,
+                "topic": sol.get("topic") or (cur or {}).get("topic") or "Exam Revision",
+                "explanation": sol.get("explanation") or "",
+                "why_previous_wrong": sol.get("why_previous_wrong") or "",
+                "model": model,
+                "gemini_retried": True,
+                "at": time.strftime("%H:%M:%S"),
+            })
+            if not revised_item.get("question") and sol.get("topic"):
+                revised_item["question"] = f"[{sol.get('topic')}]"
+
+            note_path = str(append_gemini_retry(revised_item, self._notes_dir))
+            with self._mu:
+                self._s["current"] = revised_item
+                self._s["note"] = note_path
+                if self._s.get("history"):
+                    self._s["history"][0]["topic"] = revised_item["topic"]
+                    self._s["history"][0]["gemini"] = True
+
+            done_text = f"✨ Gemini Answer: {revised_item['answer']}"
+            self._set(status="watching", text=done_text)
+            self._additional_snips = []
+            return {"ok": True, "why": done_text, "item": revised_item}
+        except Exception as e:
+            err_msg = f"Gemini retry failed: {type(e).__name__}: {str(e)[:160]}"
+            self._set(status="error", text=err_msg)
+            return {"ok": False, "why": err_msg}
 
     # ---- the loop
     def _run(self) -> None:
@@ -355,6 +464,7 @@ class ReviewWatcher:
             self._set(status="paused", text="The local AI is off (game guard)" if mode == "off"
                       else "Away mode has the GPU: this waits until Desk mode")
             return False
+        self._last_png_bytes = png
         t0 = time.monotonic()
         try:
             with self._gpu("exam review"):
@@ -374,6 +484,7 @@ class ReviewWatcher:
                     self._set(status="watching", text="Same question as before")
                     return False
                 self._last_key = key
+                self._additional_snips = []
 
                 # Solve immediately in real time: no waiting for grading, no grading checks or restrictions!
                 self._set(status="answering", text="Solving question in real time…")

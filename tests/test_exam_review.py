@@ -215,3 +215,69 @@ def test_review_slide_shows_the_last_result():
 def test_rotation_takes_turns_between_two_alert_slides():
     slides = [{"level": "info"}, {"level": "info"}, {"level": "alert"}, {"level": "info"}, {"level": "alert"}]
     assert sn.rotation(slides) == [2, 0, 4, 1, 2, 3]
+
+
+def test_add_snip_buffers_in_memory(tmp_path):
+    w, _ = make(tmp_path, [])
+    w.set_rect([10, 20, 100, 100], start=False)
+    res = w.add_snip()
+    assert res["ok"] is True
+    assert res["count"] == 1
+    assert len(w._additional_snips) == 1
+    assert w.state()["parts_count"] == 1
+
+
+def test_retry_gemini_solves_and_notes(tmp_path, monkeypatch):
+    w, client = make(tmp_path, [graded()])
+    assert w._process(b"initial_png", force=True) is True
+    assert w.state()["current"]["answer"] == "C. 255.255.255.192"
+
+    # Mock gemini solver
+    mock_solve = {
+        "answer_labels": ["D"],
+        "answer_text": "D. 255.255.255.240",
+        "topic": "Subnetting revised",
+        "explanation": "Gemini verified choice D is correct.",
+        "why_previous_wrong": "Choice C had 6 host bits, but question required 4.",
+    }
+    monkeypatch.setattr("sol_control_hud.gemini_solver.solve_with_gemini", lambda *a, **k: mock_solve)
+
+    res = w.retry_gemini()
+    assert res["ok"] is True
+    s = w.state()
+    cur = s["current"]
+    assert cur["answer"] == "D. 255.255.255.240"
+    assert cur["model"] == "gemini-3.8-flash"
+    assert cur["gemini_retried"] is True
+    assert "Gemini verified" in cur["explanation"]
+
+    # Verify note updated
+    notes = list((tmp_path / "School").glob("* practice exam.md"))
+    assert len(notes) == 1
+    note_content = notes[0].read_text(encoding="utf-8")
+    assert "Marked Bad · Re-attempt via Gemini 3.8 Flash" in note_content
+    assert "**Revised Answer:** D. 255.255.255.240" in note_content
+    assert "Choice C had 6 host bits" in note_content
+
+
+def test_review_slide_shows_gemini_badge():
+    r = {
+        "status": "watching",
+        "running": True,
+        "answered": 3,
+        "current": {
+            "topic": "DNS queries",
+            "answer_labels": ["B"],
+            "question": "Which tool queries DNS?",
+            "answer": "B. nslookup",
+            "explanation": "Direct query",
+            "model": "gemini-3.8-flash",
+            "gemini_retried": True,
+            "why_previous_wrong": "Ping tests ICMP echo, not DNS",
+        },
+    }
+    sl = sn.review_slide(r)
+    assert "Exam ✨" in sl["text"]
+    assert "Ans: B" in sl["text"]
+    assert "gemini-3.8-flash" in sl["detail"]
+    assert "Ping tests ICMP echo" in sl["detail"]

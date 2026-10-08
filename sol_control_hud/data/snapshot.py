@@ -940,11 +940,12 @@ def review_slide(r: dict) -> dict:
     """The exam helper on the ticker: the last solved question while it watches, with full explanation in the tooltip.
     Click opens the dashboard's card."""
     cur, busy = r.get("current") or {}, r.get("status") in ("reading", "explaining", "answering", "waiting")
-    prefix = "Exam "
-    segs: list[tuple[str, str]] = [(prefix, MUTED)]
+    is_gemini = bool(cur.get("gemini_retried") or cur.get("model") == "gemini-3.8-flash")
+    prefix = "Exam ✨ " if is_gemini else "Exam "
+    segs: list[tuple[str, str]] = [(prefix, CYAN if is_gemini else MUTED)]
     if cur:
         ans = "/".join(cur.get("answer_labels") or cur.get("correct_labels") or [])
-        segs += [(f"Ans: {ans or '?'}", GREEN), SEP, (cur.get("topic") or "solved", CYAN)]
+        segs += [(f"Ans: {ans or '?'}", CYAN if is_gemini else GREEN), SEP, (cur.get("topic") or "solved", CYAN)]
     else:
         segs += [(r.get("text") or "watching", MUTED)]
     count_str = (f"{r.get('answered', 0)} solved" if r.get("answered")
@@ -956,11 +957,13 @@ def review_slide(r: dict) -> dict:
     elif not r.get("running"):
         segs += [SEP, ("stopped", MUTED)]
     if cur:
-        detail = (f"{cur.get('question', '')}\nAnswer: {cur.get('answer', '')}\n"
-                  f"{cur.get('explanation', '')}")
+        model_line = f"[{cur.get('model', 'sol-vision')}]\n" if cur.get("model") else ""
+        why_wrong = f"\nPrevious attempt issue: {cur['why_previous_wrong']}\n" if cur.get("why_previous_wrong") else ""
+        detail = (f"{model_line}{cur.get('question', '')}\nAnswer: {cur.get('answer', '')}\n"
+                  f"{cur.get('explanation', '')}{why_wrong}")
     else:
         detail = r.get("text") or ""
-    return {"tag": "REVIEW", "text": plain(segs), "segments": segs, "color": CYAN if busy else MUTED,
+    return {"tag": "REVIEW", "text": plain(segs), "segments": segs, "color": CYAN if (busy or is_gemini) else MUTED,
             "detail": detail + "\nClick to open the Exam card", "level": "alert" if r.get("running") else "info"}
 
 
