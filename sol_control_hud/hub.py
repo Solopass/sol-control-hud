@@ -225,6 +225,7 @@ class Hub:
         self._last_health = 0.0
         self._last_media_check = 0.0
         self._media_stuck_seen: set[str] = set()
+        self._last_digest_check = 0.0
         from .views.web.feed import History
         self.history = History()
 
@@ -359,6 +360,17 @@ class Hub:
             r = notes.open_folder(vault, file_path)
             log(f"open folder: {vault}/{file_path} -> {r.get('ok')}")
             return r
+        if action == "digest_now":                # Settings: the machine's week so far, as the Sunday note would say it
+            from datetime import datetime
+            from . import digest
+            snap = self.collector.get_snapshot()
+            now = datetime.now()
+            try:
+                path = digest.write(digest.build(DATA_DIR / "metrics.sqlite", now, snap.disks), now)
+            except OSError as e:
+                return {"ok": False, "why": f"could not write it: {e}"}
+            log(f"digest written now: {path}")
+            return {"ok": True, "why": f"written: Digests/{path.name} (Sunday's replaces it)", "path": str(path)}
         if action == "ack_crashes":
             from .views.crash_dialog import ACK_FILE
             from .views.ticker import write_crash_ack
@@ -1040,6 +1052,30 @@ class Hub:
             return f"HUD: {', '.join(stopped)} stopped updating"
         return f"HUD ended without Exit {r['restarts']['day']}x today"
 
+    def _weekly_digest(self, snap) -> list:
+        """Sunday 20:00 (or the first minute after it, outside quiet hours): write the machine's week (digest.py) and
+        return its notice for the notifier, which holds it during a game like any other."""
+        from datetime import datetime
+        from . import digest, notify
+        state = digest.load_state()
+        had = state.get("last")
+        now = datetime.now()
+        end = digest.due(now, state)
+        if not had and state.get("last"):
+            digest.save_state(state)                      # first start: this week counts as done
+        if end is None or notify.in_quiet_hours({**notify.DEFAULTS, **(self.settings.get("notify") or {})}.get("quiet", ""), now):
+            return []
+        try:
+            path = digest.write(digest.build(DATA_DIR / "metrics.sqlite", end, snap.disks), end)
+        except OSError as e:
+            log(f"digest not written: {type(e).__name__}: {e}")
+            return []
+        state["last"] = digest.week_name(end)
+        digest.save_state(state)
+        log(f"digest written: {path}")
+        return [notify.Notice("digest", "Your machine's week is ready", f"Digests/{path.name}: "
+                              + digest.summary_line(DATA_DIR / "metrics.sqlite", end), "info", f"digest:{state['last']}")]
+
     def _tick(self) -> None:
         """Every 2 s: set the pace, stop the idle web guard, keep the tray tooltip current."""
         try:
@@ -1067,6 +1103,9 @@ class Hub:
                     from .notify import from_media
                     tiles = (self.collectors["media"].get() or {}).get("tiles") or []
                     extra = from_media(tiles, self._media_stuck_seen)
+                if time.monotonic() - self._last_digest_check >= 60:
+                    self._last_digest_check = time.monotonic()
+                    extra += self._weekly_digest(snap)
                 for n in self.notifier.check(self._prev_snap, snap, busy, extra):
                     self.notify_now(n.title, n.text, n.level)
                 self._prev_snap = snap

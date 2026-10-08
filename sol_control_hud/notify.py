@@ -27,6 +27,7 @@ KINDS = {  # kind -> label for the settings
     "vram": "A model spilled out of VRAM",
     "answer": "An overnight answer is ready",
     "media_stuck": "A media job got stuck",
+    "digest": "The weekly machine digest is ready",
 }
 DEFAULTS = {"enabled": True, "kinds": {k: True for k in KINDS}, "quiet": "23:00-08:00"}
 REPEAT_S = 600.0

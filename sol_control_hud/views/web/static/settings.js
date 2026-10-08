@@ -20,7 +20,8 @@ async function loadSettings() {
     + swRow('ticker_shown', 'Show the taskbar ticker', a.ticker_shown, 'when hidden it stays in the tray')
     + swRow('start_at_login', 'Start when Windows starts', a.start_at_login)
     + swRow('dashboard_at_start', 'Open this dashboard when it starts', a.dashboard_at_start)
-    + swRow('notify', 'Notifications', a.notify, 'Away results, chain failures, crashes, disks filling, VRAM spills')
+    + swRow('notify', 'Notifications', a.notify, 'Away results, chain failures, crashes, disks filling, VRAM spills, stuck media jobs')
+    + `<div class="srow"><span><b>Weekly machine digest</b><span class="dim small">Sundays 20:00 in 1Notebook/Digests, beside the Weekly digest chain's note</span></span><button class="mini" data-digest-now>Write it now</button></div>`
     + `<div class="srow"><span><b>Theme</b><span class="dim small">the ticker uses the same one</span></span><select id="setTheme">${$('theme').innerHTML}</select></div>`
     + '</section>';
   if (t.available) {
@@ -72,6 +73,14 @@ async function changeSetting(el) {
 }
 
 $('settingsBody').addEventListener('click', async (e) => {
+  const d = e.target.closest('[data-digest-now]');
+  if (d) {
+    d.disabled = true;
+    const r = await post('/api/action', { action: 'digest_now' });
+    toast(r.why || (r.ok ? 'written' : 'that did not work'));
+    d.disabled = false;
+    return;
+  }
   const b = e.target.closest('[data-gpu-all]');
   if (!b) return;
   if (!confirm('Move all listed apps to the Intel chip?\n\nEach one switches the next time it starts, so restart them afterwards. Games are not affected.')) return;

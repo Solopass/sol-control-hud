@@ -220,3 +220,30 @@ def test_the_hud_alert_tops_the_ticker_attention():
     got = attention(Snapshot(hud_alert="HUD: GPU counters stopped updating"))
     assert got[0] == (RED, "HUD: GPU counters stopped updating", "SYS")
     assert not any("HUD" in a[1] for a in attention(Snapshot()))
+
+
+def test_the_weekly_digest_is_written_once_outside_quiet_hours(tmp_path, monkeypatch):
+    from datetime import datetime as real_dt
+    from sol_control_hud import digest
+    monkeypatch.setattr(digest, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(digest, "NOTES_DIR", tmp_path / "Digests")
+    monkeypatch.setattr(hub, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(hub, "LOG_FILE", tmp_path / "hub.log")
+    clock = {"now": real_dt(2026, 10, 8, 18, 0)}
+
+    class FakeDT(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"]
+    import datetime as dtmod
+    monkeypatch.setattr(dtmod, "datetime", FakeDT)
+    stub = type("StubHub", (), {"settings": {"notify": {"quiet": "23:00-08:00"}}})()
+    run = lambda: hub.Hub._weekly_digest(stub, Snapshot())    # noqa: E731
+    assert run() == [] and digest.load_state() == {"last": "2026-W40"}       # first start: nothing written
+    clock["now"] = real_dt(2026, 10, 11, 23, 30)                              # due, but quiet hours
+    assert run() == [] and not (tmp_path / "Digests").exists()
+    clock["now"] = real_dt(2026, 10, 12, 8, 1)                                # the morning after: written
+    (n,) = run()
+    assert n.kind == "digest" and "2026-W41 machine.md" in n.text
+    assert (tmp_path / "Digests" / "2026-W41 machine.md").exists() and digest.load_state() == {"last": "2026-W41"}
+    assert run() == []                                                        # once
