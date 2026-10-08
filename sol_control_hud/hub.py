@@ -17,6 +17,7 @@ import argparse
 import ctypes
 import dataclasses
 import json
+import logging
 import msvcrt
 import os
 import queue
@@ -53,6 +54,16 @@ def log(msg: str) -> None:
             f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} {msg}\n")
     except OSError:
         pass
+
+
+class ClosedConnectionFilter(logging.Filter):
+    """Drop asyncio's 'Exception in callback _ProactorBasePipeTransport._call_connection_lost' records: on Windows a
+    browser tab closing the dashboard stream makes socket.shutdown() raise WinError 10054 after the connection is gone
+    (a CPython proactor quirk, harmless). It was most of hub.log's tracebacks (15 by 10-08), burying real errors."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        exc = record.exc_info[1] if record.exc_info else None
+        return not (isinstance(exc, ConnectionResetError) and "_call_connection_lost" in record.getMessage())
 
 
 def write_running_marker(path=None) -> None:
@@ -1093,6 +1104,7 @@ def main(argv: list[str] | None = None) -> None:
     if sys.stdout is None or sys.stderr is None:   # pythonw: uvicorn/print would crash on a None stream
         stream = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
         sys.stdout, sys.stderr = sys.stdout or stream, sys.stderr or stream
+    logging.getLogger("asyncio").addFilter(ClosedConnectionFilter())
     sys.excepthook = lambda t, v, tb: log("crash: " + "".join(traceback.format_exception(t, v, tb)))
     settings = load_settings()
     lock = open(LOCK_FILE, "a+b")

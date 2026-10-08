@@ -180,3 +180,19 @@ def test_tray_menu_includes_unload_models(the_hub, monkeypatch):
     labels = [item[0] for item in items if item is not None]
     assert "Unload AI models" in labels
 
+
+
+def test_closed_dashboard_connection_is_not_logged_as_an_error():
+    import logging
+    import sys as _sys
+    f = hub.ClosedConnectionFilter()
+
+    def record(msg, exc):
+        try:
+            raise exc
+        except Exception:
+            return logging.LogRecord("asyncio", logging.ERROR, __file__, 1, msg, None, _sys.exc_info())
+    reset = ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host")
+    assert not f.filter(record("Exception in callback _ProactorBasePipeTransport._call_connection_lost()", reset))
+    assert f.filter(record("Exception in callback something_else()", reset))            # other callbacks still logged
+    assert f.filter(record("Exception in callback _ProactorBasePipeTransport._call_connection_lost()", ValueError()))
