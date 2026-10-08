@@ -196,3 +196,27 @@ def test_closed_dashboard_connection_is_not_logged_as_an_error():
     assert not f.filter(record("Exception in callback _ProactorBasePipeTransport._call_connection_lost()", reset))
     assert f.filter(record("Exception in callback something_else()", reset))            # other callbacks still logged
     assert f.filter(record("Exception in callback _ProactorBasePipeTransport._call_connection_lost()", ValueError()))
+
+
+def test_the_start_notes_how_the_last_run_ended(tmp_path, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(hub, "LOG_FILE", tmp_path / "hub.log")
+    marker = tmp_path / "app-running.json"
+    boot = datetime(2026, 10, 8, 9, 0, 0).timestamp()
+    assert hub.note_previous_end(marker, boot) is None                  # last run exited cleanly: no marker, no line
+    marker.write_text(json.dumps({"pid": 7, "started": "2026-10-08T12:00:00"}))
+    assert hub.note_previous_end(marker, boot) == hub.health.ENDED_UNEXPECTEDLY
+    marker.write_text(json.dumps({"pid": 8, "started": "2026-10-08T08:00:00"}))
+    assert hub.note_previous_end(marker, boot) == hub.health.ENDED_WITH_PC
+    marker.write_text("{half a file")
+    assert hub.note_previous_end(marker, boot) == hub.health.ENDED_UNEXPECTEDLY
+    lines = (tmp_path / "hub.log").read_text().splitlines()
+    assert len(lines) == 3 and "(pid 7, started 2026-10-08T12:00:00)" in lines[0]
+    assert hub.health.restarts("\n".join(lines), now=datetime(2026, 10, 8, 18).timestamp())["week"] == 2
+
+
+def test_the_hud_alert_tops_the_ticker_attention():
+    from sol_control_hud.data.snapshot import RED, attention
+    got = attention(Snapshot(hud_alert="HUD: GPU counters stopped updating"))
+    assert got[0] == (RED, "HUD: GPU counters stopped updating", "SYS")
+    assert not any("HUD" in a[1] for a in attention(Snapshot()))

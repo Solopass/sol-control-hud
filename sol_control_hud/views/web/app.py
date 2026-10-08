@@ -22,13 +22,16 @@ class Cached:
         self.fn, self.ttl = fn, ttl
         self.value: object = None
         self.at = 0.0
+        self.failed = False         # the last run raised (the HUD health card lists these; "unavailable" is not failed)
 
     def get(self) -> object:
         if self.value is None or time.monotonic() - self.at >= self.ttl:
             try:
                 self.value = self.fn()
+                self.failed = False
             except Exception as e:  # noqa: BLE001 - one broken collector must not take the page down
                 self.value = {"available": False, "error": f"{type(e).__name__}: {e}"}
+                self.failed = True
             self.at = time.monotonic()
         return self.value
 

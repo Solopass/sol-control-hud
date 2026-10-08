@@ -30,7 +30,7 @@ from pathlib import Path
 
 from fastapi import Request   # module level: annotations are strings here, FastAPI resolves them from globals
 
-from . import heal, models_ctl
+from . import health, heal, models_ctl
 from .data.collectors import engines, vram
 from .data.snapshot import RED, TickerCollector, attention, format_multiline_rows, format_slides
 from .paths import DATA_DIR
@@ -72,6 +72,30 @@ def write_running_marker(path=None) -> None:
         path.write_text(json.dumps({"pid": os.getpid(), "started": time.strftime("%Y-%m-%dT%H:%M:%S")}), encoding="utf-8")
     except OSError:
         pass
+
+
+def note_previous_end(path=None, boot_time: float | None = None) -> str | None:
+    """Before this run's marker is written: did the last run reach Exit? One hub.log line if not (health.py counts them)."""
+    path = path or RUNNING_FILE
+    try:
+        marker = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    except (OSError, ValueError):
+        marker = {}                       # there but unreadable: it still didn't end cleanly
+    if boot_time is None:
+        import psutil
+        boot_time = psutil.boot_time()
+    end = health.previous_end(marker if marker is None else (marker or {"pid": None}), boot_time)
+    if end:
+        log(f"{end} (pid {(marker or {}).get('pid')}, started {(marker or {}).get('started')})")
+    return end
+
+
+def read_health_logs(now: float | None = None) -> dict:
+    """The log half of the HUD health card: unexpected ends and the newest real errors (last 64 KB of each log)."""
+    from .views.ticker import LOG_FILE as TICKER_LOG
+    hub_text = health.tail(LOG_FILE)
+    return {"restarts": health.restarts(hub_text, now),
+            "errors": health.errors([("hub", hub_text), ("ticker", health.tail(TICKER_LOG))])}
 
 
 def clear_running_marker(path=None) -> None:
@@ -195,6 +219,9 @@ class Hub:
         self.notifier = None
         self._prev_snap = None
         self.metrics = None
+        from .views.web.app import Cached
+        self._health_logs = Cached(lambda: read_health_logs(), 60)     # the logs: once a minute is plenty
+        self._last_health = 0.0
         from .views.web.feed import History
         self.history = History()
 
@@ -519,6 +546,10 @@ class Hub:
             self._login = start_at_login()
         except Exception:  # noqa: BLE001 - reading a shortcut must never stop the app
             self._login = False
+        try:
+            note_previous_end()
+        except Exception as e:  # noqa: BLE001 - bookkeeping must never stop the app
+            log(f"previous run check failed: {type(e).__name__}: {e}")
         write_running_marker()
         if self.settings.get("gpu_choices"):       # Discord moves to a new folder on update: put the choice on it
             try:
@@ -782,6 +813,11 @@ class Hub:
             data["listening"] = [{**r, "chip": chips.get(r.get("pid"))} for r in data.get("listening") or []]
             return {"ok": True, **data}
 
+        @app.get("/api/health")
+        def hud_health() -> dict:
+            """The HUD health card (health.py)."""
+            return {"ok": True, **self.health_report()}
+
         @app.get("/api/guard")
         def guard_state() -> dict:
             """Why the local AI is off, and whether a button can answer it (the AI card polls this)."""
@@ -966,6 +1002,41 @@ class Hub:
             pass
         self.root.after(250, self._pump)
 
+    def health_report(self) -> dict:
+        """The HUD health card (health.py): how runs ended, real errors, samplers that went quiet, its own cost."""
+        logs = self._health_logs.get()
+        snap = self.collector.get_snapshot()
+        sampler = self.collector._sampler
+        alive = lambda th: bool(th and th.is_alive())   # noqa: E731
+        checks = [("GPU counters", (getattr(sampler, "latest", None) or {}).get("sampled_at"), getattr(sampler, "interval", 2.0),
+                   alive(getattr(sampler, "_thread", None))),
+                  ("Snapshot", snap.sampled_at or None, self.collector.interval, alive(self.collector._thread))]
+        loop = self.guard.loop
+        if loop is not None:                              # started only while the dashboard looks at VRAM
+            checks.append(("VRAM guard", loop.at, loop.interval, alive(loop._thread)))
+        started = None
+        try:
+            started = json.loads(RUNNING_FILE.read_text(encoding="utf-8")).get("started")
+        except (OSError, ValueError, AttributeError):
+            pass
+        report = {**logs, "stale": health.stale(checks),
+                  "broken": sorted(k for k, c in (getattr(self, "collectors", None) or {}).items() if getattr(c, "failed", False)),
+                  "up_since": started, "pid": os.getpid(),
+                  "cost": {"cpu": snap.self_cpu, "ram_mb": snap.self_ram_mb, "loop_ms": snap.self_latency_ms,
+                           "target_cpu": 1.5}}
+        report["level"] = health.level(report)
+        return report
+
+    def _health_alert(self) -> str | None:
+        """The ticker's one line when the HUD itself is in trouble (only "bad": a sampler stopped, 3+ crashes today)."""
+        r = self.health_report()
+        if r["level"] != "bad":
+            return None
+        stopped = [s["name"] for s in r["stale"] if s["why"] == "stopped"]
+        if stopped:
+            return f"HUD: {', '.join(stopped)} stopped updating"
+        return f"HUD ended without Exit {r['restarts']['day']}x today"
+
     def _tick(self) -> None:
         """Every 2 s: set the pace, stop the idle web guard, keep the tray tooltip current."""
         try:
@@ -977,6 +1048,9 @@ class Hub:
                 self.collector.set_pace(pace)
                 log(f"pace {pace:.0f} s ({'someone is looking' if pace == ACTIVE_PACE else 'nobody is looking'})")
             self.guard.stop_if_idle()
+            if time.monotonic() - self._last_health >= 30 and getattr(self, "collectors", None):
+                self._last_health = time.monotonic()
+                self.collector.health_alert = self._health_alert()
             snap = self.collector.get_snapshot()
             self.history.add(snap)
             if self.metrics:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 from ...paths import DATA_DIR
 
@@ -83,6 +84,7 @@ class GuardLoop:
         import threading
         self.guard, self.sampler, self.ollama_fn, self.interval = guard, sampler, ollama_fn, interval
         self.latest: dict = {"available": False, "error": "starting"}
+        self.at: float | None = None        # time.time() of the last good verdict (the HUD health card's freshness)
         self._stop = threading.Event()
         self._last_loaded: tuple[str, ...] | None = None
         self._thread = threading.Thread(target=self._run, name="vram-guard", daemon=True)
@@ -104,6 +106,7 @@ class GuardLoop:
                         self.sampler.request_rescan()
                 self._last_loaded = current_loaded
                 self.latest = self.guard.update(self.sampler.latest, ollama)
+                self.at = time.time()
             except Exception as e:  # noqa: BLE001 - keep the loop alive; the error shows on the card
                 self.latest = {"available": False, "error": f"{type(e).__name__}: {e}"}
 

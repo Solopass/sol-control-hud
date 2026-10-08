@@ -89,7 +89,8 @@ class Snapshot:
     vram_evicted: bool = False                 # the runner's shared (system RAM) memory is over the line: memory only
     vram_spill_impact: str = ""                # while evicted: "slow" / "fine" = an answer since the spill was slow / ran
                                                # at its usual speed; "unknown" = nothing answered since (spill_impact)
-    vram_spilled_gb: float = 0.0               # the AI runner's memory in system RAM (sol-fast keeps ~0.62 by design)
+    vram_spilled_gb: float = 0.0
+    hud_alert: str | None = None               # the HUD's own trouble (health.py): a sampler stopped, crashing               # the AI runner's memory in system RAM (sol-fast keeps ~0.62 by design)
     vram_tight: bool = False
     vram_top_process: str | None = None
     vram_processes: list[dict] = field(default_factory=list)
@@ -493,6 +494,8 @@ def attention(s: "Snapshot") -> list[tuple[str, str, str]]:
     crashes = s.unexpected_reboots + s.gpu_resets
     if crashes:
         out.append((RED, f"{crashes} new crash event{'s' if crashes != 1 else ''}: Away blocked until reviewed", "SYS"))
+    if s.hud_alert:
+        out.append((RED, s.hud_alert, "SYS"))
     if s.ai_state == "offline" and s.ai_mode != "off":
         out.append((RED, "local AI router is down", "AI"))
     if s.vram_spill_impact == "slow":
@@ -1283,6 +1286,7 @@ class TickerCollector:
         self._apps: dict = {"apps": [], "media": []}
         self._last_speed = 0.0
         self._spill_mark = NO_SPILL
+        self.health_alert: str | None = None   # set by the hub from health.py, copied into each snapshot
         self._speed: dict = {}
         self._apps_thread: threading.Thread | None = None
         self._eta = away_screen.EtaTracker()
@@ -1572,6 +1576,7 @@ class TickerCollector:
             vram_total_gb=vram_total,
             vram_evicted=vram_evicted,
             vram_spill_impact=vram_spill_impact,
+            hud_alert=self.health_alert,
             vram_spilled_gb=round((guard_res.get("ai") or {}).get("shared_gb", 0.0), 2),
             vram_tight=vram_tight,
             vram_top_process=vram_top_process,

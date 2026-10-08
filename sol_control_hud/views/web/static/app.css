@@ -108,6 +108,11 @@ main.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 
 .row > span:first-child { color:var(--dim); }
 .note { color:var(--dim); font-size:12px; margin-top:6px; }
 .clamp { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.health-errors { margin-top:6px; font-size:12px; }
+.health-errors details { border-top:1px solid color-mix(in srgb, var(--dim) 25%, transparent); padding:3px 0; }
+.health-errors summary { cursor:pointer; color:var(--text); overflow-wrap:anywhere; }
+.health-errors summary .dim { color:var(--dim); }
+.health-errors pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:220px; overflow:auto; font-size:11px; color:var(--dim); margin:4px 0 0; }
 .pill { font-size:10px; padding:2px 9px; border-radius:10px; border:1px solid currentColor; letter-spacing:.1em; }
 .pill.bad { color:var(--red); animation:pulse 1.4s ease-in-out infinite; } .pill.warn { color:var(--amber); } .pill.ok { color:var(--green); }
 @keyframes pulse { 50% { opacity:.45; } }
