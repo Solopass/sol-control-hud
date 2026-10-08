@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS minutes (t INTEGER PRIMARY KEY, gpu REAL, gpu_max REA
 CREATE TABLE IF NOT EXISTS events (t REAL, kind TEXT, name TEXT, detail TEXT);
 CREATE INDEX IF NOT EXISTS events_t ON events (t);
 """
+# Added 10-08 (plans/SOL_HUD_IMPROVEMENTS_PLAN.md B): is the spill alarm real? spilled = the AI runner's peak GB in system
+# RAM that minute, tps = the last answer's speed seen. Old rows stay NULL.
+NEW_COLS = (("spilled", "REAL"), ("tps", "REAL"))
+SPILL_RANK = {"unknown": 0, "fine": 1, "slow": 2}   # an episode's verdict is the worst one it reached
 
 
 class Metrics:
@@ -33,6 +37,12 @@ class Metrics:
         self.db = sqlite3.connect(str(path))
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        have = {r[1] for r in self.db.execute("PRAGMA table_info(minutes)")}
+        for name, kind in NEW_COLS:
+            if name not in have:
+                self.db.execute(f"ALTER TABLE minutes ADD COLUMN {name} {kind}")
+        self.db.commit()
+        self.spill: dict | None = None     # the spill going on now: {"start", "verdict", "gb"}
         self.minute: int | None = None
         self.acc: list[tuple] = []
         self.disks: dict[str, float] = {}
@@ -68,7 +78,8 @@ class Metrics:
             self._flush()
         self.minute = minute
         self.acc.append((s.gpu_load, s.vram_used_gb, s.ram_used_gb, s.cpu_percent, s.gpu_temp, s.gpu_hotspot,
-                         s.net_down_kb, s.net_up_kb))
+                         s.net_down_kb, s.net_up_kb, getattr(s, "vram_spilled_gb", None), getattr(s, "ai_tps", None)))
+        self._track_spill(s)
         self.disks = {d["drive"]: d["free_gb"] for d in (s.disks or []) if "drive" in d and "free_gb" in d}
         crashes = s.unexpected_reboots + s.gpu_resets
         if self.crashes is not None and crashes > self.crashes:
@@ -81,10 +92,12 @@ class Metrics:
         cols = list(zip(*self.acc))
         avg = lambda xs: (round(sum(v for v in xs if v is not None) / n, 2) if (n := sum(v is not None for v in xs)) else None)  # noqa: E731
         top = lambda xs: max((v for v in xs if v is not None), default=None)  # noqa: E731
-        gpu, vram, ram, cpu, temp, hot, down, up = cols
-        self.db.execute("INSERT OR REPLACE INTO minutes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        gpu, vram, ram, cpu, temp, hot, down, up, spilled, tps = cols
+        last = lambda xs: next((v for v in reversed(xs) if v is not None), None)  # noqa: E731
+        self.db.execute("INSERT OR REPLACE INTO minutes (t, gpu, gpu_max, vram, vram_max, ram, ram_max, cpu, temp, temp_max,"
+                        " hotspot, hotspot_max, down, up, disks, spilled, tps) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (self.minute, avg(gpu), top(gpu), avg(vram), top(vram), avg(ram), top(ram), avg(cpu), avg(temp),
-                         top(temp), avg(hot), top(hot), avg(down), avg(up), json.dumps(self.disks)))
+                         top(temp), avg(hot), top(hot), avg(down), avg(up), json.dumps(self.disks), top(spilled), last(tps)))
         self.db.commit()
         self.acc = []
         if self.clock() - self.last_prune > 86400:
@@ -93,6 +106,21 @@ class Metrics:
             self.db.execute("DELETE FROM minutes WHERE t < ?", (cut,))
             self.db.execute("DELETE FROM events WHERE t < ?", (cut,))
             self.db.commit()
+
+    def _track_spill(self, s) -> None:
+        """One `spill` event per spill, written when it ends: name = its verdict (slow / fine / unknown = nothing
+        answered during it), detail = peak GB in system RAM and how long it lasted."""
+        impact = getattr(s, "vram_spill_impact", "") or ""
+        if impact:
+            if self.spill is None:
+                self.spill = {"start": s.sampled_at, "verdict": impact, "gb": 0.0}
+            if SPILL_RANK[impact] > SPILL_RANK[self.spill["verdict"]]:
+                self.spill["verdict"] = impact
+            self.spill["gb"] = max(self.spill["gb"], getattr(s, "vram_spilled_gb", 0.0) or 0.0)
+        elif self.spill is not None:
+            sp, self.spill = self.spill, None
+            minutes = (s.sampled_at - sp["start"]) / 60
+            self.event("spill", sp["verdict"], f"{sp['gb']:.2f} GB, {minutes:.0f} min", sp["start"])
 
     def event(self, kind: str, name: str, detail: str = "", t: float | None = None) -> None:
         self.db.execute("INSERT INTO events VALUES (?,?,?,?)", (t or self.clock(), kind, name, detail))
@@ -166,7 +194,7 @@ def week(path: Path, now: float | None = None, days: int = 7) -> dict:
     now = now or time.time()
     since = now - days * 86400
     empty = {"days": days, "away_hours": 0.0, "away_runs": 0, "jobs_done": 0, "jobs_failed": 0, "chains": {},
-             "crashes": 0, "hotspot_max": None, "vram_max": None, "gpu_avg": None, "disks": {}, "covered_hours": 0.0}
+             "crashes": 0, "spills": 0, "spills_slow": 0, "hotspot_max": None, "vram_max": None, "gpu_avg": None, "disks": {}, "covered_hours": 0.0}
     if not path.exists():
         return empty
     with _connect(path) as con:
@@ -191,6 +219,9 @@ def week(path: Path, now: float | None = None, days: int = 7) -> dict:
             out["chains"][detail] = out["chains"].get(detail, 0) + 1
         elif kind == "crash":
             out["crashes"] += 1
+        elif kind == "spill":
+            out["spills"] += 1
+            out["spills_slow"] += name == "slow"
     if start is not None:                                       # still away now
         out["away_hours"] += (now - start) / 3600
     out["away_hours"] = round(out["away_hours"], 1)

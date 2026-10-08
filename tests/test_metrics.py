@@ -97,3 +97,37 @@ def test_first_start_backfills_the_week_from_the_logs(tmp_path):
     m2 = metrics.Metrics(tmp_path / "m.sqlite", away, chains, clock=lambda: now)   # second start: no double count
     m2.close()
     assert metrics.week(tmp_path / "m.sqlite", now=now)["jobs_done"] == 1
+
+
+def test_spill_evidence_minutes_and_one_event_per_spill(tmp_path):
+    m = metrics.Metrics(tmp_path / "m.sqlite", clock=lambda: T0)
+    start = T0 // 60 * 60
+    m.add(snap(start, vram_spilled_gb=0.62, ai_tps=80.0))
+    m.add(snap(start + 30, vram_spilled_gb=1.3, vram_evicted=True, vram_spill_impact="unknown"))
+    m.add(snap(start + 60, vram_spilled_gb=1.4, vram_evicted=True, vram_spill_impact="slow", ai_tps=26.0))
+    m.add(snap(start + 90, vram_spilled_gb=1.2, vram_evicted=True, vram_spill_impact="slow", ai_tps=26.0))
+    m.add(snap(start + 300, vram_spilled_gb=0.62, ai_tps=75.0))                       # over: one event
+    m.add(snap(start + 330, vram_spilled_gb=1.1, vram_evicted=True, vram_spill_impact="fine", ai_tps=70.0))
+    m.add(snap(start + 400, vram_spilled_gb=0.62))
+    m.add(snap(start + 460))
+    rows = m.db.execute("SELECT t, spilled, tps FROM minutes ORDER BY t").fetchall()
+    assert rows[0] == (int(start), 1.3, 80.0) and rows[1] == (int(start) + 60, 1.4, 26.0)   # peak GB, last speed
+    ev = m.db.execute("SELECT t, name, detail FROM events WHERE kind = 'spill' ORDER BY t").fetchall()
+    assert ev == [(start + 30, "slow", "1.40 GB, 4 min"), (start + 330, "fine", "1.10 GB, 1 min")]
+    w = metrics.week(tmp_path / "m.sqlite", now=start + 500)
+    assert (w["spills"], w["spills_slow"]) == (2, 1)
+    m.close()
+
+
+def test_old_database_gets_the_new_columns(tmp_path):
+    import sqlite3
+    path = tmp_path / "m.sqlite"
+    con = sqlite3.connect(path)
+    con.executescript(metrics.SCHEMA)                                   # a 09-26 file: no spilled / tps columns
+    con.execute("INSERT INTO minutes (t, gpu) VALUES (1, 5.0)")
+    con.commit(); con.close()
+    m = metrics.Metrics(path, clock=lambda: T0)
+    cols = [r[1] for r in m.db.execute("PRAGMA table_info(minutes)")]
+    assert cols[-2:] == ["spilled", "tps"]
+    assert m.db.execute("SELECT gpu, spilled FROM minutes").fetchall() == [(5.0, None)]
+    m.close()

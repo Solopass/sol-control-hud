@@ -804,6 +804,7 @@ async function loadWeek() {
     stat(w.crashes, 'crash events', w.crashes ? 'var(--red)' : 'var(--green)'),
     stat(w.hotspot_max != null ? `${Math.round(w.hotspot_max)}°` : null, 'hottest hotspot', w.hotspot_max >= 95 ? 'var(--red)' : 'var(--text)'),
     stat(w.vram_max != null ? `${w.vram_max} GB` : null, 'peak VRAM'),
+    stat(w.spills ? `${w.spills_slow}/${w.spills}` : 0, 'spills that slowed answers', w.spills_slow ? 'var(--amber)' : 'var(--green)'),
   ].join(''));
   const disks = Object.entries(w.disks || {}).map(([d, g]) => `<span style="color:${g <= -5 ? 'var(--red)' : g >= 5 ? 'var(--green)' : 'var(--dim)'}">${esc(d)}: ${g > 0 ? '+' : ''}${g} GB</span>`).join(' · ');
   setHTML($('weekDisks'), `Chains: ${esc(chains)}${disks ? ' · Disks: ' + disks : ''}`);
