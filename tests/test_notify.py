@@ -22,10 +22,12 @@ def test_old_log_lines_never_pop_up(tmp_path):
 
 
 def test_what_is_worth_a_notice():
-    got = notify.from_snapshots(S(), S(gpu_resets=1, vram_evicted=True, ai_model="sol-smart", disk_trends={"D": -12.0}))
+    got = notify.from_snapshots(S(), S(gpu_resets=1, vram_evicted=True, vram_spill_impact="slow", ai_model="sol-smart", disk_trends={"D": -12.0}))
     assert [n.kind for n in got] == ["crash", "vram", "disk"]
     assert got[0].level == "error" and "Away is blocked" in got[0].text and got[2].title == "D: filling up fast"
     assert notify.from_snapshots(S(gpu_resets=1), S(gpu_resets=1)) == []            # only when it changes
+    for impact in ("unknown", "fine"):                                               # counter alone: no notice
+        assert notify.from_snapshots(S(), S(vram_evicted=True, vram_spill_impact=impact)) == []
     assert notify.from_snapshots(None, S(gpu_resets=1)) == []                       # not at the first look
     chains = notify.from_chain_lines(["2026-09-26T20:00:00 Weekly digest.md: run 3 failed: model gone",
                                       "2026-09-26T20:01:00 Summarize a folder.md: run 9 succeeded",
@@ -55,7 +57,7 @@ def at(h, m=0):
 
 def test_quiet_hours_let_only_crashes_through(tmp_path):
     n, clock = make(tmp_path, at(2))
-    got = n.check(S(), S(gpu_resets=1, vram_evicted=True), busy=False)
+    got = n.check(S(), S(gpu_resets=1, vram_evicted=True, vram_spill_impact="slow"), busy=False)
     assert [x.kind for x in got] == ["crash"]
     assert notify.in_quiet_hours("23:00-08:00", datetime(2026, 9, 26, 23, 30))
     assert not notify.in_quiet_hours("23:00-08:00", datetime(2026, 9, 26, 12, 0))
@@ -63,12 +65,12 @@ def test_quiet_hours_let_only_crashes_through(tmp_path):
 
 def test_no_repeats_and_switches(tmp_path):
     n, clock = make(tmp_path, at(14))
-    assert len(n.check(S(), S(vram_evicted=True), busy=False)) == 1
-    assert n.check(S(), S(vram_evicted=True), busy=False) == []            # same thing within 10 min
+    assert len(n.check(S(), S(vram_evicted=True, vram_spill_impact="slow"), busy=False)) == 1
+    assert n.check(S(), S(vram_evicted=True, vram_spill_impact="slow"), busy=False) == []            # same thing within 10 min
     clock["t"] += 601
-    assert len(n.check(S(), S(vram_evicted=True), busy=False)) == 1
+    assert len(n.check(S(), S(vram_evicted=True, vram_spill_impact="slow"), busy=False)) == 1
     off, _ = make(tmp_path, at(14), kinds={**notify.DEFAULTS["kinds"], "vram": False})
-    assert off.check(S(), S(vram_evicted=True), busy=False) == []          # that kind switched off
+    assert off.check(S(), S(vram_evicted=True, vram_spill_impact="slow"), busy=False) == []          # that kind switched off
     muted, _ = make(tmp_path, at(14), enabled=False)
     assert muted.check(S(), S(gpu_resets=1), busy=False) == []             # all off
 
@@ -77,7 +79,7 @@ def test_held_during_a_game_then_one_summary(tmp_path):
     n, clock = make(tmp_path, at(15))
     with open(tmp_path / "away.jsonl", "a") as f:
         f.write(json.dumps({"event": "away-end", "reason": "queue done"}) + "\n")
-    assert n.check(S(), S(vram_evicted=True), busy=True) == []              # nothing while you play
+    assert n.check(S(), S(vram_evicted=True, vram_spill_impact="slow"), busy=True) == []              # nothing while you play
     out = n.check(S(), S(), busy=False)
     assert len(out) == 1 and out[0].kind == "summary" and out[0].title == "While you were busy: 2 things"
     assert "Away finished (queue done)" in out[0].text and out[0].level == "warning"

@@ -555,6 +555,7 @@ def test_answer_speed_names_the_model_by_port_and_flags_slow(tmp_path):
     assert [x["tps"] for x in speed.parse_speeds(ROUTER_LOG)] == [22.8]     # prompt reading and tiny answers skipped
     r = speed.answer_speed({"sol-fast": {"pid": 1, "port": 49170}}, path=log)
     assert r["model"] == "sol-fast" and r["tps"] == 22.8 and r["usual"] == 100 and r["slow"] is True
+    assert r["answer_id"] == (49170, 0)                                    # port + task: tells one answer from the next
     r = speed.answer_speed({"sol-fast": {"pid": 1, "port": 1}}, path=log)  # restarted since: unknown process, no verdict
     assert r["model"] is None and r["slow"] is False
     assert speed.answer_speed({}, path=tmp_path / "missing.log") == {"available": False}

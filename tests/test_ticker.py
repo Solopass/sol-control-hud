@@ -78,6 +78,7 @@ def test_format_slides_evicted():
         vram_used_gb=15.2,
         vram_total_gb=16.0,
         vram_evicted=True,
+        vram_spill_impact="slow",
         ai_model="sol-fast",
         ai_state="sleeping",
         ai_mode="away",
@@ -85,6 +86,14 @@ def test_format_slides_evicted():
     slides = format_slides(snap)
     assert "EVICTED!" in slides[0]["text"]
     assert slides[0]["color"] == "#f87171"  # red
+
+
+def test_spill_without_a_slow_answer_is_amber_not_red():
+    for impact, word in (("unknown", "spill? speed not measured"), ("fine", "spill, speed OK")):
+        s = Snapshot(gpu_load=50.0, vram_used_gb=15.2, vram_total_gb=16.0, vram_evicted=True, vram_spill_impact=impact)
+        slide = format_slides(s)[0]
+        assert word in slide["text"] and "EVICTED" not in slide["text"]
+        assert slide["color"] == "#fbbf24"  # amber
 
 
 def test_format_multiline_rows():
@@ -410,8 +419,11 @@ def test_event_checking_alerts():
         # 3. VRAM evicted transition
         app.trigger_alert.reset_mock()
         prev = Snapshot(vram_evicted=False, sampled_at=100.0)
-        curr = Snapshot(vram_evicted=True, sampled_at=102.0)
+        curr = Snapshot(vram_evicted=True, vram_spill_impact="unknown", sampled_at=102.0)
         app._check_events(prev, curr)
+        app.trigger_alert.assert_not_called()                  # the counter alone: no red pulse
+        slow = Snapshot(vram_evicted=True, vram_spill_impact="slow", sampled_at=104.0)
+        app._check_events(curr, slow)
         app.trigger_alert.assert_called_with(ACCENT_RED, "vram_evicted")
 
         # 4. System crash

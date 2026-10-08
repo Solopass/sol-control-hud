@@ -267,3 +267,16 @@ def test_chip_per_app_and_the_amd_card_picked_by_maker():
                                                  rf"\GPU Adapter Memory({IGPU})\Dedicated Usage": 0.2 * GB},
                            proc_dedicated={}, proc_shared={}, name_of=str, info={})
     assert legacy["vram_used_gb"] == 9.0 and legacy["pid_chips"] == {}                  # chips unknown: old fallback
+
+
+def test_spill_is_judged_by_the_first_answer_after_it_began():
+    from sol_control_hud.data.snapshot import NO_SPILL, spill_impact
+    before = {"current_process": True, "answer_id": (5000, 10), "slow": True}     # a slow answer from before the spill
+    impact, mark = spill_impact(True, NO_SPILL, before)
+    assert impact == "unknown" and mark == (5000, 10)                              # old answers don't count
+    assert spill_impact(True, mark, before)[0] == "unknown"                       # nothing answered since
+    assert spill_impact(True, mark, {"current_process": True, "answer_id": (5000, 11), "slow": False})[0] == "fine"
+    assert spill_impact(True, mark, {"current_process": True, "answer_id": (5000, 12), "slow": True})[0] == "slow"
+    assert spill_impact(True, mark, {"current_process": False, "answer_id": (6000, 1), "slow": True})[0] == "unknown"
+    assert spill_impact(False, mark, before) == ("", NO_SPILL)                    # cleared: the next spill starts fresh
+    assert spill_impact(True, NO_SPILL, {})[0] == "unknown"                       # no speed known at all

@@ -36,11 +36,11 @@ def test_disk_space_trend_colors():
 
 def test_attention_lists_what_needs_you_worst_first():
     assert td.attention(Snapshot(**OK)) == []
-    s = Snapshot(**{**OK, "gpu_resets": 1, "vram_evicted": True, "backup_stale": True,
+    s = Snapshot(**{**OK, "gpu_resets": 1, "vram_evicted": True, "vram_spill_impact": "slow", "backup_stale": True,
                     "chain_last_finished": "Weekly digest (failed)"})
     got = td.attention(s)
     assert got[0] == (RED, "1 new crash event: Away blocked until reviewed", "SYS")
-    assert (RED, "model spilled out of VRAM (slow)", "HW") in got
+    assert (RED, "model spilled out of VRAM: answers slow", "HW") in got
     assert got[-2:] == [(AMBER, "chain failed: Weekly digest", "RUN"), (AMBER, "WSL backup is stale", "SYS")]
     alert = slide(s, "ALERT")
     assert alert["level"] == "alert" and alert["color"] == RED and alert["target"] == "SYS"

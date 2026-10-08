@@ -281,10 +281,16 @@ function renderVram(p) {
   tween($('vramUsed'), s.vram_used_gb, 1); $('vramTotal').textContent = `/ ${s.vram_total_gb ? Math.round(s.vram_total_gb) : '–'} GB`;
   const verdict = v.available ? v.verdict : (s.vram_evicted ? 'EVICTED' : s.vram_tight ? 'TIGHT' : 'OK');
   const pill = $('vramVerdict');
-  pill.textContent = { WONT_FIT: "WON'T FIT", EVICTED: 'SPILLED' }[verdict] || verdict || '…';
-  pill.title = { WONT_FIT: 'the default model would not fit next to what is on the card now', EVICTED: 'part of the model is in system RAM (slow)',
+  // EVICTED is the memory counter only; whether it hurts is judged by the next answer (snapshot.spill_impact)
+  const impact = s.vram_spill_impact || 'unknown', slowSpill = verdict === 'EVICTED' && impact === 'slow';
+  const spillText = { slow: 'SPILLED', fine: 'SPILL · SPEED OK', unknown: 'SPILL?' }[impact] || 'SPILL?';
+  pill.textContent = { WONT_FIT: "WON'T FIT", EVICTED: spillText }[verdict] || verdict || '…';
+  pill.title = { WONT_FIT: 'the default model would not fit next to what is on the card now',
+                 EVICTED: { slow: `part of the model is in system RAM and the last answer was slow (${s.ai_tps ?? '?'} tok/s)`,
+                            fine: `part of the model is in system RAM, but the last answer ran at its usual speed (${s.ai_tps ?? '?'} tok/s)` }[impact]
+                          || 'part of the model is in system RAM; nothing has answered since, so its speed is not known yet',
                  TIGHT: 'little room left', OK: 'room for the model' }[verdict] || '';
-  pill.className = `pill ${verdict === 'EVICTED' ? 'bad' : verdict === 'OK' ? 'ok' : 'warn'}`;
+  pill.className = `pill ${slowSpill ? 'bad' : verdict === 'OK' ? 'ok' : 'warn'}`;
   const card = v.card_gb || s.vram_total_gb || 16, parts = [];
   if (v.available) {
     if (v.ai?.dedicated_gb >= 0.05) parts.push([`AI ${(v.ai.models || []).join(', ') || 'model'}`, v.ai.dedicated_gb, 'var(--green)']);
@@ -294,14 +300,15 @@ function renderVram(p) {
   const known = parts.reduce((a, b) => a + b[1], 0), used = s.vram_used_gb || 0;
   if (used > known + 0.05) parts.push(['other', used - known, 'color-mix(in srgb, var(--dim) 50%, transparent)']);
   parts.push(['free', Math.max(0, card - Math.max(used, known)), 'transparent']);
-  const stack = $('vramStack'); stack.classList.toggle('evicted', verdict === 'EVICTED');
+  const stack = $('vramStack'); stack.classList.toggle('evicted', slowSpill);
   while (stack.children.length < parts.length) stack.append(document.createElement('i'));
   while (stack.children.length > parts.length) stack.lastChild.remove();
   parts.forEach(([n, gb, c], i) => { const el = stack.children[i]; el.style.flexGrow = Math.max(gb, 0.001); el.style.background = c; el.title = `${n}: ${gb.toFixed(1)} GB`; });
   setHTML($('vramLegend'), parts.filter((x) => x[0] !== 'free').map(([n, gb, c]) => `<span style="--c:${c}">${esc(n)} ${gb.toFixed(1)}</span>`).join(''));
   const notes = [];
   if (v.need?.model) notes.push(`${v.need.model} needs ~${v.need.gb} GB${v.spare_gb != null ? ` · ${v.spare_gb.toFixed(1)} GB spare` : ''}`);
-  if (v.evicted) notes.push('Windows pushed part of the model out to system RAM: it runs slow until VRAM frees up');
+  if (v.evicted) notes.push(`Windows moved ${v.ai?.shared_gb ?? '?'} GB of the model to system RAM: ` +
+    ({ slow: 'answers are slow until VRAM frees up', fine: 'answers still run at full speed' }[impact] || 'the next answer shows whether it slows down'));
   if (v.suggest_free?.length && verdict !== 'OK') notes.push(`free up: ${v.suggest_free.map((t) => `${t.label} ${t.gb} GB`).join(', ')}`);
   $('vramNote').textContent = notes.join(' · ');
 

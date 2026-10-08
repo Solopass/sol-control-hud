@@ -86,9 +86,13 @@ def from_snapshots(prev, curr) -> list[Notice]:
         out.append(Notice("crash", "New crash event", f"{crashes} since the last review: Away is blocked until it's reviewed "
                                                       "(right-click the ticker > Quick Actions after checking reports).",
                           "error", "crash"))
-    if curr.vram_evicted and not prev.vram_evicted:
-        out.append(Notice("vram", "Model spilled out of VRAM", f"{curr.ai_model or 'The model'} partly moved to system RAM: "
-                                                               "it runs slow until VRAM frees up (close a game/browser tab).",
+    # Only a spill that slowed a real answer: the shared-memory counter alone also trips while nothing is answering
+    # (10-06: every ~35 min all day) and when the model still runs at its usual speed.
+    if curr.vram_spill_impact == "slow" and prev.vram_spill_impact != "slow":
+        speed = f" ({curr.ai_tps:.0f} tok/s)" if curr.ai_tps else ""
+        out.append(Notice("vram", "Model spilled out of VRAM", f"{curr.ai_model or 'The model'} answers slow{speed}: "
+                                                               f"{curr.vram_spilled_gb:.1f} GB of it is in system RAM until "
+                                                               "VRAM frees up (close a game/browser tab).",
                           "warning", "vram"))
     for drive, delta in (curr.disk_trends or {}).items():
         if delta <= -DISK_FAST_GB and (prev.disk_trends or {}).get(drive, 0) > -DISK_FAST_GB:

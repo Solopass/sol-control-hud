@@ -86,7 +86,10 @@ class Snapshot:
     gpu_fan_rpm: int | None = None
     vram_used_gb: float | None = None
     vram_total_gb: float | None = None
-    vram_evicted: bool = False
+    vram_evicted: bool = False                 # the runner's shared (system RAM) memory is over the line: memory only
+    vram_spill_impact: str = ""                # while evicted: "slow" / "fine" = an answer since the spill was slow / ran
+                                               # at its usual speed; "unknown" = nothing answered since (spill_impact)
+    vram_spilled_gb: float = 0.0               # the AI runner's memory in system RAM (sol-fast keeps ~0.62 by design)
     vram_tight: bool = False
     vram_top_process: str | None = None
     vram_processes: list[dict] = field(default_factory=list)
@@ -492,8 +495,11 @@ def attention(s: "Snapshot") -> list[tuple[str, str, str]]:
         out.append((RED, f"{crashes} new crash event{'s' if crashes != 1 else ''}: Away blocked until reviewed", "SYS"))
     if s.ai_state == "offline" and s.ai_mode != "off":
         out.append((RED, "local AI router is down", "AI"))
-    if s.vram_evicted:
-        out.append((RED, "model spilled out of VRAM (slow)", "HW"))
+    if s.vram_spill_impact == "slow":
+        out.append((RED, f"model spilled out of VRAM: answers slow ({s.ai_tps:.0f} tok/s)" if s.ai_tps
+                    else "model spilled out of VRAM: answers slow", "HW"))
+    elif s.vram_spill_impact == "unknown":
+        out.append((AMBER, f"{s.vram_spilled_gb:.1f} GB of the model in system RAM: may be slow", "HW"))
     if s.gpu_hotspot is not None and s.gpu_hotspot >= HOTSPOT_ALERT_C:
         out.append((RED, f"GPU hotspot {s.gpu_hotspot}°C", "HW"))
     for d in s.disks:
@@ -515,6 +521,25 @@ def attention(s: "Snapshot") -> list[tuple[str, str, str]]:
     if s.vram_tight and not s.vram_evicted and s.ai_mode != "away":
         out.append((AMBER, "VRAM tight: the model may spill", "HW"))
     return out
+
+
+NO_SPILL = object()
+SPILL_WORD = {"unknown": "spill? speed not measured", "fine": "spill, speed OK", "slow": "EVICTED!", "": "spill"}
+
+
+def spill_impact(evicted: bool, mark, speed: dict) -> tuple[str, object]:
+    """Does the spill actually slow answers? The shared-memory counter only says some of the model sits in system RAM;
+    10-06 it said so every ~35 min all day with nothing answering, and 10-08 sol-fast held 0.62 GB there at full speed
+    (68-82 tok/s). So judge by the first real answer after the spill began. `mark` is the newest answer's id when it
+    began (NO_SPILL while not evicted); returns (impact, new mark)."""
+    if not evicted:
+        return "", NO_SPILL
+    current = speed.get("answer_id") if speed.get("current_process") else None
+    if mark is NO_SPILL:
+        mark = current                  # answers from before the spill don't count
+    if current is None or current == mark:
+        return "unknown", mark
+    return ("slow" if speed.get("slow") else "fine"), mark
 
 
 def count_note_words(text: str) -> int:
@@ -638,9 +663,12 @@ def format_slides(s: Snapshot) -> list[dict]:
     if s.unexpected_reboots > 0 or s.gpu_resets > 0:
         reset_badge = f"  ·  [CRASH x{s.unexpected_reboots + s.gpu_resets}!]"
         hw_color = "#f87171"
-    if s.vram_evicted:
-        hw_color = "#f87171"  # Red alert
+    if s.vram_spill_impact == "slow":
+        hw_color = "#f87171"  # Red alert: spilled and an answer since was slow
         vram_str = f"VRAM {vram_used}/{vram_tot}G (EVICTED!)"
+    elif s.vram_evicted:
+        hw_color = "#f87171" if reset_badge else "#fbbf24"
+        vram_str = f"VRAM {vram_used}/{vram_tot}G ({SPILL_WORD[s.vram_spill_impact]})"
     elif s.vram_tight:
         hw_color = "#f87171" if reset_badge else "#fbbf24"  # Amber warning
         vram_str = f"VRAM {vram_used}/{vram_tot}G (TIGHT)"
@@ -994,7 +1022,8 @@ def _part_color(tag: str, part: str, s: Snapshot) -> str:
             return AMBER if (s.gpu_temp or 0) >= 85 or (s.temp_rise_c or 0) >= TEMP_RISE_C else TEXT
         if p.startswith("VRAM"):
             growing = (s.vram_rise_gb or 0) >= VRAM_RISE_GB and s.ai_mode == "desk"
-            return RED if s.vram_evicted else AMBER if s.vram_tight or growing else TEXT
+            return (RED if s.vram_spill_impact == "slow" else AMBER if s.vram_evicted or s.vram_tight or growing
+                    else TEXT)
         if p.startswith("RAM"):
             return RED if s.ram_percent >= 92 else AMBER if s.ram_percent >= 85 else TEXT
     elif tag == "AI":
@@ -1103,10 +1132,13 @@ def format_multiline_rows(s: Snapshot) -> list[dict]:
     gpu_txt = f"{round(s.gpu_load)}%" if s.gpu_load is not None else "--"
     vram_used = f"{s.vram_used_gb:.1f}" if s.vram_used_gb is not None else "--"
     vram_tot = f"{s.vram_total_gb:.0f}" if s.vram_total_gb is not None else "16"
-    vram_status = "EVICTED" if s.vram_evicted else ("TIGHT" if s.vram_tight else "OK")
-    vram_status_col = "#f87171" if s.vram_evicted else ("#fbbf24" if s.vram_tight else "#4ade80")
-    if s.vram_evicted:
+    slow_spill = s.vram_spill_impact == "slow"
+    vram_status = "EVICTED" if slow_spill else "SPILL" if s.vram_evicted else ("TIGHT" if s.vram_tight else "OK")
+    vram_status_col = "#f87171" if slow_spill else ("#fbbf24" if s.vram_evicted or s.vram_tight else "#4ade80")
+    if slow_spill:
         vram_display = f"{vram_used}/{vram_tot}G (EVICTED!)"
+    elif s.vram_evicted:
+        vram_display = f"{vram_used}/{vram_tot}G ({SPILL_WORD[s.vram_spill_impact]})"
     elif s.vram_tight:
         vram_display = f"{vram_used}/{vram_tot}G (TIGHT)"
     elif s.vram_top_process:
@@ -1250,6 +1282,7 @@ class TickerCollector:
         self._last_apps = 0.0
         self._apps: dict = {"apps": [], "media": []}
         self._last_speed = 0.0
+        self._spill_mark = NO_SPILL
         self._speed: dict = {}
         self._apps_thread: threading.Thread | None = None
         self._eta = away_screen.EtaTracker()
@@ -1360,6 +1393,7 @@ class TickerCollector:
                 self._speed = speed_mod.answer_speed(models_ctl.model_processes())
             except Exception:
                 self._speed = {}
+        vram_spill_impact, self._spill_mark = spill_impact(vram_evicted, self._spill_mark, self._speed)
         sp = self._speed if self._speed.get("current_process") and time.time() - (self._speed.get("at") or 0) <= 1800 else {}
 
         # 2b. GPU Sensors (ADL: Edge/Hotspot/Mem Temp, Fan RPM)
@@ -1537,6 +1571,8 @@ class TickerCollector:
             vram_used_gb=vram_used,
             vram_total_gb=vram_total,
             vram_evicted=vram_evicted,
+            vram_spill_impact=vram_spill_impact,
+            vram_spilled_gb=round((guard_res.get("ai") or {}).get("shared_gb", 0.0), 2),
             vram_tight=vram_tight,
             vram_top_process=vram_top_process,
             vram_card_full=vram_card_full,

@@ -26,7 +26,7 @@ SLOW_FRACTION = 0.5          # below half the usual speed: say so
 USUAL_TPS = {"sol-fast": 100, "sol-vision": 100, "sol-smart": 64, "sol-long": 60}
 HEAL_RECENT_S = 30 * 60      # a heal line older than this is history, not status
 
-_EVAL = re.compile(r"^\[(\d+)\].*?\|\s+eval time =\s+([\d.]+) ms /\s+(\d+) tokens.*?([\d.]+) tokens per second")
+_EVAL = re.compile(r"^\[(\d+)\].*?(?:task\s+(\d+)\s*)?\|\s+eval time =\s+([\d.]+) ms /\s+(\d+) tokens.*?([\d.]+) tokens per second")
 _HEAL = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}) .*?Auto-heal (waiting|trigger): (.*)$")
 
 
@@ -49,9 +49,9 @@ def parse_speeds(text: str) -> list[dict]:
         if "prompt eval time" in line:
             continue
         m = _EVAL.search(line)
-        if m and int(m.group(3)) >= MIN_TOKENS:
-            out.append({"port": int(m.group(1)), "ms": float(m.group(2)), "tokens": int(m.group(3)),
-                        "tps": round(float(m.group(4)), 1)})
+        if m and int(m.group(4)) >= MIN_TOKENS:
+            out.append({"port": int(m.group(1)), "task": int(m.group(2)) if m.group(2) else None, "ms": float(m.group(3)),
+                        "tokens": int(m.group(4)), "tps": round(float(m.group(5)), 1)})
     return out
 
 
@@ -70,6 +70,7 @@ def answer_speed(procs: dict | None = None, path: Path = ROUTER_LOG) -> dict:
     except OSError:
         at = None
     return {"available": True, "model": model, "tps": last["tps"], "tokens": last["tokens"], "at": at,
+            "answer_id": (last["port"], last.get("task")),
             "recent": same, "usual": usual, "slow": bool(usual and last["tps"] < usual * SLOW_FRACTION),
             "current_process": model is not None}
 

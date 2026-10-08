@@ -1954,7 +1954,7 @@ class TickerApp:
                 self.trigger_alert(ACCENT_GREEN, "chain_completed")
 
         # 2. VRAM Eviction transition
-        if curr.vram_evicted and not prev.vram_evicted:
+        if curr.vram_spill_impact == "slow" and prev.vram_spill_impact != "slow":
             self.trigger_alert(ACCENT_RED, "vram_evicted")
 
         # 3. New crash / reset detected
@@ -2210,10 +2210,10 @@ class TickerApp:
         if s.ai_mode == "away" and s.away_fraction is not None:
             ratio = min(max(s.away_fraction, 0.0), 1.0)
             self.vram_meter.set_segments([(ratio, t["accent_green"])])
-        elif s.vram_evicted:
+        elif s.vram_spill_impact == "slow":
             ratio = min(max((s.vram_used_gb or 0.0) / tot, 0.0), 1.0)
             self.vram_meter.set_segments([(ratio, t["accent_red"])])
-        elif s.vram_tight:
+        elif s.vram_evicted or s.vram_tight:
             ratio = min(max((s.vram_used_gb or 0.0) / tot, 0.0), 1.0)
             self.vram_meter.set_segments([(ratio, t["accent_amber"])])
         else:
