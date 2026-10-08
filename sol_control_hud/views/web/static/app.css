@@ -226,6 +226,12 @@ footer #foot { margin-left:auto; }
   padding:6px 10px; border-radius:8px; background:var(--badge); font-size:13px; }
 .crow .meta { color:var(--dim); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .crow .acts { display:flex; gap:4px; justify-content:flex-end; flex-wrap:wrap; }
+/* the game guard turned the AI off: why, and the buttons that answer it */
+.guard { border-left:2px solid var(--amber); padding:6px 0 6px 9px; margin:0 0 10px; }
+.guard[hidden] { display:none; }
+.guard-why { font-size:12px; line-height:1.4; }
+.guard-acts { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+
 /* "rendering on a GPU with no monitor" warning under the GPU chart */
 .wrong-gpu { border-left:2px solid var(--amber); padding:5px 0 5px 8px; margin-top:8px; color:var(--text); line-height:1.45; }
 .wrong-gpu[hidden] { display:none; }

@@ -334,6 +334,21 @@ class Hub:
             return r
         if action in ("project", "media"):
             return self._launch(action, target, str((body or {}).get("op", "")), body or {})
+        if action in ("guard_ignore", "guard_resume"):
+            # the guard turned the AI off for something that is not a game: say so once, instead of editing the
+            # config by hand (09-25 Notepad and Edge, 09-27 claude x3, 10-07/08 steamwebhelper x5)
+            from . import game_guard
+            if action == "guard_resume":
+                r = game_guard.resume()
+            else:
+                g = self.collectors["guard"].get() if hasattr(self, "collectors") else {}
+                if not (g or {}).get("can_ignore") or (target and target != (g or {}).get("name")):
+                    return {"ok": False, "why": "that is not what turned the AI off"}
+                r = game_guard.ignore((g or {}).get("name"))
+            log(f"{action} {target}: {r.get('why')}")
+            if hasattr(self, "collectors") and "guard" in self.collectors:
+                self.collectors["guard"].value = None
+            return r
         if action == "close_port":
             # ports.close_listener looks the port up itself and refuses the AI stack, Windows services and us
             from .data.collectors import ports
@@ -601,6 +616,8 @@ class Hub:
             lambda: displays.report(self.collector._sampler.last_util, lambda p: gpu.process_name(p, gpu_names)), 10)
         self._decode_watch = decode.SoftwareDecodeWatch()
         self.collectors["decode"] = Cached(lambda: self._decode_watch.update(self.collector._sampler.last_util), 10)
+        from . import game_guard                       # why the AI is off, and the buttons that answer it
+        self.collectors["guard"] = Cached(game_guard.state, 3)
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -755,6 +772,11 @@ class Hub:
             chips = (self.collectors["gpu"].get() or {}).get("pid_chips") or {}
             data["listening"] = [{**r, "chip": chips.get(r.get("pid"))} for r in data.get("listening") or []]
             return {"ok": True, **data}
+
+        @app.get("/api/guard")
+        def guard_state() -> dict:
+            """Why the local AI is off, and whether a button can answer it (the AI card polls this)."""
+            return {"ok": True, **(self.collectors["guard"].get() or {})}
 
         @app.get("/api/displays")
         def display_adapters() -> dict:
