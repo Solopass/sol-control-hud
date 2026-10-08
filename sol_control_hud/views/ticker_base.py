@@ -10,6 +10,7 @@ try:
 except ImportError:
     winsound = None
 from ..paths import DATA_DIR
+from ..swallow import note as _swallowed
 
 
 def play_alert_sound(sound_type: int | None = None) -> None:
@@ -19,7 +20,7 @@ def play_alert_sound(sound_type: int | None = None) -> None:
     try:
         threading.Thread(target=winsound.MessageBeep, args=(st,), daemon=True).start()
     except Exception:
-        pass
+        _swallowed("ticker_base.play_alert_sound")
 
 
 HUD_WEB_URL = "http://127.0.0.1:7900"

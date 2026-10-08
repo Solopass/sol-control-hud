@@ -7,6 +7,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
+from ..swallow import note as _swallowed
 
 PRESETS = {
     "eco": {
@@ -337,7 +338,7 @@ class SettingsDialog:
                 txt = f"📊 Live HUD Overhead: {cpu:.1f}% CPU  ·  {ram:.1f} MB RAM  ·  Loop Latency: {lat:.1f} ms"
                 self.overhead_lbl.configure(text=txt)
             except Exception:
-                pass
+                _swallowed("settings_dialog.SettingsDialog._update_overhead_meter")
         self.win.after(2000, self._update_overhead_meter)
 
     def _position_window(self) -> None:
@@ -369,5 +370,5 @@ class SettingsDialog:
             try:
                 self.on_save(new_settings)
             except Exception:
-                pass
+                _swallowed("settings_dialog.SettingsDialog._on_save_clicked")
         self.win.destroy()

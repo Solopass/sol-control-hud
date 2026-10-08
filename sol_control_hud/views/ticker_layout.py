@@ -10,6 +10,7 @@ from .widgets import SegmentedBar, Sparkline
 from .ticker_base import DEFAULT_FONT_SCALE, FONT_SCALES, MULTI_HEIGHT, SINGLE_HEIGHT, WIDTH, WINDOW_TITLE
 from .ticker_widgets import SegmentLabel, Tooltip
 from .ticker_win import clamp_rect, dock_width, dpi_factor, get_screen_and_work_area, monitor_rects, start_button_left
+from ..swallow import note as _swallowed
 
 
 class TickerLayoutMixin:
@@ -66,7 +67,7 @@ class TickerLayoutMixin:
             style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
             ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
         except Exception:
-            pass
+            _swallowed("ticker_layout.TickerLayoutMixin._configure_window")
 
     def _apply_geometry(self, initial: bool = False) -> None:
         scale_info = FONT_SCALES.get(self.font_scale, FONT_SCALES[DEFAULT_FONT_SCALE])

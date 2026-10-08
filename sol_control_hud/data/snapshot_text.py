@@ -8,6 +8,7 @@ from .snapshot_model import (
     AMBER, CYAN, DISK_TREND_GB, GIT_OLD_DAYS, GREEN, HOTSPOT_ALERT_C, MUTED, RED, SEP, SERVICE_ORDER, SPILL_WORD,
     Snapshot, TEMP_RISE_C, TEXT, VRAM_RISE_GB, joined, plain,
 )
+from ..swallow import note as _swallowed
 
 
 def disk_color(d: dict, trend: float | None) -> str:
@@ -600,7 +601,7 @@ def format_multiline_rows(s: Snapshot) -> list[dict]:
         try:
             mode_display = f"away until {s.ai_until.split('T')[-1][:5]}"
         except Exception:
-            pass
+            _swallowed("snapshot_text.format_multiline_rows")
     elif s.ai_mode == "off" and s.ai_reason:
         mode_display = f"off: {s.ai_reason.removeprefix('game: ')}"
 

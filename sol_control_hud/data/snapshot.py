@@ -36,6 +36,7 @@ from .snapshot_text import (  # noqa: F401 - moved verbatim; old imports keep wo
     _part_color, attention, chain_result_color, colorize, disk_color, format_multiline_rows,
     format_rate, format_slides, review_slide, rotation, slide_level,
 )
+from ..swallow import note as _swallowed
 
 
 def gpu_lock_held(path: Path | None = None) -> bool:
@@ -159,7 +160,7 @@ def read_last_finished_chain(path: Path = CHAINS_LOG_FILE) -> str | None:
                             return f"{name} (failed)"
                 return line[:40]
     except Exception:
-        pass
+        _swallowed("snapshot.read_last_finished_chain")
     return None
 
 
@@ -375,7 +376,7 @@ def read_daily_note_status(vault_dir: Path | None = None) -> tuple[bool, int, st
             try:
                 y_words = count_note_words(y_path.read_text(encoding="utf-8", errors="replace"))
             except Exception:
-                pass
+                _swallowed("snapshot.read_daily_note_status")
         return False, y_words, None, note_path
     try:
         st = note_path.stat()
@@ -416,9 +417,9 @@ def check_workspace_git(workspace_dir: Path | None = None) -> tuple[int, list[st
                 if res.returncode == 0 and res.stdout.strip():
                     dirty_repos.append(d.name)
             except Exception:
-                pass
+                _swallowed("snapshot.check_workspace_git")
     except Exception:
-        pass
+        _swallowed("snapshot.check_workspace_git")
     return len(dirty_repos), dirty_repos, total
 
 
@@ -605,7 +606,7 @@ class TickerCollector:
             try:
                 self._stability_data = system.stability()
             except Exception:
-                pass
+                _swallowed("snapshot.TickerCollector.collect_once")
             self._last_stability = now
         gpu_resets = self._stability_data.get("gpu_driver_resets", 0)
         whea_errors = self._stability_data.get("whea", 0)
@@ -620,7 +621,7 @@ class TickerCollector:
                                               if "drive" in d and "free_gb" in d}))
                 self._disk_hist = [h for h in self._disk_hist if now - h[0] <= DISK_TREND_WINDOW + 600]
             except Exception:
-                pass
+                _swallowed("snapshot.TickerCollector.collect_once")
             try:
                 self._night = night_summary(now=now)
             except Exception:
@@ -645,7 +646,7 @@ class TickerCollector:
                             ages[name] = age
                     self._git_ages = ages
                 except Exception:
-                    pass
+                    _swallowed("snapshot.TickerCollector.collect_once.scan")
             self._git_thread = threading.Thread(target=scan, name="ticker-git", daemon=True)
             self._git_thread.start()
         git_dirty_count, git_dirty_repos, git_total_repos = self._git_data
@@ -660,7 +661,7 @@ class TickerCollector:
                     from .collectors.media_apis import launchpad_summary
                     self._apps = launchpad_summary(wsl_running())
                 except Exception:
-                    pass
+                    _swallowed("snapshot.TickerCollector.collect_once.scan_apps")
             self._apps_thread = threading.Thread(target=scan_apps, name="ticker-apps", daemon=True)
             self._apps_thread.start()
 
@@ -678,7 +679,7 @@ class TickerCollector:
             self._last_net_bytes = (counters.bytes_sent, counters.bytes_recv)
             self._last_net_time = now
         except Exception:
-            pass
+            _swallowed("snapshot.TickerCollector.collect_once")
 
         # 10. Services
         services = probe_services(router_up=ai_state != "offline")
@@ -705,7 +706,7 @@ class TickerCollector:
                     self._self_cpu = self._proc.cpu_percent(interval=None)
                     self._self_ram_mb = self._proc.memory_info().rss / (1024.0 * 1024.0)
                 except Exception:
-                    pass
+                    _swallowed("snapshot.TickerCollector.collect_once")
                 self._last_self_check = now
         else:
             self._self_cpu = 0.0
@@ -821,6 +822,6 @@ class TickerCollector:
             try:
                 self.collect_once()
             except Exception:
-                pass
+                _swallowed("snapshot.TickerCollector._run")
             if self._stop.wait(self.interval):   # the hub slows this down while nobody is looking
                 break

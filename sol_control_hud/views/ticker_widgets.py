@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 from .ticker_base import BG_CARD, BORDER_COLOR, TEXT_MAIN
 from .ticker_win import get_screen_and_work_area
+from ..swallow import note as _swallowed
 
 
 def truncate_text(text: str, font: tkfont.Font, max_pixels: int) -> str:
@@ -89,7 +90,7 @@ class SegmentLabel(tk.Canvas):
             try:
                 self.after_cancel(self._anim_timer)
             except Exception:
-                pass
+                _swallowed("ticker_widgets.SegmentLabel.animate_slide_in")
             self._anim_timer = None
 
         offsets = [14, 7, 2, 0]
@@ -144,7 +145,7 @@ class Tooltip:
             try:
                 self._lbl.configure(text=text)
             except Exception:
-                pass
+                _swallowed("ticker_widgets.Tooltip.set_text")
 
     def _on_enter(self, event=None) -> None:
         self._cancel()
@@ -160,7 +161,7 @@ class Tooltip:
             try:
                 self.widget.after_cancel(self._timer)
             except Exception:
-                pass
+                _swallowed("ticker_widgets.Tooltip._cancel")
             self._timer = None
 
     def show(self) -> None:
@@ -191,13 +192,13 @@ class Tooltip:
             self._lbl.pack(padx=1, pady=1)
             tw.wm_geometry(f"+{x}+{y}")
         except Exception:
-            pass
+            _swallowed("ticker_widgets.Tooltip.show")
 
     def hide(self) -> None:
         if self.tip_window:
             try:
                 self.tip_window.destroy()
             except Exception:
-                pass
+                _swallowed("ticker_widgets.Tooltip.hide")
             self.tip_window = None
             self._lbl = None

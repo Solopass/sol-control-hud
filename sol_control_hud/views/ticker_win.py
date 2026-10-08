@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import wintypes
+from ..swallow import note as _swallowed
 
 
 _START_PS = (
@@ -47,7 +48,7 @@ def monitor_dpi(x: int, y: int) -> int:
         if ctypes.windll.shcore.GetDpiForMonitor(hmon, 0, ctypes.byref(dx), ctypes.byref(dy)) == 0:
             return int(dx.value)
     except Exception:  # noqa: BLE001
-        pass
+        _swallowed("ticker_win.monitor_dpi")
     return 96
 
 
@@ -81,7 +82,7 @@ def monitor_rects(x: int, y: int) -> tuple[tuple[int, int, int, int], tuple[int,
             m, w = info.rcMonitor, info.rcWork
             return (m.left, m.top, m.right, m.bottom), (w.left, w.top, w.right, w.bottom)
     except Exception:
-        pass
+        _swallowed("ticker_win.monitor_rects")
     (l, t, r, b), sw, sh = get_screen_and_work_area()
     return (0, 0, sw, sh), (l, t, r, b)
 
@@ -102,7 +103,7 @@ def raise_topmost(hwnd: int) -> None:
         ctypes.windll.user32.SetWindowPos(wintypes.HWND(hwnd), wintypes.HWND(HWND_TOPMOST), 0, 0, 0, 0,
                                           SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
     except Exception:
-        pass
+        _swallowed("ticker_win.raise_topmost")
 
 
 TASKBAR_CLASSES = ("Shell_TrayWnd", "Shell_SecondaryTrayWnd")

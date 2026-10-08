@@ -9,6 +9,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import font as tkfont
 import webbrowser
+from ..swallow import note as _swallowed
 
 CRASH_WATCH_PATH = Path(r"D:\OBVLT\reports\crash-watch.md")
 ACK_FILE = Path(r"D:\OBVLT\reports\stability-ack.json")
@@ -32,7 +33,7 @@ def parse_unacknowledged_crashes(report_path: Path = CRASH_WATCH_PATH) -> list[d
                         "resume": parts[4].replace("**", "").strip() if len(parts) > 4 else "-",
                     })
     except Exception:
-        pass
+        _swallowed("crash_dialog.parse_unacknowledged_crashes")
     return new_events
 
 
@@ -185,13 +186,13 @@ class CrashInspectorDialog:
             from .ticker import write_crash_ack
             write_crash_ack(ACK_FILE)
         except Exception:
-            pass
+            _swallowed("crash_dialog.CrashInspectorDialog._on_ack_clicked")
 
         if self.on_cleared:
             try:
                 self.on_cleared()
             except Exception:
-                pass
+                _swallowed("crash_dialog.CrashInspectorDialog._on_ack_clicked")
 
         self.win.destroy()
 

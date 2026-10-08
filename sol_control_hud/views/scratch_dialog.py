@@ -9,6 +9,7 @@ from pathlib import Path
 import time
 import tkinter as tk
 from tkinter import font as tkfont
+from ..swallow import note as _swallowed
 
 POLYMATICA_VAULT = Path(r"D:\Polymatica Vault")
 OBVLT_VAULT = Path(r"D:\OBVLT")
@@ -271,7 +272,7 @@ class QuickScratchDialog:
                 try:
                     self.on_saved(target_path, content)
                 except Exception:
-                    pass
+                    _swallowed("scratch_dialog.QuickScratchDialog._on_save")
             self.win.destroy()
         else:
             self.status_lbl.configure(text=f"Failed to save: {msg}", fg=self.theme["accent_red"])

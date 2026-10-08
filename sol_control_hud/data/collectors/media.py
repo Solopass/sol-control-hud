@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import threading
 import time
+from ...swallow import note as _swallowed
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "media_session.ps1"
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
@@ -98,7 +99,7 @@ class MediaCollector:
             if res.returncode == 0 and res.stdout.strip():
                 return self._store(parse_line(res.stdout.strip()))
         except Exception:
-            pass
+            _swallowed("media.MediaCollector.poll_once")
         return MediaInfo()
 
     def _store(self, info: MediaInfo) -> MediaInfo:
@@ -122,7 +123,7 @@ class MediaCollector:
                     if line.strip():
                         self._store(parse_line(line.strip()))
             except Exception:
-                pass
+                _swallowed("media.MediaCollector._run")
             finally:
                 self._kill()
             self._stop.wait(15.0)
@@ -200,5 +201,5 @@ def focus_media_app(app_name: str | None = None, title: str | None = None) -> bo
             user32.SetForegroundWindow(matched_hwnd)
             return True
     except Exception:
-        pass
+        _swallowed("media.focus_media_app")
     return False

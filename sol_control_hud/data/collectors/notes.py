@@ -7,6 +7,7 @@ import time
 import urllib.parse
 from pathlib import Path
 from typing import Any
+from ...swallow import note as _swallowed
 
 DEFAULT_VAULTS: dict[str, Path] = {
     "OBVLT": Path(r"D:\OBVLT"),
@@ -30,7 +31,7 @@ def discover_vaults() -> dict[str, Path]:
                         if p.exists() and p.is_dir():
                             vaults[p.name] = p
             except Exception:
-                pass
+                _swallowed("notes.discover_vaults")
     # Always include known default vaults if they exist on disk
     for name, path in DEFAULT_VAULTS.items():
         if path.exists() and path.is_dir() and name not in vaults:
@@ -97,7 +98,7 @@ def extract_metadata(file_path: Path) -> tuple[list[str], int]:
                 elif stripped.startswith("- ") and tags:
                     tags.append(stripped[2:].strip().strip("'\"#"))
     except Exception:
-        pass
+        _swallowed("notes.extract_metadata")
     return tags, words
 
 
@@ -142,7 +143,7 @@ def scan_vault_notes(vault_name: str = "OBVLT", force: bool = False) -> list[dic
                     "_path": full_path,
                 })
     except Exception:
-        pass
+        _swallowed("notes.scan_vault_notes")
 
     notes.sort(key=lambda x: x["mtime"], reverse=True)
 

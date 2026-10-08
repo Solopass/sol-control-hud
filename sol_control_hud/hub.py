@@ -34,6 +34,7 @@ from . import health, heal, models_ctl
 from .data.collectors import engines, vram
 from .data.snapshot import RED, TickerCollector, attention, format_multiline_rows, format_slides
 from .paths import DATA_DIR
+from .swallow import note as _swallowed
 
 SETTINGS_FILE = DATA_DIR / "hub-settings.json"
 LOCK_FILE = DATA_DIR / "hub.lock"
@@ -95,8 +96,10 @@ def read_health_logs(now: float | None = None) -> dict:
     """The log half of the HUD health card: unexpected ends and the newest real errors (last 64 KB of each log)."""
     from .views.ticker import LOG_FILE as TICKER_LOG
     hub_text = health.tail(LOG_FILE)
+    from .swallow import LOG_FILE as SWALLOWED_LOG
     return {"restarts": health.restarts(hub_text, now),
-            "errors": health.errors([("hub", hub_text), ("ticker", health.tail(TICKER_LOG))])}
+            "errors": health.errors([("hub", hub_text), ("ticker", health.tail(TICKER_LOG))]),
+            "handled": health.handled(health.tail(SWALLOWED_LOG), now)}
 
 
 def clear_running_marker(path=None) -> None:
@@ -1200,7 +1203,7 @@ class Hub:
             try:
                 step()
             except Exception:  # noqa: BLE001 - leave no matter what
-                pass
+                _swallowed("hub.Hub._shutdown")
         os._exit(0)
 
 
@@ -1243,7 +1246,7 @@ def main(argv: list[str] | None = None) -> None:
             ctypes.windll.user32.SetThreadDesktop(hdesk)
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:  # noqa: BLE001
-        pass
+        _swallowed("hub.main")
     show_ticker, show_dashboard = views_for(args.show, settings)
     if args.open_dashboard:
         show_dashboard = True          # your saved ticker choice stays as it was

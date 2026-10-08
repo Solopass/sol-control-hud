@@ -119,6 +119,21 @@ def _headline(lines: list[str]) -> str:
     return lines[0]
 
 
+def handled(text: str, now: float | None = None, hours: float = 24, n: int = SHOWN_ERRORS) -> dict:
+    """data/swallowed.log (swallow.note): errors the code carried on after. Each place + kind is written at most once
+    an hour, so this counts distinct problems, not how often they happened. Shown on the card; never sets the level."""
+    now = time.time() if now is None else now
+    recent = []
+    for line in text.splitlines():
+        m = _TS.match(line)
+        t = _ts(m.group(1)) if m else None
+        if t is not None and now - t <= hours * 3600:
+            where, _, what = m.group(2).partition(": ")
+            recent.append({"at": t, "where": where, "text": what[:200]})
+    recent.sort(key=lambda e: e["at"], reverse=True)
+    return {"day": len(recent), "places": len({e["where"].split(" (")[0] for e in recent}), "recent": recent[:n]}
+
+
 def stale(checks: list[tuple[str, float | None, float, bool]], now: float | None = None) -> list[dict]:
     """checks: (name, last good time.time() or None, its interval s, its thread alive). The ones that need a look."""
     now = time.time() if now is None else now

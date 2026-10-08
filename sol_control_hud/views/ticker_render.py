@@ -10,6 +10,7 @@ except ImportError:
 from ..data.snapshot import attention
 from .ticker_base import ACCENT_CYAN, DEFAULT_FONT_SCALE, FONT_SCALES, play_alert_sound
 from .ticker_widgets import interpolate_color
+from ..swallow import note as _swallowed
 
 
 class TickerRenderMixin:
@@ -80,7 +81,7 @@ class TickerRenderMixin:
             try:
                 self.root.after_cancel(self._pulse_timer)
             except Exception:
-                pass
+                _swallowed("ticker_render.TickerRenderMixin.trigger_alert")
             self._pulse_timer = None
 
         self._pulse_color = chosen_color

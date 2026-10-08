@@ -18,6 +18,7 @@ from pathlib import Path
 import psutil
 
 from .data.collectors.engines import LLAMA_SWAP, _client
+from .swallow import note as _swallowed
 
 MODELS_JSON = Path(os.environ.get("SOL_MODELS", r"D:\OBVLT\tools\models.json"))
 LOCAL_AI = Path(os.environ.get("SOL_LOCAL_AI", r"D:\OBVLT\configs\local-ai.json"))
@@ -133,4 +134,4 @@ def _quiet(fn, *a):
     try:
         fn(*a)
     except Exception:  # noqa: BLE001 - the next status update shows what really happened
-        pass
+        _swallowed("models_ctl._quiet")

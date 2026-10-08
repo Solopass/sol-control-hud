@@ -834,6 +834,12 @@ async function loadHealth() {
   setHTML($('healthErrors'), (h.errors || []).length
     ? h.errors.map((e) => `<details><summary><span class="dim">${esc(when(e.at))} ${esc(e.source)}</span> ${esc(e.text)}</summary><pre>${esc(e.detail)}</pre></details>`).join('')
     : '<div class="note">no errors in its logs</div>');
+  const q = h.handled || {};                   // swallow.note: errors it carried on after (one line per place an hour)
+  setHTML($('healthHandled'), q.day
+    ? `<details><summary><span class="dim">handled quietly, last 24 h:</span> ${q.day} at ${q.places} place${q.places === 1 ? '' : 's'}</summary>`
+      + `<pre>${esc((q.recent || []).map((e) => `${when(e.at)} ${e.where}: ${e.text}`).join('
+'))}</pre></details>`
+    : '');
 }
 loadHealth();
 setInterval(loadHealth, 15000);

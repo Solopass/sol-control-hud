@@ -92,3 +92,17 @@ def test_level():
     assert health.level({"restarts": {"week": 0, "day": 0}, "stale": [], "broken": ["disks"]}) == "warn"
     assert health.level({"restarts": {"week": 3, "day": 3}, "stale": [], "broken": []}) == "bad"
     assert health.level({"restarts": {}, "stale": [{"name": "x", "age_s": 1, "why": "stopped"}], "broken": []}) == "bad"
+
+
+def test_handled_counts_the_last_day_from_the_swallowed_log():
+    log = "\n".join([
+        "2026-10-06T10:00:00 ticker.TickerApp._render (_render line 3): ValueError: old",          # 2 days ago
+        "2026-10-08T09:00:00 ticker.TickerApp._render (_render line 3): ValueError: bad width",
+        "2026-10-08T11:00:00 ticker.TickerApp._render (_render line 3): ValueError: bad width",
+        "2026-10-08T12:00:00 snapshot.read_state (read_state line 9): OSError: locked",
+    ])
+    h = health.handled(log, now=NOW)
+    assert (h["day"], h["places"]) == (3, 2)
+    assert h["recent"][0] == {"at": datetime(2026, 10, 8, 12).timestamp(), "where": "snapshot.read_state (read_state line 9)",
+                              "text": "OSError: locked"}
+    assert health.level({"restarts": {"week": 0, "day": 0}, "stale": [], "broken": [], "handled": h}) == "ok"   # info only

@@ -45,6 +45,7 @@ from .ticker_widgets import (  # noqa: F401 - moved verbatim; old imports keep w
 )
 from .ticker_layout import TickerLayoutMixin
 from .ticker_render import TickerRenderMixin
+from ..swallow import note as _swallowed
 
 
 # Constants & Paths
@@ -73,14 +74,14 @@ def activate_existing_instance() -> None:
         TRIGGER_FILE.parent.mkdir(parents=True, exist_ok=True)
         TRIGGER_FILE.write_text(str(time.time()), encoding="utf-8")
     except Exception:
-        pass
+        _swallowed("ticker.activate_existing_instance")
 
     try:
         hdesk = ctypes.windll.user32.OpenDesktopW("Default", 0, False, 0x01FF)
         if hdesk:
             ctypes.windll.user32.SetThreadDesktop(hdesk)
     except Exception:
-        pass
+        _swallowed("ticker.activate_existing_instance")
 
     try:
         hwnd = ctypes.windll.user32.FindWindowW(None, WINDOW_TITLE)
@@ -95,7 +96,7 @@ def activate_existing_instance() -> None:
                                               SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
             ctypes.windll.user32.SetForegroundWindow(hwnd)
     except Exception:
-        pass
+        _swallowed("ticker.activate_existing_instance")
 
 
 ACK_FILE = Path(r"D:\OBVLT\reports\stability-ack.json")
@@ -179,7 +180,7 @@ def get_available_chains(chains_dir: Path | None = None) -> list[tuple[str, Path
                 continue
             chains.append((name, f))
     except Exception:
-        pass
+        _swallowed("ticker.get_available_chains")
     chains.sort(key=lambda x: x[0].lower())
     return chains
 
@@ -348,7 +349,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                 if self._raises <= 3 or self._raises % 100 == 0:   # enough to see it working, never a flood
                     log_event(f"raised above the taskbar (#{self._raises})")
         except Exception:
-            pass
+            _swallowed("ticker.TickerApp._keep_on_top")
         self.root.after(500, self._keep_on_top)   # cheap check (no redraw unless covered), so it can run twice a second
 
 
@@ -395,11 +396,11 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                     else:
                         client.post("http://127.0.0.1:11440/models/load", json={"model": model_id})
             except Exception:
-                pass
+                _swallowed("ticker.TickerApp.switch_ai_model._do_switch")
             try:
                 self.root.after(400, self._on_data_tick)
             except Exception:
-                pass
+                _swallowed("ticker.TickerApp.switch_ai_model._do_switch")
 
         threading.Thread(target=_do_switch, name="model-switch-worker", daemon=True).start()
         pulse_col = self.get_theme()["accent_amber"] if model_id == "unload" else self.get_theme()["accent_primary"]
@@ -414,7 +415,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             else:
                 set_chain_status(chain_path, "queued")
         except Exception:
-            pass
+            _swallowed("ticker.TickerApp.launch_chain")
         self.trigger_alert(self.get_theme()["accent_green"], "chain_queued")
         self.root.after(300, self._on_data_tick)
 
@@ -576,7 +577,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                     init_content = tmpl_path.read_text(encoding="utf-8") if tmpl_path.exists() else "hidden: false\ntitle: \ntags: \nNote:\n\n"
                     note_path.write_text(init_content, encoding="utf-8")
                 except Exception:
-                    pass
+                    _swallowed("ticker.TickerApp._open_slide_target")
             uri = f"obsidian://open?vault=Polymatica%20Vault&file={year}%2F{date_str}"
             opened = False
             try:
@@ -587,7 +588,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                     webbrowser.open(uri)
                     opened = True
                 except Exception:
-                    pass
+                    _swallowed("ticker.TickerApp._open_slide_target")
             if not opened:
                 if note_path.exists():
                     os.startfile(str(note_path))
@@ -601,7 +602,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             try:
                 subprocess.Popen(["cmd", "/c", "start", "ms-settings:network"], creationflags=0x08000000 if os.name == "nt" else 0)
             except Exception:
-                pass
+                _swallowed("ticker.TickerApp._open_slide_target")
         elif any(k in tag_u for k in ("DISK", "SYS", "STORAGE", "SYSTEM")):
             if "SYS" in tag_u and (self.latest_snap.unexpected_reboots > 0 or self.latest_snap.gpu_resets > 0):
                 rep_dir = Path(r"D:\OBVLT\reports")
@@ -628,7 +629,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                         creationflags=0x08000000 if os.name == "nt" else 0,
                     )
                 except Exception:
-                    pass
+                    _swallowed("ticker.TickerApp.switch_ai_mode._runner")
                 self.refresh_data_now()
             threading.Thread(target=_runner, daemon=True).start()
         self.trigger_alert(ACCENT_CYAN, "ai_mode")
@@ -667,7 +668,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             write_crash_ack(ACK_FILE)
             self.refresh_data_now()
         except Exception:
-            pass
+            _swallowed("ticker.TickerApp.acknowledge_crashes")
 
     def refresh_data_now(self) -> None:
         """Forces an immediate data collection across all feeds and updates the UI."""
@@ -678,7 +679,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                 if self.root.winfo_exists():
                     self.root.after(0, self._on_data_tick)
             except Exception:
-                pass
+                _swallowed("ticker.TickerApp.refresh_data_now._collect")
         threading.Thread(target=_collect, daemon=True).start()
 
     def _on_tag_click(self) -> None:
@@ -736,7 +737,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             try:
                 self.root.after_cancel(self._peek_cancel_timer)
             except Exception:
-                pass
+                _swallowed("ticker.TickerApp._on_mini_enter")
             self._peek_cancel_timer = None
         if not self._is_peeking:
             self._is_peeking = True
@@ -752,7 +753,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                 try:
                     self.root.after_cancel(self._peek_cancel_timer)
                 except Exception:
-                    pass
+                    _swallowed("ticker.TickerApp._on_mini_leave")
             self._peek_cancel_timer = self.root.after(450, self._collapse_peek)
 
     def _collapse_peek(self) -> None:
@@ -1031,7 +1032,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
         try:
             os.startfile(str(SETTINGS_FILE))
         except Exception:
-            pass
+            _swallowed("ticker.TickerApp.open_settings_file")
 
     def toggle_startup_menu(self) -> None:
         if self.hub:                       # one place for it (the tray and the dashboard show the same switch)
@@ -1057,12 +1058,12 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                 self.root.attributes("-topmost", True)
                 self.trigger_alert(ACCENT_CYAN, "activated")
         except Exception:
-            pass
+            _swallowed("ticker.TickerApp._check_activation_trigger")
         finally:
             try:
                 self.root.after(350, self._check_activation_trigger)
             except Exception:
-                pass
+                _swallowed("ticker.TickerApp._check_activation_trigger")
 
     def set_mode(self, new_mode: str) -> None:
         if new_mode not in ("mini", "single", "multi"):
@@ -1074,7 +1075,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             try:
                 self.root.after_cancel(self._peek_cancel_timer)
             except Exception:
-                pass
+                _swallowed("ticker.TickerApp.set_mode")
             self._peek_cancel_timer = None
 
         self.mini_frame.pack_forget()
@@ -1172,7 +1173,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             try:
                 self.root.after_cancel(self._pulse_timer)
             except Exception:
-                pass
+                _swallowed("ticker.TickerApp.quit")
             self._pulse_timer = None
         self.collector.stop()
         self._save_settings()
@@ -1180,11 +1181,11 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             if TRIGGER_FILE.exists():
                 TRIGGER_FILE.unlink()
         except Exception:
-            pass
+            _swallowed("ticker.TickerApp.quit")
         try:
             self.root.destroy()
         except Exception:
-            pass
+            _swallowed("ticker.TickerApp.quit")
         os._exit(0)
 
 
@@ -1200,7 +1201,7 @@ def main() -> None:
         if hdesk:
             ctypes.windll.user32.SetThreadDesktop(hdesk)
     except Exception:
-        pass
+        _swallowed("ticker.main")
 
     # Single-instance enforcement via Windows msvcrt file locking
     _instance_lock = acquire_instance_lock()
@@ -1216,7 +1217,7 @@ def main() -> None:
         try:
             ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
-            pass
+            _swallowed("ticker.main")
 
     import traceback
     if sys.stderr is None or sys.stdout is None:   # pythonw: print()/warnings would raise on a None stream
