@@ -132,7 +132,7 @@ class ExamHudWindow:
 
         self.bad_btn = tk.Button(
             btn_frame,
-            text="👎 Mark Bad (Gemini)",
+            text="🔍 Verify / Retry (Gemini)",
             command=self._on_click_retry,
             bg="#ef4444",
             fg="#ffffff",
@@ -214,7 +214,7 @@ class ExamHudWindow:
             self.bad_btn.config(state=tk.DISABLED, text="✓ Gemini Checked")
         else:
             self.badge_lbl.config(text="⚡ sol-vision (local)", fg="#94a3b8")
-            self.bad_btn.config(state=tk.NORMAL, text="👎 Mark Bad (Gemini)")
+            self.bad_btn.config(state=tk.NORMAL, text="🔍 Verify / Retry (Gemini)")
 
         self.txt.config(state=tk.NORMAL)
         self.txt.delete("1.0", tk.END)

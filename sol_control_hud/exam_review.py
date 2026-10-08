@@ -255,6 +255,11 @@ class ReviewWatcher:
             s = json.loads(json.dumps(self._s))
         s["running"] = bool(self._thread and self._thread.is_alive())
         s["parts_count"] = len(self._additional_snips) + (1 if self._last_png_bytes else 0)
+        try:
+            from . import gemini_solver
+            s["has_gemini_key"] = bool(gemini_solver.get_api_key(self._settings_path))
+        except Exception:
+            s["has_gemini_key"] = False
         return s
 
     def _set(self, **kw) -> None:

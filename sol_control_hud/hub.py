@@ -344,10 +344,10 @@ class Hub:
                 self.collectors["ports"].value = None      # the card lists what's left on its next poll
             return r
         if action == "review":                    # the Exam review card (exam_review.py)
-            return self.review_action(target)
+            return self.review_action(target, body or {})
         return {"ok": False, "why": f"unknown action {action!r}"}
 
-    def review_action(self, target: str) -> dict:
+    def review_action(self, target: str, body: dict | None = None) -> dict:
         from . import exam_review
         w = exam_review.watcher()
         if target == "pick":                      # the box is drawn on the Tk thread
@@ -359,13 +359,23 @@ class Hub:
                 return {"ok": False, "why": "no review note yet: it's made with the first missed question"}
             os.startfile(note)
             return {"ok": True, "why": "opening today's review note"}
-        if target in ("retry_gemini", "bad"):
+        if target in ("retry_gemini", "bad", "verify"):
             r = w.retry_gemini()
             if r.get("ok") and r.get("item"):
                 self.notify_now("Gemini Solution", f"Ans: {r['item'].get('answer')}")
                 self.cmds.put(("review_update_hud", r["item"]))
             log(f"exam review: retry_gemini -> {r.get('why')}")
             return r
+        if target == "set_key":
+            b = body or {}
+            key = str(b.get("key", "")).strip()
+            if not key:
+                return {"ok": False, "why": "API key cannot be empty"}
+            s = exam_review.load_settings()
+            s["gemini_api_key"] = key
+            exam_review.save_settings(s)
+            log("exam review: saved Gemini API key to exam-review.json")
+            return {"ok": True, "why": "Gemini API key saved"}
         if target == "add_snip":
             r = w.add_snip()
             log(f"exam review: add_snip -> {r.get('why')}")
