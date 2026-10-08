@@ -26,6 +26,7 @@ KINDS = {  # kind -> label for the settings
     "disk": "A disk filling up fast",
     "vram": "A model spilled out of VRAM",
     "answer": "An overnight answer is ready",
+    "media_stuck": "A media job got stuck",
 }
 DEFAULTS = {"enabled": True, "kinds": {k: True for k in KINDS}, "quiet": "23:00-08:00"}
 REPEAT_S = 600.0
@@ -101,6 +102,22 @@ def from_snapshots(prev, curr) -> list[Notice]:
     return out
 
 
+def from_media(tiles: list[dict], seen: set[str]) -> list[Notice]:
+    """One notice per media job that got stuck (media_apis.stuck_jobs: the file says queued/processing, the service
+    isn't running). `seen` remembers which were already told, so a stuck job is told once, not every check."""
+    out = []
+    for t in tiles or []:
+        for s in t.get("stuck") or []:
+            key = f"media:{t.get('name')}:{s.get('id')}"
+            if s.get("why") != "stuck" or key in seen:
+                continue
+            seen.add(key)
+            out.append(Notice("media_stuck", f"{t.get('title') or t.get('name')}: a job got stuck",
+                              f"{s.get('title') or 'A job'} still says {s.get('status')}, but the service isn't running. "
+                              "Start it again or clear the job.", "warning", key))
+    return out
+
+
 def from_away_lines(lines: list[str], session: dict | None) -> list[Notice]:
     """away.jsonl: Away ended -> a summary (the session numbers come from snapshot.night_summary); answers ready."""
     out = []
@@ -160,13 +177,14 @@ class Notifier:
             return False
         return True
 
-    def check(self, prev, curr, busy: bool) -> list[Notice]:
+    def check(self, prev, curr, busy: bool, extra: list[Notice] | None = None) -> list[Notice]:
         """Everything new since the last check that should be shown now. busy = a game / fullscreen app is in front:
         keep them for later and show one summary when it's over."""
         now = self.clock()
         away_lines = self.away.new_lines()
         session = self.session_fn() if self.session_fn and any('"away-end"' in ln for ln in away_lines) else None
-        found = from_snapshots(prev, curr) + from_away_lines(away_lines, session) + from_chain_lines(self.chains.new_lines())
+        found = (from_snapshots(prev, curr) + from_away_lines(away_lines, session) + from_chain_lines(self.chains.new_lines())
+                 + list(extra or []))
         fresh = [n for n in found if self._allowed(n, now)]
         for n in fresh:
             self.last_sent[n.key or n.kind] = now

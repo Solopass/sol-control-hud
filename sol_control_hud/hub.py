@@ -41,6 +41,7 @@ LOG_FILE = DATA_DIR / "hub.log"
 # "I'm running" marker for tools\sol-llm-watch.ps1: present + its pid gone = the app died -> the watcher restarts it.
 # A clean exit (tray / ticker / dashboard Exit) removes it, so what you close stays closed.
 RUNNING_FILE = DATA_DIR / "app-running.json"
+MEDIA_CHECK_S = 300.0          # stuck media jobs (E3): the card's own file read, looked at by the hub every 5 min
 DEFAULTS = {"ticker": True, "dashboard_at_start": False, "port": 7900, "notify": None}   # notify: see notify.DEFAULTS
 ACTIVE_PACE, IDLE_PACE = 2.0, 10.0
 WEB_ACTIVE_S = 30.0          # a dashboard request within this long counts as "someone is looking"
@@ -222,6 +223,8 @@ class Hub:
         from .views.web.app import Cached
         self._health_logs = Cached(lambda: read_health_logs(), 60)     # the logs: once a minute is plenty
         self._last_health = 0.0
+        self._last_media_check = 0.0
+        self._media_stuck_seen: set[str] = set()
         from .views.web.feed import History
         self.history = History()
 
@@ -1058,7 +1061,13 @@ class Hub:
                 self.metrics.read_logs()
             if self.notifier and snap.sampled_at:
                 busy = bool(t and t._is_hidden_for_fullscreen) or (snap.ai_mode == "off" and str(snap.ai_reason or "").startswith("game"))
-                for n in self.notifier.check(self._prev_snap, snap, busy):
+                extra = []
+                if time.monotonic() - self._last_media_check >= MEDIA_CHECK_S and getattr(self, "collectors", None):
+                    self._last_media_check = time.monotonic()
+                    from .notify import from_media
+                    tiles = (self.collectors["media"].get() or {}).get("tiles") or []
+                    extra = from_media(tiles, self._media_stuck_seen)
+                for n in self.notifier.check(self._prev_snap, snap, busy, extra):
                     self.notify_now(n.title, n.text, n.level)
                 self._prev_snap = snap
             self._maybe_heal(snap)

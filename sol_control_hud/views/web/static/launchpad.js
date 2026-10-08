@@ -151,6 +151,11 @@ function mediaTile(t) {
   if ((t.recent || []).length) body += `<h3>Recent jobs</h3>${t.recent.slice(0, 3).map(jobLine).join('')}${weekLine(t.week)}`;
   if ((t.files || []).length) body += `<h3>Newest outputs</h3>${t.files.slice(0, 3).map((f) => jobLine({ title: f.title, status: 'done', what: `${f.size_mb} MB`, at: f.at })).join('')}`;
   if (t.latest_note) body += `<div class="meta small" title="${esc(t.latest_note.title)}">newest note: ${esc(t.latest_note.title)} · ${ago(t.latest_note.at)}</div>`;
+  // E3: a job the file still calls queued/processing while the service isn't running (stuck), or silent for an hour
+  const stuck = (t.stuck || []).map((s) => `<div class="${s.why === 'stuck' ? 'bad' : 'warn'}" title="${esc(s.status)} · last written ${s.updated ? new Date(s.updated * 1000).toLocaleString() : '?'}">`
+    + `${s.why === 'stuck' ? '⚠ stuck' : '◔ no progress for ' + upWords(s.age_s)}: ${esc(s.title)}`
+    + `${s.why === 'stuck' ? ` · says ${esc(s.status)} but ${esc(t.title)} isn't running` : ''}</div>`).join('');
+  if (stuck) body = `<div class="mstuck">${stuck}</div>` + body;
   if (!body) body = `<div class="meta small">${t.project === 'omni-tools' ? 'works in the browser: nothing to report until it\'s open' : 'nothing yet'}</div>`;
   const live = liveOpen[t.name];
   if (live) {

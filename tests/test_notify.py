@@ -94,3 +94,23 @@ def test_hub_switch_and_test_notice(tmp_path, monkeypatch):
     assert h.do_action("notify", "off")["notify"] is False and h.views()["notify"] is False
     assert json.loads((tmp_path / "hub-settings.json").read_text())["notify"]["enabled"] is False
     assert h.do_action("notify", "on")["notify"] is True
+
+
+def test_a_stuck_media_job_is_told_once():
+    seen = set()
+    tiles = [{"name": "media-api", "title": "Media API", "stuck": [
+        {"id": "j1", "title": "youtube.com · watch?v=9", "status": "processing", "why": "stuck"},
+        {"id": "j2", "title": "long one", "status": "processing", "why": "stalled"}]}]      # stalled: shown, not told
+    (n,) = notify.from_media(tiles, seen)
+    assert n.kind == "media_stuck" and "Media API" in n.title and "watch?v=9" in n.text and n.key == "media:media-api:j1"
+    assert notify.from_media(tiles, seen) == []                                      # same job: not again
+    assert notify.from_media([], seen) == [] and notify.from_media(None, seen) == []
+
+
+def test_media_notices_go_through_the_same_switches(tmp_path):
+    s = {"enabled": True, "kinds": {"media_stuck": False}, "quiet": ""}
+    n = notify.Notifier(s, tmp_path / "a.jsonl", tmp_path / "c.log")
+    extra = [notify.Notice("media_stuck", "x", "y", "warning", "media:m:1")]
+    assert n.check(S(), S(), busy=False, extra=extra) == []                         # that kind switched off
+    s["kinds"]["media_stuck"] = True
+    assert [x.kind for x in n.check(S(), S(), busy=False, extra=extra)] == ["media_stuck"]

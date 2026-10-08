@@ -572,3 +572,43 @@ def test_heal_status_reads_the_watchers_latest_line(tmp_path):
     h = speed.heal_status(log, now=now)
     assert h["recent"] and h["kind"] == "waiting" and h["text"].endswith("but a chain is running")
     assert speed.heal_status(log, now=now + 3600)["recent"] is False
+
+
+def test_stuck_and_stalled_jobs():
+    now = 100_000.0
+    open_jobs = [{"id": "1", "title": "a", "status": "processing", "updated": now - 15 * 60},
+                 {"id": "2", "title": "b", "status": "queued", "updated": now - 2 * 60},
+                 {"id": "3", "title": "c", "status": "processing", "updated": now - 2 * 3600}]
+    asleep = media_apis.stuck_jobs(open_jobs, "asleep", now)
+    assert [(j["id"], j["why"]) for j in asleep] == [("1", "stuck"), ("3", "stuck")]   # "b" is only 2 min old
+    up = media_apis.stuck_jobs(open_jobs, "busy", now)
+    assert [(j["id"], j["why"], j["age_s"]) for j in up] == [("3", "stalled", 7200)]   # running: only an hour of silence
+    assert media_apis.stuck_jobs([], "asleep", now) == []
+
+
+def test_a_crashed_job_shows_as_stuck_on_its_tile(tmp_path):
+    jobs = tmp_path / "jobs.json"
+    jobs.write_text(json.dumps([{"job_id": "j1", "type": "transcribe", "source": "https://www.youtube.com/watch?v=9",
+                                 "status": "processing", "created_at": "2026-10-08T10:00:00",
+                                 "updated_at": "2026-10-08T10:05:00"}]), encoding="utf-8")
+    m = {"port": 8080, "runs_in": "wsl", "unit": "media-api", "jobs_file": str(jobs)}
+    now = time.mktime((2026, 10, 8, 11, 0, 0, 0, 0, -1))
+    t = media_apis.tile("media-api", m, {"running": False}, [], now)
+    assert t["state"] == "asleep" and t["active_jobs"] == 0
+    assert [(s["id"], s["why"], s["title"]) for s in t["stuck"]] == [("j1", "stuck", "youtube.com · watch?v=9")]
+
+
+def test_voice_jobs_lists_open_ones_with_or_without_updated_at(tmp_path):
+    for with_updated in (True, False):
+        db = tmp_path / f"v{with_updated}.sqlite"
+        con = sqlite3.connect(db)
+        extra = ", updated_at REAL" if with_updated else ""
+        con.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, song TEXT, preset TEXT, status TEXT, stage TEXT, key_root TEXT,"
+                    f" key_mode TEXT, bpm REAL, message TEXT, created_at REAL{extra})")
+        con.execute("INSERT INTO jobs (song, preset, status, stage, message, created_at) VALUES ('s', 'pop', 'processing', 'x', '', 1000.0)")
+        if with_updated:
+            con.execute("UPDATE jobs SET updated_at = 1500.0")
+        con.commit()
+        con.close()
+        (o,) = media_apis.voice_jobs(db, now=3000.0)["open"]
+        assert o == {"id": "1", "title": "s", "status": "processing", "updated": 1500.0 if with_updated else 1000.0}

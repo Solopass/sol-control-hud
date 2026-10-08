@@ -32,6 +32,8 @@ AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".mp4", 
 RECENT = 5
 WEEK_S = 7 * 86400          # the tally covers a week: a single day is usually empty
 ACTIVE_STATUSES = {"queued", "running", "processing"}
+STUCK_ASLEEP_S = 10 * 60     # the file says queued/processing, the service isn't running, nothing written for this long
+STALLED_S = 60 * 60          # the service runs but the job hasn't been written to for this long (shown, not notified)
 
 STATE_WORDS = {"up": "running", "busy": "working", "ready": "ready · starts on first use", "asleep": "WSL is off",
                "down": "not available", "off": "not running", "busy_port": "port taken"}
@@ -125,7 +127,10 @@ def media_api_jobs(path: Path | str, now: float | None = None) -> dict:
                "at": j["_t"] or None, "progress": j.get("progress_percent"),
                "error": (j.get("error") or "")[:160] or None} for j in jobs[:RECENT]]
     active = sum(1 for j in jobs if str(j.get("status")) in ACTIVE_STATUSES)
-    return {"recent": recent, "week": week, "total": len(jobs), "active": active}
+    open_jobs = [{"id": str(j.get("job_id") or j["_t"]), "title": _short_source(j.get("source", "")) or j.get("type", ""),
+                  "status": j.get("status"), "updated": _iso(j.get("updated_at")) or j["_t"] or None}
+                 for j in jobs if str(j.get("status")) in ACTIVE_STATUSES][:RECENT]
+    return {"recent": recent, "week": week, "total": len(jobs), "active": active, "open": open_jobs}
 
 
 def voice_jobs(db: Path | str, now: float | None = None) -> dict:
@@ -143,6 +148,10 @@ def voice_jobs(db: Path | str, now: float | None = None) -> dict:
                                 (now - WEEK_S,)).fetchall()
             total = con.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
             active = con.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','processing')").fetchone()[0]
+            cols = {r[1] for r in con.execute("PRAGMA table_info(jobs)")}
+            when = "updated_at" if "updated_at" in cols else "created_at"     # an older Vocal Savior had no updated_at
+            open_rows = con.execute(f"SELECT id, song, status, {when} FROM jobs WHERE status IN ('queued','processing') "
+                                    "ORDER BY id DESC LIMIT ?", (RECENT,)).fetchall()
         finally:
             con.close()
     except sqlite3.Error:
@@ -151,7 +160,8 @@ def voice_jobs(db: Path | str, now: float | None = None) -> dict:
                "detail": " · ".join(x for x in (f"{kr} {km}" if kr else "", f"{bpm:.0f} bpm" if bpm else "", stage if status != "finished" else "") if x),
                "at": created, "error": (msg or "")[:160] if status == "failed" else None}
               for song, preset, status, stage, kr, km, bpm, msg, created in rows]
-    return {"recent": recent, "week": dict(tally), "total": total, "active": active}
+    open_jobs = [{"id": str(i), "title": song, "status": status, "updated": updated} for i, song, status, updated in open_rows]
+    return {"recent": recent, "week": dict(tally), "total": total, "active": active, "open": open_jobs}
 
 
 def newest_files(folder: Path | str, exts=AUDIO_EXTS, n: int = RECENT, suffix: str | None = None) -> list[dict]:
@@ -189,6 +199,21 @@ def windows_listener(port: int, match: str | None, listening: list[dict]) -> tup
 
 
 # ---------------------------------------------------------------- the card
+def stuck_jobs(open_jobs: list[dict], state: str, now: float) -> list[dict]:
+    """Jobs that need you. "stuck": the file still says queued/processing but the service isn't running (it crashed
+    or was stopped mid-job; the file never gets told). "stalled": the service runs but the job hasn't changed in an
+    hour (a long single step can look like this too, so it is only shown, never notified)."""
+    out = []
+    running = state in ("up", "busy")
+    for j in open_jobs:
+        age = now - (j.get("updated") or now)
+        if not running and age >= STUCK_ASLEEP_S:
+            out.append({**j, "why": "stuck", "age_s": round(age)})
+        elif running and age >= STALLED_S:
+            out.append({**j, "why": "stalled", "age_s": round(age)})
+    return out
+
+
 def tile(name: str, m: dict, probe: dict, listening: list[dict], now: float | None = None) -> dict:
     now = time.time() if now is None else now
     port = int(m.get("port") or 0)
@@ -214,10 +239,11 @@ def tile(name: str, m: dict, probe: dict, listening: list[dict], now: float | No
         elif other:
             state, note = "busy_port", f":{port} is held by {other.get('name')}"
 
-    recent, week, active = [], {}, 0
+    recent, week, active, stuck = [], {}, 0, []
     if m.get("jobs_file") or m.get("jobs_db"):
         j = media_api_jobs(m["jobs_file"], now) if m.get("jobs_file") else voice_jobs(m["jobs_db"], now)
         recent, week = j["recent"], j["week"]
+        stuck = stuck_jobs(j.get("open") or [], state, now)
         # a job file says "running" forever after a crash: it only counts while the service is up
         active = j["active"] if state == "up" else 0
         if active:
@@ -238,7 +264,7 @@ def tile(name: str, m: dict, probe: dict, listening: list[dict], now: float | No
         "since": since, "up_seconds": None if not since else max(0.0, now - since),
         "url": f"http://127.0.0.1:{port}/" if port else None,
         "docs": f"http://127.0.0.1:{port}{m['docs']}" if port and m.get("docs") else None,
-        "active_jobs": active,
+        "active_jobs": active, "stuck": stuck,
         "facts": facts, "recent": recent, "week": week, "files": files, "latest_note": (latest_note or [None])[0],
         "has_folder": bool(m.get("folder")),
         "can_start": bool(m.get("start") or m.get("project")) and state in ("off", "asleep", "ready", "down"),
