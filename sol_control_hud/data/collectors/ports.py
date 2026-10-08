@@ -96,8 +96,17 @@ def classify(proc: psutil.Process, port: int, own_pid: int | None = None) -> str
     return "dev" if name in DEV_NAMES else "app"
 
 
-def _rows(own_pid: int | None = None, now: float | None = None) -> list[dict]:
-    """One row per (process, port) listening on this machine. IPv4 and IPv6 on the same port are one row."""
+# What a listener *is* (name, label, class, start time) doesn't change while the same process holds the same port, but
+# reading it costs several Windows process queries per port: 51 ms for 26 listeners, every 5 s while the dashboard's
+# Localhost card is open (py-spy 10-08: the HUD's largest single cost). So it's kept per (pid, port) and read again
+# after INFO_TTL_S or when that listener goes away. close_listener() never uses it: it decides on a fresh read.
+INFO_TTL_S = 60.0
+_info: dict[tuple[int, int], tuple[float, dict]] = {}
+
+
+def _rows(own_pid: int | None = None, now: float | None = None, cached: bool = False) -> list[dict]:
+    """One row per (process, port) listening on this machine. IPv4 and IPv6 on the same port are one row.
+    cached: reuse what each listener is from the last INFO_TTL_S (the card's polling; never for closing)."""
     now = time.time() if now is None else now
     try:
         conns = psutil.net_connections(kind="inet")
@@ -111,6 +120,11 @@ def _rows(own_pid: int | None = None, now: float | None = None) -> list[dict]:
         if key in by_key:
             by_key[key]["addrs"].append(c.laddr.ip)
             continue
+        hit = _info.get(key) if cached else None
+        if hit and now - hit[0] < INFO_TTL_S:
+            started = hit[1]["started"]
+            by_key[key] = {**hit[1], "up_seconds": None if started is None else max(0.0, now - started), "addrs": [c.laddr.ip]}
+            continue
         try:
             proc = psutil.Process(c.pid)
             kind = classify(proc, c.laddr.port, own_pid)
@@ -122,8 +136,13 @@ def _rows(own_pid: int | None = None, now: float | None = None) -> list[dict]:
                            "kind": kind, "kind_words": CLASS_WORDS[kind], "can_close": kind in CLOSABLE,
                            "started": started, "up_seconds": None if started is None else max(0.0, now - started),
                            "addrs": [c.laddr.ip]}
+            if cached:
+                _info[key] = (now, {k: v for k, v in by_key[key].items() if k not in ("up_seconds", "addrs")})
         except (psutil.NoSuchProcess, psutil.Error, OSError):
             continue
+    if cached:
+        for gone in [k for k in _info if k not in by_key]:   # that process stopped listening: forget it
+            del _info[gone]
     rows = list(by_key.values())
     for r in rows:
         r["addrs"] = sorted(set(r["addrs"]))
@@ -196,7 +215,7 @@ def _store() -> History:
 
 def listeners(own_pid: int | None = None, shown_closed: int = 8) -> dict:
     """The card's data: what listens now (what you might close first) and what closed recently."""
-    rows = _rows(own_pid)
+    rows = _rows(own_pid, cached=True)
     closed = _store().update(rows)
     return {"available": True, "generated_at": time.time(), "listening": rows, "closed": closed[:shown_closed],
             "counts": {k: sum(1 for r in rows if r["kind"] == k) for k in CLASS_WORDS},

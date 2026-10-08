@@ -60,6 +60,7 @@ def fake_machine(monkeypatch, listening, procs):
 
     monkeypatch.setattr(ports.psutil, "Process", process)
     monkeypatch.setattr(ports.psutil, "wait_procs", lambda ps, timeout=None: (list(ps), []))
+    monkeypatch.setattr(ports, "_info", {})            # each fake machine starts without what an earlier one cached
     return procs
 
 
@@ -241,6 +242,30 @@ def test_listeners_reports_what_the_card_needs(machine):
     assert d["counts"] == {"dev": 1, "app": 0, "ai": 1, "system": 1, "self": 1}
     assert d["closable"] == 1                                     # only the vite server
     assert [r["kind"] for r in d["listening"]][0] == "dev"         # what you might close is listed first
+
+
+def test_the_card_reuses_what_a_listener_is_but_closing_reads_it_fresh(machine, monkeypatch):
+    looks = []
+    lookup = ports.psutil.Process
+    monkeypatch.setattr(ports.psutil, "Process", lambda pid: looks.append(pid) or lookup(pid))
+    first = ports.listeners(own_pid=99)["listening"]
+    n = len(looks)
+    again = ports.listeners(own_pid=99)["listening"]
+    assert len(looks) == n                                        # the second look asks Windows nothing again
+    strip = lambda rows: [{k: v for k, v in r.items() if k != "up_seconds"} for r in rows]   # noqa: E731
+    assert strip(again) == strip(first)
+    machine[10]._cmd = ("node", r"C:\p\other\node_modules\vite\bin\vite.js")
+    assert "vite \u00b7 other" in ports.close_listener(5173, own_pid=99)["why"]   # closing decided on a fresh read
+
+
+def test_a_listener_that_goes_away_is_forgotten(machine, monkeypatch):
+    ports.listeners(own_pid=99)
+    assert (10, 5173) in ports._info
+    monkeypatch.setattr(ports.psutil, "net_connections",
+                        lambda kind="inet": [type("C", (), {"status": psutil.CONN_LISTEN, "pid": 11,
+                                                            "laddr": Addr("127.0.0.1", 11440)})()])
+    ports.listeners(own_pid=99)
+    assert (10, 5173) not in ports._info and (11, 11440) in ports._info
 
 
 # ---- the action behind the button
