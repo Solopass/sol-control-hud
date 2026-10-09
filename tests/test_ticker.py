@@ -1178,3 +1178,34 @@ def test_switching_ai_mode_from_the_ticker_really_runs_the_script(monkeypatch, t
     me = types.SimpleNamespace(trigger_alert=lambda *a: None, refresh_data_now=lambda: None)
     ticker.TickerApp.switch_ai_mode(me, "away")
     assert ran and ran[0][-2:] == [str(script), "away"]
+
+
+def test_a_game_shuts_the_ticker_down_and_brings_it_back_once(monkeypatch, tmp_path):
+    import tkinter as tk
+    from sol_control_hud.views import ticker
+    monkeypatch.setattr(ticker, "SETTINGS_FILE", tmp_path / "s.json")
+    monkeypatch.setattr(ticker, "TRIGGER_FILE", tmp_path / "t.trigger")
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = ticker.TickerApp(root)
+        scheduled = []
+        monkeypatch.setattr(app.root, "after", lambda ms, fn=None, *a: scheduled.append(getattr(fn, "__name__", fn)))
+        app.shut_down_for_game()
+        assert app._game_off and app._is_hidden_for_fullscreen and not app.root.winfo_viewable()
+        for loop in (app._auto_rotate_slide, app._poll_collector, app._check_activation_trigger, app._keep_on_top,
+                     app._refresh_start_left):
+            loop()                                         # each pending timer fires once during the game ...
+        assert scheduled == []                             # ... and stops instead of rescheduling
+        assert app._parked == {"rotate", "poll", "trigger", "top", "taskbar"}
+        app.set_user_hidden(False)                         # the tray's "show" can't bring back a half-alive ticker
+        assert not app.root.winfo_viewable()
+        app.shut_down_for_game()                           # repeated calls change nothing
+        app.come_back_after_game()
+        assert sorted(scheduled) == sorted(["_auto_rotate_slide", "_poll_collector", "_check_activation_trigger",
+                                            "_keep_on_top", "_refresh_start_left"])   # each restarted exactly once
+        assert not app._game_off and app._parked == set()
+        app.come_back_after_game()                         # again: nothing more
+        assert len(scheduled) == 5
+    finally:
+        root.destroy()

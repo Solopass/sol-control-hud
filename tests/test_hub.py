@@ -247,3 +247,19 @@ def test_the_weekly_digest_is_written_once_outside_quiet_hours(tmp_path, monkeyp
     assert n.kind == "digest" and "2026-W41 machine.md" in n.text
     assert (tmp_path / "Digests" / "2026-W41 machine.md").exists() and digest.load_state() == {"last": "2026-W41"}
     assert run() == []                                                        # once
+
+
+def test_the_hub_shuts_the_ticker_down_for_a_game(the_hub):
+    calls = []
+    t = type("T", (), {"user_hidden": False, "_is_hidden_for_fullscreen": False, "_game_off": False})()
+    t.shut_down_for_game = lambda: (calls.append("down"), setattr(t, "_game_off", True))
+    t.come_back_after_game = lambda: (calls.append("back"), setattr(t, "_game_off", False))
+    the_hub.ticker = t
+    the_hub.root = type("R", (), {"after": lambda *a, **k: None})()
+    the_hub.collector.snap = Snapshot(ai_mode="off", ai_reason="game: game cs2", sampled_at=1.0)
+    the_hub._tick()
+    the_hub._tick()                                       # still in the game: not again
+    the_hub.collector.snap = Snapshot(ai_mode="desk", ai_reason="game ended", sampled_at=2.0)
+    the_hub._tick()
+    assert calls == ["down", "back"]
+    assert hub.snap_game_on(Snapshot(ai_mode="off", ai_reason="manual")) is False

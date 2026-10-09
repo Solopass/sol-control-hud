@@ -266,6 +266,8 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
         self.alerts_sound = bool(self.settings.get("alerts_sound", False))
         self.auto_hide_fullscreen = bool(self.settings.get("auto_hide_fullscreen", True))
         self._is_hidden_for_fullscreen = False
+        self._game_off = False              # shut down for a game: window gone, every timer stopped (shut_down_for_game)
+        self._parked: set[str] = set()      # the timers that stopped for it, restarted by come_back_after_game
         self._pulse_timer = None
         self._pulse_step = 0
         self._pulse_color = self.get_theme()["accent_green"]
@@ -339,7 +341,44 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
         # Where the taskbar icons begin (a docked ticker ends before them), then every 10 minutes
         self.root.after(3000, self._refresh_start_left)
 
+    # ---- shut down while a game runs (10-08: you asked for the ticker to be fully off in games, not just hidden)
+    # Each timer loop calls _park() first: during a game it stops there instead of rescheduling, and remembers
+    # itself. come_back_after_game() restarts exactly the ones that stopped, so no loop can ever run twice.
+    _LOOP_DELAYS_MS = {"rotate": None, "poll": 1500, "trigger": 350, "top": 500, "taskbar": 3000}
+
+    def _park(self, loop: str) -> bool:
+        if self._game_off:
+            self._parked.add(loop)
+            return True
+        return False
+
+    def shut_down_for_game(self) -> None:
+        """The game guard says a game is running: take the window away and let every timer stop at its next tick."""
+        if self._game_off:
+            return
+        self._game_off = True
+        self._is_hidden_for_fullscreen = True   # nothing (tray "show", the fullscreen check) brings it back meanwhile
+        self.root.withdraw()
+        log_event("game started: ticker shut down (window closed, timers stopping)")
+
+    def come_back_after_game(self) -> None:
+        """The game is over: restart the timers that stopped. The poll loop's fullscreen check shows the window again
+        (unless you hid it yourself) exactly as it does after any fullscreen app."""
+        if not self._game_off:
+            return
+        self._game_off = False
+        loops = {"rotate": self._auto_rotate_slide, "poll": self._poll_collector,
+                 "trigger": self._check_activation_trigger, "top": self._keep_on_top,
+                 "taskbar": self._refresh_start_left}
+        for name in sorted(self._parked):
+            delay = self._LOOP_DELAYS_MS[name] or int(self.interval * 1000)
+            self.root.after(delay, loops[name])
+        log_event(f"game over: ticker back ({len(self._parked)} timers restarted)")
+        self._parked.clear()
+
     def _keep_on_top(self) -> None:
+        if self._park("top"):
+            return
         try:
             if (not self._is_hidden_for_fullscreen and not self.user_hidden and getattr(self, "hwnd", None)
                     and covered_by_taskbar(self.hwnd)
@@ -1044,6 +1083,8 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
 
     def _check_activation_trigger(self) -> None:
         """Polls for an activation trigger file written when another instance attempted to launch."""
+        if self._park("trigger"):
+            return
         try:
             if TRIGGER_FILE.exists():
                 try:
@@ -1105,6 +1146,8 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
     def _auto_rotate_slide(self) -> None:
         """Cycles the rotation order (ticker_data.rotation): what needs you first and again between every other slide,
         all-fine slides left out. An ALERT stays up twice as long."""
+        if self._park("rotate"):
+            return
         hold = 1
         if not self.paused and not self._is_hidden_for_fullscreen and self.mode == "single" and self.slides:
             order = rotation(self.slides)
@@ -1115,6 +1158,8 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
         self.root.after(int(self.interval * 1000 * hold), self._auto_rotate_slide)
 
     def _poll_collector(self) -> None:
+        if self._park("poll"):
+            return
         if self._start_left_new:           # the taskbar answer arrived (background thread): fit a docked ticker to it
             self._start_left_new = False
             if self.docked and not self.user_hidden and not self._is_hidden_for_fullscreen:

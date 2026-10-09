@@ -149,6 +149,11 @@ def views_for(show: str | None, settings: dict) -> tuple[bool, bool]:
     return bool(settings["ticker"]), bool(settings["dashboard_at_start"])
 
 
+def snap_game_on(snap) -> bool:
+    """The watcher's game guard turned the AI off for a game (state.json reason "game: ...")."""
+    return bool(snap and snap.ai_mode == "off" and str(snap.ai_reason or "").startswith("game"))
+
+
 def pace_for(ticker_visible: bool, seconds_since_web: float) -> float:
     return ACTIVE_PACE if ticker_visible or seconds_since_web < WEB_ACTIVE_S else IDLE_PACE
 
@@ -557,6 +562,13 @@ class Hub:
         self.ticker = TickerApp(self.root, collector=self.collector, hub=self)
         if not self.start_ticker:
             self.ticker.set_user_hidden(True)
+        try:                                       # started mid-game: off from the first moment, not after the first tick
+            from .data.snapshot import read_llm_state
+            mode, reason, _ = read_llm_state()
+            if mode == "off" and str(reason or "").startswith("game"):
+                self.ticker.shut_down_for_game()
+        except Exception as e:  # noqa: BLE001 - the first tick does the same 2 s later
+            log(f"game check at start failed: {type(e).__name__}: {e}")
         self._start_tray()
         if self.start_dashboard:
             self.open_dashboard()
@@ -1083,7 +1095,12 @@ class Hub:
         """Every 2 s: set the pace, stop the idle web guard, keep the tray tooltip current."""
         try:
             t = self.ticker
-            visible = bool(t and not t.user_hidden and not t._is_hidden_for_fullscreen)
+            # the ticker is fully off while a game runs (the game guard's reason), back when it ends
+            game_on = snap_game_on(self.collector.get_snapshot())
+            game_off = getattr(t, "_game_off", None)       # None: a ticker without the game shutdown (tests' stand-ins)
+            if game_off is not None and game_on != game_off:
+                t.shut_down_for_game() if game_on else t.come_back_after_game()
+            visible = bool(t and not t.user_hidden and not t._is_hidden_for_fullscreen and not getattr(t, "_game_off", False))
             pace = pace_for(visible, time.monotonic() - self.last_web)
             if pace != self.pace:
                 self.pace = pace

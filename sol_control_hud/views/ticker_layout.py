@@ -39,6 +39,8 @@ class TickerLayoutMixin:
 
     def _refresh_start_left(self, again: bool = True) -> None:
         """Ask (in the background) where the taskbar icons begin; the poll loop picks it up. Every 10 min."""
+        if again and self._park("taskbar"):
+            return
         def work():
             self._start_left = start_button_left()
             self._start_left_new = True
