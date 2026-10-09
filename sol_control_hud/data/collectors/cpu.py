@@ -17,6 +17,50 @@ except ImportError:  # pragma: no cover - pywin32 ships with the venv on SOL
     win32pdh = None
 
 _PERF = r"\Processor Information(_Total)\% Processor Performance"
+_UTILITY = r"\Processor Information(*)\% Processor Utility"
+
+
+class Utility:
+    """CPU load the way Task Manager shows it: Windows' "% Processor Utility", per logical CPU and total.
+
+    Why not psutil: psutil reports "% Processor Time" (share of time busy). Task Manager on Windows 10/11 shows
+    "% Processor Utility", which also counts how fast the cores run, so it reads higher on a boosting 14900K
+    (10-08: 10.0 % vs 7.6 % at the same moment). The HUD should match the number you compare it with. Capped at 100
+    like Task Manager. Each instance keeps its own query (a rate is the average since that query's last read), so the
+    ticker's snapshot and the dashboard's CPU card don't steal each other's interval. None until it has two reads,
+    and None if the counter is unavailable (callers fall back to psutil)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._q = self._c = None
+
+    def read(self) -> tuple[float, list[float]] | None:
+        if win32pdh is None:
+            return None
+        with self._lock:
+            try:
+                if self._q is None:
+                    self._q = win32pdh.OpenQuery()
+                    self._c = win32pdh.AddEnglishCounter(self._q, _UTILITY)
+                    win32pdh.CollectQueryData(self._q)
+                    return None
+                win32pdh.CollectQueryData(self._q)
+                arr = win32pdh.GetFormattedCounterArray(self._c, win32pdh.PDH_FMT_DOUBLE)
+            except Exception:  # noqa: BLE001 - fall back to psutil this time, try a fresh query next time
+                self._q = None
+                return None
+        return parse_utility(arr)
+
+
+def parse_utility(arr: dict[str, float]) -> tuple[float, list[float]] | None:
+    """{"0,0": 12.3, ..., "0,_Total": 9.1, "_Total": 9.1} -> (total, per logical CPU in order), each capped at 100."""
+    total = arr.get("_Total", arr.get("0,_Total"))
+    per = sorted(((int(k.split(",")[1]), v) for k, v in arr.items()
+                  if "," in k and k.split(",")[1].isdigit()), key=lambda kv: (kv[0]))
+    if total is None or not per:
+        return None
+    cap = lambda x: round(min(max(x, 0.0), 100.0), 1)  # noqa: E731
+    return cap(total), [cap(v) for _, v in per]
 
 
 class _Clock:
@@ -45,6 +89,7 @@ class _Clock:
 
 
 _CLOCK = _Clock()
+_CARD_UTILITY = Utility()
 _NAME: str | None = None
 
 
@@ -78,7 +123,10 @@ def split(threads: list[float], physical: int) -> dict:
 def sample() -> dict:
     """{name, load, threads, clock_ghz, base_ghz, p_cores, e_cores, p_load, e_load, cores, busiest}. Load is since the
     previous call (psutil keeps the last reading), so call it on a steady pace."""
-    threads = psutil.cpu_percent(percpu=True)
+    threads = psutil.cpu_percent(percpu=True)            # keeps psutil's interval going for the fallback
+    u = _CARD_UTILITY.read()
+    if u and len(u[1]) == len(threads):
+        threads = u[1]
     physical = psutil.cpu_count(logical=False) or len(threads)
     try:
         base = psutil.cpu_freq().max or psutil.cpu_freq().current

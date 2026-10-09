@@ -312,6 +312,16 @@ def night_summary(away_log: Path = AWAY_LOG_FILE, chains_log: Path = CHAINS_LOG_
             "chains": chains[-3:], "reason": end.get("reason") or "?"}
 
 
+def vram_holders(guard_res: dict) -> list[dict]:
+    """Who holds the card, biggest first, from the VRAM guard's per-app numbers (they add up to the adapter total;
+    the raw per-process counters re-count shared surfaces) plus the AI runner."""
+    ai = guard_res.get("ai") or {}
+    parts = [{"name": t["label"], "dedicated_gb": t["gb"], "shared_gb": 0.0} for t in guard_res.get("top_consumers") or []]
+    if (ai.get("dedicated_gb") or 0) >= 0.05:
+        parts.append({"name": "llama-server", "dedicated_gb": ai["dedicated_gb"], "shared_gb": ai.get("shared_gb", 0.0)})
+    return sorted(parts, key=lambda p: p["dedicated_gb"], reverse=True)
+
+
 def spill_impact(evicted: bool, mark, speed: dict) -> tuple[str, object]:
     """Does the spill actually slow answers? The shared-memory counter only says some of the model sits in system RAM;
     10-06 it said so every ~35 min all day with nothing answering, and 10-08 sol-fast held 0.62 GB there at full speed
@@ -454,7 +464,9 @@ class TickerCollector:
         self._apps: dict = {"apps": [], "media": []}
         self._last_speed = 0.0
         self._spill_mark = NO_SPILL
-        self.health_alert: str | None = None   # set by the hub from health.py, copied into each snapshot
+        self.health_alert: str | None = None
+        from .collectors.cpu import Utility
+        self._cpu_utility = Utility()   # set by the hub from health.py, copied into each snapshot
         self._speed: dict = {}
         self._apps_thread: threading.Thread | None = None
         self._eta = away_screen.EtaTracker()
@@ -526,6 +538,9 @@ class TickerCollector:
         # 1. System Memory & CPU
         mem = system.memory()
         cpu = psutil.cpu_percent(interval=None)
+        u = self._cpu_utility.read()                     # Task Manager's number when Windows has it (cpu.Utility)
+        if u:
+            cpu = u[0]
 
         # 2. GPU & VRAM
         gpu_latest = getattr(self._sampler, "latest", {})
@@ -541,9 +556,11 @@ class TickerCollector:
         vram_tight = guard_res.get("verdict") == "TIGHT"
         vram_top_process = None
         vram_processes = []
-        if gpu_avail:
-            # the per-process counters sometimes report more than the card has (dwm "29.6G" on a 16 GB card): skip those
-            procs = [p for p in gpu_latest.get("processes", []) if p.get("dedicated_gb", 0) <= (vram_total or 16.0)]
+        if gpu_avail and guard_res.get("available"):
+            # Who holds the card, from the guard's per-app numbers. The raw per-process counters re-count shared
+            # surfaces: on 10-08 the ticker said "VRAM 4.3/16G (dwm 10.5G)". The guard keeps each app's own number and
+            # gives the desktop (dwm) only what's left of the adapter total, so these add up to what's really used.
+            procs = vram_holders(guard_res)
             if procs:
                 vram_processes = procs[:3]
                 top_p = procs[0]

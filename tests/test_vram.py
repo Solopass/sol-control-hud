@@ -309,3 +309,16 @@ def test_spill_is_judged_by_the_first_answer_after_it_began():
     assert spill_impact(True, mark, {"current_process": False, "answer_id": (6000, 1), "slow": True})[0] == "unknown"
     assert spill_impact(False, mark, before) == ("", NO_SPILL)                    # cleared: the next spill starts fresh
     assert spill_impact(True, NO_SPILL, {})[0] == "unknown"                       # no speed known at all
+
+
+def test_the_top_vram_app_comes_from_the_guard_not_the_raw_counters(tmp_path):
+    """10-08: the ticker said "VRAM 4.3/16G (dwm 10.5G)" - the raw dwm counter re-counts every window's surfaces."""
+    from sol_control_hud.data.snapshot import vram_holders
+    reading = dict(dedicated={pm(200): 10.5, pm(300): 1.2, pm(500): 0.3}, shared={})
+    g = gpu_block(**reading, used=4.3)
+    v = vram.VramGuard(needs=vram.NeedStore(tmp_path / "n.json"), confirm=1).update(g, {"up": False})
+    holders = vram_holders(v)
+    assert holders[0]["name"] != "dwm" or holders[0]["dedicated_gb"] <= 4.3
+    assert sum(h["dedicated_gb"] for h in holders) <= 4.3 + 0.05          # never more than the card really holds
+    assert vram_holders({"ai": {"dedicated_gb": 7.2, "shared_gb": 0.6}, "top_consumers": [
+        {"label": "brave", "gb": 1.3}]})[0] == {"name": "llama-server", "dedicated_gb": 7.2, "shared_gb": 0.6}
