@@ -468,3 +468,69 @@ def open_note_run(run_id, opener=_open_note, db: Path | None = None) -> dict:
         return {"ok": False, "why": "that run has no note (yet)"}
     opener(Path(note))
     return {"ok": True, "why": f"opened {Path(note).name}"}
+
+
+def bulk_add_solang(links_text: str, popen=subprocess.Popen, http=None) -> dict:
+    """Send YouTube links/playlist text to Solang's bulk-ingest endpoint (:3000).
+    Auto-starts Solang if not currently active on port 3000.
+    """
+    clean_input = (links_text or "").strip()
+    if not clean_input:
+        return {"ok": False, "why": "please paste YouTube links or a playlist"}
+
+    import urllib.request
+    import urllib.error
+    import json as _json
+
+    # Check if Solang is running on 127.0.0.1:3000
+    is_running = False
+    try:
+        req = urllib.request.Request("http://127.0.0.1:3000/api/health", headers={"User-Agent": "SOL-HUD"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            is_running = (resp.status == 200)
+    except Exception:
+        is_running = False
+
+    # Auto-start Solang if down
+    if not is_running:
+        solang_dir = Path(r"D:\Workspace\solang")
+        if not (solang_dir / "server.ts").exists():
+            return {"ok": False, "why": "Solang folder not found in D:\\Workspace\\solang"}
+        spawn(["bun", "server.ts"], cwd=solang_dir, log_name="solang-hud", popen=popen)
+        # Wait up to 6 seconds for port 3000
+        for _ in range(12):
+            time.sleep(0.5)
+            try:
+                req = urllib.request.Request("http://127.0.0.1:3000/api/health", headers={"User-Agent": "SOL-HUD"})
+                with urllib.request.urlopen(req, timeout=1.0) as resp:
+                    if resp.status == 200:
+                        is_running = True
+                        break
+            except Exception:
+                continue
+
+    if not is_running:
+        return {"ok": False, "why": "Could not start Solang on port 3000"}
+
+    # Post to /api/youtube/bulk-ingest
+    try:
+        payload = _json.dumps({"input": clean_input, "autoSave": True}).encode("utf-8")
+        req = urllib.request.Request(
+            "http://127.0.0.1:3000/api/youtube/bulk-ingest",
+            data=payload,
+            headers={"Content-Type": "application/json", "User-Agent": "SOL-HUD"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=45.0) as resp:
+            res_data = _json.loads(resp.read().decode("utf-8"))
+            count = res_data.get("count", 0)
+            items = res_data.get("items", [])
+            ingested_count = sum(1 for x in items if x.get("status") in ("ingested", "already_exists"))
+            return {
+                "ok": True,
+                "why": f"Processed {count} track(s): {ingested_count} ready in Solang",
+                "count": count,
+                "items": items
+            }
+    except Exception as err:
+        return {"ok": False, "why": f"Solang ingest failed: {err}"}

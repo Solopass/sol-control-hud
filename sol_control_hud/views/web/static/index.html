@@ -154,6 +154,29 @@
     <div class="note">Looking never wakes a service: state comes from systemd and their files on D:. <b>Live</b> asks a running one directly.</div>
   </article>
 
+  <article class="card wide" id="c-solang">
+    <h2>
+      <span>🎵 Solang Karaoke Studio <span class="dim" id="solangSummary">Korean & English Dual Lyric Studio (:3000)</span></span>
+      <div class="notes-controls">
+        <button class="mini go" id="solangStart" title="Start Solang Studio server on :3000">▶ Start</button>
+        <button class="mini" id="solangOpen" title="Open Solang Studio in your browser">↗ Open Studio</button>
+        <button class="mini danger" id="solangStop" title="Stop Solang Studio server">■ Stop</button>
+      </div>
+    </h2>
+    <form class="notebox" id="solangForm" autocomplete="off">
+      <h3>Bulk Song & Playlist Ingest <span class="dim">paste YouTube links, playlists, or artist queries to automatically fetch dual lyrics and sync</span></h3>
+      <div class="solang-input-row" style="display:flex; flex-direction:column; gap:8px;">
+        <textarea id="solangLinks" rows="2" placeholder="Paste YouTube links (one per line) or playlist URL... e.g. https://www.youtube.com/watch?v=11cta61wi0g" style="width:100%; background:var(--bg-input, #0b1120); border:1px solid var(--border, #1e293b); border-radius:8px; padding:10px; color:#f1f5f9; font-family:monospace; font-size:12px; resize:vertical;"></textarea>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span class="dim small" id="solangStatusText">Ready for links. Auto-starts Solang if offline.</span>
+          <button type="submit" class="go" id="solangSubmitBtn" style="padding:8px 16px;">Bulk Ingest Songs</button>
+        </div>
+      </div>
+      <div id="solangResults" style="margin-top:10px;"></div>
+    </form>
+    <div class="note">Processes via <b>Tier 1 YouTube Dual CC</b> &rarr; <b>Tier 2 LRCLIB</b> &rarr; <b>Local sol-fast AI</b>. Saved directly to <code>D:\Workspace\solang\data\projects\</code>.</div>
+  </article>
+
   <article class="card wide" id="c-ask">
     <h2><span id="askHead">Ask it overnight</span> <span class="dim" id="askSub">runs in the next Away session · answer in 1Notebook\Answers</span></h2>
     <form class="ask" id="askForm" autocomplete="off">

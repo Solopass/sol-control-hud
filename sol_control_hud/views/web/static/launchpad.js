@@ -243,6 +243,53 @@ $('noteRuns').addEventListener('click', async (e) => {
   toast(r.why || (r.ok ? 'opened' : 'no note'));
 });
 
+// ---------- Solang Karaoke Studio Widget
+const SOLANG_URL = 'http://127.0.0.1:3000';
+$('solangStart')?.addEventListener('click', () => launch('project', 'solang', 'start'));
+$('solangStop')?.addEventListener('click', () => launch('project', 'solang', 'stop'));
+$('solangOpen')?.addEventListener('click', () => openUrl(SOLANG_URL));
+
+$('solangForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('solangLinks');
+  const btn = $('solangSubmitBtn');
+  const status = $('solangStatusText');
+  const resBox = $('solangResults');
+  const links = (input.value || '').trim();
+  if (!links) return;
+
+  btn.disabled = true;
+  status.textContent = 'Processing... Auto-starting Solang and analyzing tracks.';
+  toast('Sending links to Solang Studio...');
+
+  try {
+    const r = await post('/api/action', { action: 'solang', op: 'bulk_add', links });
+    if (r.ok) {
+      toast(r.why || 'Ingested successfully!');
+      status.textContent = r.why;
+      input.value = '';
+      if (Array.isArray(r.items) && r.items.length > 0) {
+        setHTML(resBox, `<div class="meta small" style="margin-top:6px;"><b>Ingested:</b></div>` + r.items.map((it) => {
+          const isDone = it.status === 'ingested' || it.status === 'already_exists';
+          const icon = isDone ? '✓' : '✕';
+          const cls = isDone ? 'ok' : 'bad';
+          return `<div class="mjob" style="margin-top:4px;"><span class="jicon ${cls}">${icon}</span>`
+            + `<span class="jt">${esc(it.title || it.videoId)}</span>`
+            + `<span class="dim">${esc(it.artist || '')} · ${esc(it.status)}</span></div>`;
+        }).join(''));
+      }
+    } else {
+      toast(r.why || 'Solang ingest failed');
+      status.textContent = r.why || 'Failed';
+    }
+  } catch (err) {
+    toast('Error contacting HUD backend');
+    status.textContent = 'Network error contacting HUD backend.';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ---------- polling: every 10 s while visible, every 2 s for a minute after a start or stop
 function refreshLaunchpad() { loadProjects(); loadMedia(); }
 let launchpadTick = 0;

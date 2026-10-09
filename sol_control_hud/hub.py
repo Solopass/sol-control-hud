@@ -516,6 +516,10 @@ class Hub:
             return r
         if kind == "media" and op == "open_note":
             return launcher.open_note_run(b.get("run"))
+        if kind == "solang" and op == "bulk_add":
+            r = launcher.bulk_add_solang(str(b.get("links") or b.get("source") or ""))
+            log(f"solang bulk_add: {r.get('why')}")
+            return r
         self._refresh_launchpad()                     # act on the current state, not a cached one
         try:
             rows = self.projects_payload()["projects"]
