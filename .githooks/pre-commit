@@ -2,9 +2,24 @@
 # Runs before every commit (Claude and Gemini both commit here). A failing check stops the commit.
 # Skip once, knowingly: git commit --no-verify
 cd "$(git rev-parse --show-toplevel)" || exit 1
-# 1. No new undefined names in staged Python files (scripts/check_names.py: the 09-26 lost-import bug, in a second)
+# 1. No new undefined names in staged Python files (scripts/check_names.py: the ticker's missing `import subprocess`)
 ./.venv/Scripts/python.exe scripts/check_names.py || { echo "pre-commit: new undefined name(s) above, commit stopped"; exit 1; }
-# 2. The tests
+# 2. Staged dashboard scripts must parse (10-08: a broken string in app.js stopped the whole web dashboard and no
+#    Python test noticed). Node runs in WSL; without WSL/node this check is skipped, not failed.
+js=$(git diff --cached --name-only --diff-filter=ACMR -- '*.js')
+if [ -n "$js" ] && wsl.exe -e sh -c 'command -v node' >/dev/null 2>&1; then
+  top=$(pwd -W 2>/dev/null || pwd)
+  mnt="/mnt/$(printf %s "${top%%:*}" | tr 'A-Z' 'a-z')${top#*:}"
+  for f in $js; do
+    git show ":$f" > .git/precommit-check.js
+    if ! out=$(MSYS_NO_PATHCONV=1 wsl.exe node --check "$mnt/.git/precommit-check.js" 2>&1); then
+      printf '%s\n' "$out" | sed "s#$mnt/.git/precommit-check.js#$f#"
+      rm -f .git/precommit-check.js; echo "pre-commit: $f does not parse, commit stopped"; exit 1
+    fi
+  done
+  rm -f .git/precommit-check.js
+fi
+# 3. The tests
 ./.venv/Scripts/python.exe -m pytest -q -x tests >/tmp/sol-control-hud-tests.log 2>&1
 status=$?
 tail -n 3 /tmp/sol-control-hud-tests.log

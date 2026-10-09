@@ -837,8 +837,7 @@ async function loadHealth() {
   const q = h.handled || {};                   // swallow.note: errors it carried on after (one line per place an hour)
   setHTML($('healthHandled'), q.day
     ? `<details><summary><span class="dim">handled quietly, last 24 h:</span> ${q.day} at ${q.places} place${q.places === 1 ? '' : 's'}</summary>`
-      + `<pre>${esc((q.recent || []).map((e) => `${when(e.at)} ${e.where}: ${e.text}`).join('
-'))}</pre></details>`
+      + `<pre>${esc((q.recent || []).map((e) => `${when(e.at)} ${e.where}: ${e.text}`).join('\n'))}</pre></details>`
     : '');
 }
 loadHealth();
