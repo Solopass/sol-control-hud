@@ -231,7 +231,8 @@ def open_note(vault_name: str, rel_path: str) -> dict[str, Any]:
     # Format obsidian://open?vault=...&file=...
     uri = f"obsidian://open?vault={urllib.parse.quote(vault_name)}&file={urllib.parse.quote(clean_file)}"
     try:
-        os.startfile(uri)
+        from ...obsidian_open import open_uri     # opens it, then brings Obsidian to the front once it shows the note
+        open_uri(uri, Path(clean_file).stem, vault_name)
         return {"ok": True, "why": f"Opened {clean_file} in Obsidian", "uri": uri}
     except Exception as e:
         # Fallback to opening file path directly

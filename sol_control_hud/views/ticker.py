@@ -620,7 +620,8 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             uri = f"obsidian://open?vault=Polymatica%20Vault&file={year}%2F{date_str}"
             opened = False
             try:
-                os.startfile(uri)
+                from ..obsidian_open import open_uri   # and bring Obsidian to the front once it shows the note
+                open_uri(uri, date_str, "Polymatica Vault")
                 opened = True
             except Exception:
                 try:

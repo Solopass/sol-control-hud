@@ -440,7 +440,13 @@ def note_runs(limit: int = 4, db: Path | None = None) -> list[dict]:
     return out
 
 
-def open_note_run(run_id, opener=_open_path, db: Path | None = None) -> dict:
+def _open_note(path: Path) -> None:
+    """A transcript note: in Obsidian (it's in a vault) and brought to the front; .md has no default app here."""
+    from .obsidian_open import open_path
+    open_path(path)
+
+
+def open_note_run(run_id, opener=_open_note, db: Path | None = None) -> dict:
     """Open the note a run wrote. The path comes from the run database, never from the page."""
     try:
         rid = int(run_id)
