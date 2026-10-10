@@ -514,7 +514,7 @@ body:not(.opt-no-xs-styled) :is(#c-stab, #c-svc, #c-health, #c-activity, #c-revi
 #c-ai-thinking[data-size="xl"] .think-ops-grid { grid-template-columns: 1fr; }
 #c-ai-thinking[data-size="xl"] .think-stream-wrap { max-height:380px; }
 /* Chains: S = what runs now, M = + waiting / scheduled */
-#c-chains[data-size="s"] :is(.cols, #chainList, .pipeline), #c-chains[data-size="s"] > h3 { display:none; }
+#c-chains[data-size="s"] :is(.cols, #chainList, .pipeline, .chain-thinking-wrap), #c-chains[data-size="s"] > h3 { display:none; }
 #c-chains[data-size="m"] #chainList, #c-chains[data-size="m"] > h3 { display:none; }
 /* Projects: M = only the ones running now */
 #c-projects[data-size="m"] .jrow:not(:has(> .dot.run)) { display:none; }
@@ -678,4 +678,56 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
 @keyframes thinkPulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.55; transform: scale(0.96); }
+}
+
+/* Chain card live thinking stream */
+.chain-thinking-wrap {
+  margin: 10px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #090c10;
+  overflow: hidden;
+}
+.chain-thinking-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--badge) 60%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+.chain-thinking-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.chain-thinking-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.chain-thinking-terminal {
+  margin: 0;
+  padding: 8px 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #94a3b8;
+  max-height: 180px;
+  min-height: 80px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.chain-thinking-terminal code {
+  font-family: inherit;
+  color: inherit;
+}
+.chain-thinking-terminal code.is-thinking {
+  color: #c084fc;
+}
+.chain-thinking-terminal code.is-answering {
+  color: #38bdf8;
 }

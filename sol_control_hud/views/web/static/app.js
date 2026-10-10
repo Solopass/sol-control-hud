@@ -517,6 +517,50 @@ function renderChains(p) {
     }).join(''));
     if (run.items) { setBar(bar, run.item / run.items, 'var(--cyan)'); bar.classList.add('live'); bar.title = `item ${run.item} of ${run.items}`; }
   }
+  const thinkWrap = $('chainThinkingWrap');
+  if (thinkWrap) {
+    const ops = p.ai_ops || {};
+    const th = ops.thinking || {};
+    const sp = ops.speed || {};
+    const isRunning = Boolean(run);
+    const hasThought = Boolean(th.active || (th.text && th.text.trim().length > 0));
+
+    if (isRunning && hasThought) {
+      thinkWrap.hidden = false;
+      const phaseEl = $('chainThinkPhase');
+      const stepEl = $('chainThinkStep');
+      const speedEl = $('chainThinkSpeed');
+      const tokensEl = $('chainThinkTokens');
+      const termCode = $('chainThinkingCode');
+      const term = $('chainThinkingTerminal');
+
+      const phase = th.active ? (th.phase || 'thinking') : 'done';
+      if (phaseEl) {
+        phaseEl.textContent = phase;
+        phaseEl.className = `pill ${phase === 'thinking' ? 'waiting think-pulse' : 'done'}`;
+      }
+      if (stepEl) {
+        stepEl.textContent = run.step_name ? `${run.chain} › ${run.step_name}` : (run.chain || 'Chain');
+      }
+      if (speedEl) {
+        const speedVal = sp.tg_tps != null ? sp.tg_tps : (sp.eval_tps != null ? sp.eval_tps : null);
+        speedEl.textContent = speedVal ? `${speedVal} tok/s` : '';
+      }
+      if (tokensEl && th.tokens != null) {
+        tokensEl.textContent = `${th.tokens} tokens`;
+      }
+      if (termCode) {
+        termCode.className = phase === 'thinking' ? 'is-thinking' : (phase === 'answering' ? 'is-answering' : '');
+        const display = th.text || th.preview || 'Thinking…';
+        termCode.textContent = display;
+      }
+      if (term && th.active) {
+        term.scrollTop = term.scrollHeight;
+      }
+    } else {
+      thinkWrap.hidden = true;
+    }
+  }
   // waiting chains get "Run now": one run that skips the polite waits (the runner still stops for the game guard,
   // an Away queue job, or an Away-only model)
   const pend = c.pending || [];

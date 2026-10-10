@@ -152,6 +152,19 @@
     </div>
     <div class="pipeline" id="pipeline" hidden></div>
     <div class="bar" id="itemsBar" hidden><i></i></div>
+    <div class="chain-thinking-wrap" id="chainThinkingWrap" hidden>
+      <div class="chain-thinking-header">
+        <span class="chain-thinking-title">
+          <span class="pill waiting" id="chainThinkPhase">thinking</span>
+          <span class="small" id="chainThinkStep">Live Reasoning</span>
+        </span>
+        <div class="chain-thinking-meta">
+          <span class="small dim" id="chainThinkSpeed">– tok/s</span>
+          <span class="small dim" id="chainThinkTokens">0 tokens</span>
+        </div>
+      </div>
+      <pre class="chain-thinking-terminal" id="chainThinkingTerminal"><code id="chainThinkingCode"></code></pre>
+    </div>
     <div class="cols">
       <div><h3>Waiting</h3><div class="list" id="chPending"></div></div>
       <div><h3>Scheduled</h3><div class="list" id="chSched"></div></div>
