@@ -147,17 +147,50 @@ def grab_png(rect, max_side: int = MAX_SIDE) -> bytes:
     return png(*grab(rect, ow, oh))
 
 
-def stitch_pngs_vertical(png_list: list[bytes]) -> bytes:
-    """Stitches multiple PNG byte sequences vertically into a single seamless PNG."""
+def find_vertical_overlap(raw1: bytes, h1: int, raw2: bytes, h2: int, stride: int,
+                          min_overlap: int = 15, max_overlap: int | None = None) -> int:
+    """Finds the number of overlapping scanlines between the bottom of raw1 and the top of raw2.
+    Returns 0 if no clean overlap is found.
+    """
+    if h1 <= min_overlap or h2 <= min_overlap or stride <= 0:
+        return 0
+    limit = min(h1, h2) - 1
+    if max_overlap is not None:
+        limit = min(limit, max_overlap)
+
+    # Search from largest possible overlap down to min_overlap
+    for k in range(limit, min_overlap - 1, -1):
+        s1_start = (h1 - k) * stride
+        s1_end = h1 * stride
+        s2_start = 0
+        s2_end = k * stride
+
+        # Fast boundary scan: check first and last scanline of candidate overlap block
+        if raw1[s1_start : s1_start + stride] != raw2[s2_start : s2_start + stride]:
+            continue
+        if raw1[s1_end - stride : s1_end] != raw2[s2_end - stride : s2_end]:
+            continue
+        # Verify full candidate block
+        if raw1[s1_start : s1_end] == raw2[s2_start : s2_end]:
+            return k
+
+    return 0
+
+
+def stitch_pngs_vertical(png_list: list[bytes], dedup_overlap: bool = True) -> bytes:
+    """Stitches multiple PNG byte sequences vertically into a single seamless PNG,
+    automatically deduplicating overlapping scanlines when scrolling.
+    """
     valid_pngs = [p for p in png_list if p and p.startswith(b"\x89PNG\r\n\x1a\n")]
     if not valid_pngs:
         return b""
     if len(valid_pngs) == 1:
         return valid_pngs[0]
 
-    raw_scanlines: list[bytes] = []
+    combined_raw = bytearray()
     base_w: int | None = None
     total_h = 0
+    stride = 0
 
     for p in valid_pngs:
         idx = 8
@@ -178,21 +211,30 @@ def stitch_pngs_vertical(png_list: list[bytes]) -> bytes:
 
         if base_w is None:
             base_w = w
+            stride = 1 + w * 3  # filter byte + RGB
         elif base_w != w:
             # Width mismatch: fallback to returning first image rather than corrupting scanlines
             return valid_pngs[0]
 
         try:
             decomp = zlib.decompress(b"".join(idat_chunks))
-            raw_scanlines.append(decomp)
-            total_h += h
         except Exception:
             continue
 
-    if not raw_scanlines or base_w is None or total_h <= 0:
-        return valid_pngs[0]
+        if total_h == 0 or not dedup_overlap:
+            combined_raw.extend(decomp)
+            total_h += h
+        else:
+            overlap = find_vertical_overlap(bytes(combined_raw), total_h, decomp, h, stride)
+            if overlap > 0:
+                combined_raw.extend(decomp[overlap * stride :])
+                total_h += (h - overlap)
+            else:
+                combined_raw.extend(decomp)
+                total_h += h
 
-    combined_raw = b"".join(raw_scanlines)
+    if not combined_raw or base_w is None or total_h <= 0:
+        return valid_pngs[0]
 
     def chunk(kind: bytes, data: bytes) -> bytes:
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
@@ -200,6 +242,32 @@ def stitch_pngs_vertical(png_list: list[bytes]) -> bytes:
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", struct.pack(">IIBBBBB", base_w, total_h, 8, 2, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(combined_raw, 6))
+        + chunk(b"IDAT", zlib.compress(bytes(combined_raw), 6))
         + chunk(b"IEND", b"")
     )
+
+
+def scroll_window(rect: list[int] | tuple[int, ...], clicks: int = -4, wait_s: float = 0.25) -> None:
+    """Simulates a mouse wheel scroll inside the center of rect.
+    Negative clicks scrolls DOWN, positive clicks scrolls UP.
+    Saves and restores cursor position so the mouse pointer does not jump.
+    """
+    import time
+    user32, _ = _win32()
+    cx = int(rect[0] + rect[2] // 2)
+    cy = int(rect[1] + rect[3] // 2)
+
+    pt = wintypes.POINT()
+    user32.GetCursorPos(ctypes.byref(pt))
+
+    user32.SetCursorPos(cx, cy)
+    time.sleep(0.02)
+
+    # MOUSEEVENTF_WHEEL = 0x0800
+    user32.mouse_event(0x0800, 0, 0, int(clicks * 120), 0)
+
+    time.sleep(0.02)
+    user32.SetCursorPos(pt.x, pt.y)
+
+    if wait_s > 0:
+        time.sleep(wait_s)

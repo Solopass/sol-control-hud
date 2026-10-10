@@ -462,6 +462,13 @@ class Hub:
         if target in ("pick_snip", "pick_part2"):
             self.cmds.put(("review_pick_snip", None))
             return {"ok": True, "why": "drag a box around the scrolled section (Esc cancels)"}
+        if target in ("auto_scroll", "scroll_solve"):
+            r = w.auto_scroll_and_solve()
+            log(f"exam review: auto_scroll_and_solve -> {r.get('why')}")
+            if r.get("ok"):
+                self.cmds.put(("review_snip_added", r.get("parts", 2)))
+                self.notify_now("Exam Auto-Scroll", "Captured, stitched, and solved scrolled question")
+            return r
         if target in ("hud", "popup"):
             self.cmds.put(("review_toggle_hud", None))
             return {"ok": True, "why": "toggled floating exam HUD"}
@@ -1207,6 +1214,7 @@ class Hub:
                     on_retry_gemini=lambda: self.review_action("retry_gemini"),
                     on_add_snip=lambda: self.review_action("snip"),
                     on_pick_snip=lambda: self.review_action("pick_snip"),
+                    on_auto_scroll=lambda: self.review_action("auto_scroll"),
                 )
             except Exception as e:
                 log(f"exam hud init failed: {e}")

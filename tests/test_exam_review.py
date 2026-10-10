@@ -392,3 +392,64 @@ def test_append_note_renders_markdown_checkboxes(tmp_path):
     assert "- [ ] D. 1.1.1.1" in content
 
 
+def test_find_vertical_overlap_and_dedup():
+    w, h1, h2, overlap = 10, 50, 50, 20
+    # Create scanlines for image 1
+    raw1_lines = [bytes([i % 256 for i in range(w * 4)]) for i in range(h1)]
+    # Image 2 overlaps the last 20 rows of image 1, then has 30 new rows
+    raw2_lines = raw1_lines[h1 - overlap :] + [bytes([(i + 30) % 256 for i in range(w * 4)]) for i in range(h2 - overlap)]
+
+    bgra1 = b"".join(raw1_lines)
+    bgra2 = b"".join(raw2_lines)
+
+    p1 = qc.png(w, h1, bgra1)
+    p2 = qc.png(w, h2, bgra2)
+
+    stitched = qc.stitch_pngs_vertical([p1, p2], dedup_overlap=True)
+    out_w, out_h = struct.unpack(">II", stitched[16:24])
+    assert out_w == w
+    assert out_h == h1 + h2 - overlap  # 50 + 50 - 20 = 80!
+
+
+def test_auto_scroll_and_solve(tmp_path, monkeypatch):
+    valid_png = qc.png(10, 5, bytes([255, 0, 0, 255] * 50))
+    w, client = make(tmp_path, [graded()])
+    w._grab_png = lambda r: valid_png
+    w.set_rect([10, 20, 100, 100], start=False)
+
+    scroll_calls = []
+    def mock_scroll(rect, clicks, wait_s):
+        scroll_calls.append((rect, clicks, wait_s))
+
+    monkeypatch.setattr("sol_control_hud.quiz_capture.scroll_window", mock_scroll)
+
+    res = w.auto_scroll_and_solve(clicks=-4, restore_scroll=True)
+    assert res["ok"] is True
+    assert res["parts"] == 2
+    # Verify scroll down and scroll back up both occurred
+    assert len(scroll_calls) == 2
+    assert scroll_calls[0][1] == -4  # scrolled down
+    assert scroll_calls[1][1] == 4   # restored up
+
+
+def test_passive_scroll_watcher_on_cut_off(tmp_path):
+    cut_off_read = {
+        "status": "cut_off",
+        "question": "Which mask gives 50 hosts with the fewest host bits?",
+        "choices": CHOICES[:2],  # only choices A and B visible!
+        "your_labels": ["B"],
+        "correct_labels": ["C"],
+    }
+    w, client = make(tmp_path, [cut_off_read])
+    valid_png = qc.png(10, 5, bytes([255, 0, 0, 255] * 50))
+    w._grab_png = lambda r: valid_png
+
+    # Processing cut_off flags pending scroll without failing
+    res = w._process(valid_png, force=True)
+    assert res is False
+    assert w._pending_scroll is True
+    assert w._last_cut_off_png == valid_png
+    assert "cut off" in w.state()["text"].lower()
+
+
+

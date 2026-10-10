@@ -479,6 +479,8 @@ class ReviewWatcher:
         self._last_png_bytes: bytes | None = None
         self._additional_snips: list[bytes] = []
         self._stitched_png_bytes: bytes | None = None
+        self._pending_scroll: bool = False
+        self._last_cut_off_png: bytes | None = None
         rect = load_settings(settings_path).get("rect")
         self._s = {"status": "stopped", "text": "Set a box around the question area, then start.",
                    "rect": rect if isinstance(rect, list) and len(rect) == 4 else None,
@@ -551,6 +553,8 @@ class ReviewWatcher:
         self._last_png_bytes = None
         self._additional_snips = []
         self._stitched_png_bytes = None
+        self._pending_scroll = False
+        self._last_cut_off_png = None
         self._set(current=None, history=[], correct=0, wrong=0, answered=0, topics={})
         return {"ok": True, "why": "cleared this session's list"}
 
@@ -564,13 +568,50 @@ class ReviewWatcher:
             png = self._grab_png(target_rect)
             self._additional_snips.append(png)
             all_parts = ([self._last_png_bytes] if self._last_png_bytes else []) + self._additional_snips
-            self._stitched_png_bytes = stitch_pngs_vertical(all_parts)
+            self._stitched_png_bytes = stitch_pngs_vertical(all_parts, dedup_overlap=True)
             count = len(self._additional_snips) + (1 if self._last_png_bytes else 0)
             msg = f"Captured scroll snip #{len(self._additional_snips)} ({count} parts stitched in memory)"
             self._set(text=msg)
             return {"ok": True, "why": msg, "count": count, "stitched": bool(self._stitched_png_bytes)}
         except Exception as e:
             return {"ok": False, "why": f"Failed to capture scroll snip: {e}"}
+
+    def auto_scroll_and_solve(self, clicks: int = -4, restore_scroll: bool = True) -> dict:
+        """One-click / hotkey auto-scroll: captures slice 1, simulates mouse wheel down,
+        captures slice 2, restores scroll position, stitches with overlap deduplication, and solves."""
+        target_rect = self._s.get("rect")
+        if not target_rect:
+            return {"ok": False, "why": "No capture box set"}
+        try:
+            from .quiz_capture import scroll_window, stitch_pngs_vertical
+            self._set(status="reading", text="Auto-scrolling question view…")
+
+            # Slice 1 (top of question)
+            slice1 = self._last_cut_off_png or self._last_png_bytes or self._grab_png(target_rect)
+            self._last_png_bytes = slice1
+
+            # Auto-scroll down
+            scroll_window(target_rect, clicks=clicks, wait_s=0.25)
+
+            # Slice 2 (bottom of question)
+            slice2 = self._grab_png(target_rect)
+
+            # Optional: scroll back up to starting position
+            if restore_scroll:
+                scroll_window(target_rect, clicks=-clicks, wait_s=0.05)
+
+            # Stitch with overlap deduplication
+            self._additional_snips = [slice2]
+            stitched = stitch_pngs_vertical([slice1, slice2], dedup_overlap=True)
+            self._stitched_png_bytes = stitched
+            self._pending_scroll = False
+            self._last_cut_off_png = None
+
+            # Solve immediately
+            solved = self._process(stitched, force=True)
+            return {"ok": solved, "why": "Auto-scrolled, stitched, and solved", "parts": 2}
+        except Exception as e:
+            return {"ok": False, "why": f"Auto-scroll failed: {e}"}
 
     def retry_gemini(self, model: str = "gemini-3.8-flash") -> dict:
         """User marked current answer bad: send in-memory images to Gemini API for a new answer."""
@@ -684,8 +725,20 @@ class ReviewWatcher:
                     png = self._grab_png(rect)
                     force, self._force = self._force, False
                     baseline = thumb                      # the next look compares with this screen
-                    if self._process(png, force):
-                        last_new = self._clock()
+                    if self._pending_scroll and self._last_cut_off_png:
+                        from .quiz_capture import stitch_pngs_vertical
+                        slice1 = self._last_cut_off_png
+                        slice2 = png
+                        stitched = stitch_pngs_vertical([slice1, slice2], dedup_overlap=True)
+                        self._additional_snips = [slice2]
+                        self._stitched_png_bytes = stitched
+                        self._pending_scroll = False
+                        self._last_cut_off_png = None
+                        if self._process(stitched, force=True):
+                            last_new = self._clock()
+                    else:
+                        if self._process(png, force):
+                            last_new = self._clock()
             except Exception as e:  # noqa: BLE001 - one bad look (screen locked, engine hiccup) must not end the watch
                 self._set(status="error", text=f"{type(e).__name__}: {str(e)[:200]}")
             if self._clock() - last_new > self.idle_stop:
@@ -749,9 +802,13 @@ class ReviewWatcher:
                 read = tidy_read(parse_json(r.content))
                 choices = read["choices"]
                 status = read.get("status")
+                if status == "cut_off":
+                    self._pending_scroll = True
+                    self._last_cut_off_png = png
+                    self._set(status="waiting", text="Question cut off at bottom: draw a bigger box or scroll down to auto-solve")
+                    return False
                 if status != "ok" or not read.get("question"):
-                    self._set(status="watching", text="The box cuts the question off: draw a bigger box"
-                              if status == "cut_off" else "No question in the box right now")
+                    self._set(status="watching", text="No question in the box right now")
                     return False
                 key = question_key(read)
                 if key == self._last_key and not force:
@@ -760,6 +817,8 @@ class ReviewWatcher:
                 self._last_key = key
                 self._additional_snips = []
                 self._stitched_png_bytes = None
+                self._pending_scroll = False
+                self._last_cut_off_png = None
 
                 # Solve immediately in real time: no waiting for grading, no grading checks or restrictions!
                 self._set(status="answering", text="Solving question in real time…")

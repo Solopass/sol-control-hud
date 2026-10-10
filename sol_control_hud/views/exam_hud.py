@@ -23,11 +23,13 @@ class ExamHudWindow:
         on_retry_gemini: Callable[[], None] | None = None,
         on_add_snip: Callable[[], None] | None = None,
         on_pick_snip: Callable[[], None] | None = None,
+        on_auto_scroll: Callable[[], None] | None = None,
     ):
         self.parent = parent
         self.on_retry_gemini = on_retry_gemini
         self.on_add_snip = on_add_snip
         self.on_pick_snip = on_pick_snip
+        self.on_auto_scroll = on_auto_scroll
         self.win: tk.Toplevel | None = None
         self.title_lbl: tk.Label | None = None
         self.badge_lbl: tk.Label | None = None
@@ -35,6 +37,7 @@ class ExamHudWindow:
         self.ans_lbl: tk.Label | None = None
         self.bad_btn: tk.Button | None = None
         self.snip_btn: tk.Button | None = None
+        self.auto_scroll_btn: tk.Button | None = None
         self.copy_btn: tk.Button | None = None
         self.txt: tk.Text | None = None
         self._visible = False
@@ -183,13 +186,13 @@ class ExamHudWindow:
             font=("Segoe UI", 9),
             cursor="hand2",
         )
-        self.snip_btn.pack(side=tk.LEFT, padx=8)
+        self.snip_btn.pack(side=tk.LEFT, padx=(0, 8))
         self.snip_btn.bind("<Button-3>", lambda e: self._on_right_click_snip())
 
-        self.copy_btn = tk.Button(
+        self.auto_scroll_btn = tk.Button(
             btn_frame,
-            text="📋 Copy Command",
-            command=self._on_click_copy,
+            text="⚡ Auto-Scroll",
+            command=self._on_click_auto_scroll,
             bg="#0284c7",
             fg="#ffffff",
             activebackground="#0369a1",
@@ -200,10 +203,26 @@ class ExamHudWindow:
             font=("Segoe UI", 9, "bold"),
             cursor="hand2",
         )
+        self.auto_scroll_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.copy_btn = tk.Button(
+            btn_frame,
+            text="📋 Copy Command",
+            command=self._on_click_copy,
+            bg="#059669",
+            fg="#ffffff",
+            activebackground="#047857",
+            activeforeground="#ffffff",
+            bd=0,
+            padx=8,
+            pady=4,
+            font=("Segoe UI", 9, "bold"),
+            cursor="hand2",
+        )
 
         hint_lbl = tk.Label(
             btn_frame,
-            text="Esc: hide",
+            text="Esc: hide · Alt+↓: scroll",
             fg="#64748b",
             bg="#0f172a",
             font=("Segoe UI", 8),
@@ -213,6 +232,8 @@ class ExamHudWindow:
         # Bindings
         self.win.bind("<Escape>", lambda e: self.hide())
         self.win.bind("<Control-r>", lambda e: self._on_click_retry())
+        self.win.bind("<Alt-Down>", lambda e: self._on_click_auto_scroll())
+        self.win.bind("<Control-Down>", lambda e: self._on_click_auto_scroll())
         self.win.protocol("WM_DELETE_WINDOW", self.hide)
         return self.win
 
@@ -382,3 +403,11 @@ class ExamHudWindow:
             self.on_pick_snip()
         elif self.on_add_snip:
             self.on_add_snip()
+
+    def _on_click_auto_scroll(self) -> None:
+        if self.on_auto_scroll:
+            if self.auto_scroll_btn:
+                self.auto_scroll_btn.config(text="Scrolling…")
+                if self.win:
+                    self.win.after(2500, lambda: self.auto_scroll_btn.config(text="⚡ Auto-Scroll") if self.auto_scroll_btn else None)
+            self.on_auto_scroll()

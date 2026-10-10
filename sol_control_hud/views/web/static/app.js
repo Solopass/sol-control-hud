@@ -503,10 +503,10 @@ function renderReview(p) {
     const modelBadge = isGemini ? ' <span class="pill" style="background:#0284c7;color:#fff;font-size:0.75rem;padding:2px 6px">✨ Gemini 3.8 Flash</span>' : '';
     const head = `<span style="color:${isGemini ? 'var(--cyan)' : 'var(--green)'}">💡 Answer: ${esc(c.answer || (c.answer_labels || []).join(', '))} · ${esc(c.topic || 'Solved')}</span>${typeBadge}${modelBadge}`;
     const whyWrong = c.why_previous_wrong ? `<p class="rev-explain" style="color:var(--amber);margin-bottom:6px"><b>Previous attempt issue:</b> ${esc(c.why_previous_wrong)}</p>` : '';
-    const body = `${whyWrong}<p class="rev-explain">${esc(c.explanation)}</p>`;
+    const autoScrollBtn = `<button class="mini primary" style="margin-top:8px" data-act="review" data-target="auto_scroll" title="Simulate scroll down, stitch, and solve">⚡ Auto-Scroll & Solve</button>`;
     const retryBtn = isGemini ? '' : `<button class="mini danger" style="margin-top:8px" data-act="review" data-target="retry_gemini" title="Verify or re-solve with Gemini 3.8 Flash">🔍 Verify / Retry (Gemini)</button>`;
     setHTML(cur, `<div class="row"><b>${head}</b><span class="dim small">${esc(c.at || '')}${c.seconds ? ` · ${c.seconds} s` : ''}</span></div>` +
-      `<div class="rev-q">${esc(c.question)}</div>${exhibitHtml}${contentHtml}${body}${retryBtn}`);
+      `<div class="rev-q">${esc(c.question)}</div>${exhibitHtml}${contentHtml}${body}<div style="display:flex;gap:8px">${autoScrollBtn}${retryBtn}</div>`);
   }
   setHTML($('revHistory'), (r.history || []).map((h) => `<div class="item"><span>${h.n}. ${esc(h.topic || h.question)}</span>` +
     `<span style="color:${h.gemini ? 'var(--cyan)' : 'var(--green)'}">${h.gemini ? '✨' : '✓'}</span></div>`).join('') || '<div class="empty">nothing yet</div>');
