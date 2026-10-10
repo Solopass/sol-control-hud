@@ -905,9 +905,19 @@ async function loadControl() {
   if (schedEdit) return;                     // don't redraw under an open schedule editor
   setHTML($('chainList'), control.chains.map((c) => {
     const ops = OPS[c.status] || ['run', 'pause'];
-    const meta = [c.schedule && `⏱ ${c.schedule}`, c.watch && 'watches a folder', c.model].filter(Boolean).join(' · ');
-    return `<div class="crow"><span>${esc(c.name)}</span><span class="status ${esc(c.status)}">${esc(c.status)}</span>` +
-      `<span class="meta" title="${esc(meta)}">${esc(meta)}</span><span class="acts">` +
+    const metaParts = [];
+    if (c.active_waiting) metaParts.push(`<span style="color:var(--amber)" title="${esc(c.active_waiting)}">⏳ ${esc(c.active_waiting)}</span>`);
+    else if (c.blocked) metaParts.push(`<span style="color:var(--amber)" title="${esc(c.blocked)}">⏳ ${esc(c.blocked)}</span>`);
+    else if (c.reason) metaParts.push(`<span style="color:var(--red)" title="${esc(c.reason)}">⚠️ ${esc(c.reason)}</span>`);
+    else if (c.next_run) metaParts.push(`<span class="dim">📅 ${esc(nextLabel(c.next_run))}</span>`);
+    else if (c.schedule) metaParts.push(`⏱ ${esc(c.schedule)}`);
+    if (c.watch) metaParts.push('watches a folder');
+    if (c.model) metaParts.push(esc(c.model));
+    const metaHtml = metaParts.join(' · ');
+    const statusClass = c.status === 'running' ? 'status running live-pulse' : `status ${esc(c.status)}`;
+    const statusLabel = c.status === 'running' ? 'running ⚡' : esc(c.status);
+    return `<div class="crow"><span>${esc(c.name)}</span><span class="${statusClass}">${statusLabel}</span>` +
+      `<span class="meta">${metaHtml}</span><span class="acts">` +
       `<button class="mini ghost" data-sched="${esc(c.name)}" title="Change when it runs">⏱</button>` +
       ops.map((o) => `<button class="mini" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o]}</button>`).join('') +
       (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>';

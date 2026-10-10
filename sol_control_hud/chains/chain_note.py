@@ -184,6 +184,21 @@ def parse_gather(text: str, where: str) -> dict:
                      f"last 7 days`, `commits in D:\\Workspace for the last 7 days` or `changes in D:\\Workspace since last review`")
 
 
+def chain_front(path: str | Path) -> dict:
+    try:
+        text = Path(path).read_text(encoding="utf-8-sig")[:4000]
+    except OSError:
+        return {}
+    m = _FRONT.match(text)
+    if not m:
+        return {}
+    try:
+        d = yaml.safe_load(m.group(1))
+        return d if isinstance(d, dict) else {}
+    except yaml.YAMLError:
+        return {}
+
+
 def load_chain(path: str | Path) -> Chain:
     path = Path(path)
     try:
@@ -756,8 +771,12 @@ def write_error_result(path: str | Path, message: str) -> None:
 
 
 def check_chain(path: str | Path, tools: dict, registry: dict) -> list[str]:
+    p = Path(path)
     try:
-        chain = load_chain(path)
+        meta = chain_front(p)
+        if meta.get("type") == "chain-request":
+            return []
+        chain = load_chain(p)
         doc = to_workflow(chain)
     except ChainError as e:
         return [str(e)]

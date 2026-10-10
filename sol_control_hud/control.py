@@ -256,13 +256,40 @@ def _front(p: Path) -> dict:
 
 def list_chains(chains_dir: Path | None = None) -> list[dict]:
     out = []
+    status_data = {}
+    chains_json = Path(r"D:\AI\Cache\llm\chains.json")
+    if chains_json.is_file():
+        try:
+            status_data = json.loads(chains_json.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            status_data = {}
+
+    running_info = status_data.get("running") or {}
+    running_name = running_info.get("chain")
+    pending_by_chain = {p.get("chain"): p for p in (status_data.get("pending") or []) if isinstance(p, dict)}
+    sched_by_chain = {s.get("chain"): s for s in (status_data.get("scheduled") or []) if isinstance(s, dict)}
+
     for name, p in _chain_paths(chains_dir).items():
         meta = _front(p)
         result = p.parent / chain_note.RESULTS_DIR_NAME / f"{name} (result).md"
-        out.append({"name": name, "status": str(meta.get("status") or "draft").lower(), "model": meta.get("model") or "",
-                    "schedule": str(meta.get("schedule") or ""), "watch": bool(meta.get("watch")),
-                    "result_time": datetime.fromtimestamp(result.stat().st_mtime).strftime("%Y-%m-%dT%H:%M")
-                    if result.is_file() else None})
+        is_running = (running_name == name)
+        active_waiting = running_info.get("waiting") if is_running else None
+        blocked = (pending_by_chain.get(name) or {}).get("blocked")
+        next_run = (sched_by_chain.get(name) or {}).get("next")
+        reason = str(meta.get("reason") or meta.get("error") or meta.get("waiting") or "")
+
+        out.append({
+            "name": name,
+            "status": "running" if is_running else str(meta.get("status") or "draft").lower(),
+            "model": meta.get("model") or "",
+            "schedule": str(meta.get("schedule") or ""),
+            "watch": bool(meta.get("watch")),
+            "result_time": datetime.fromtimestamp(result.stat().st_mtime).strftime("%Y-%m-%dT%H:%M") if result.is_file() else None,
+            "blocked": blocked,
+            "active_waiting": active_waiting,
+            "reason": reason,
+            "next_run": next_run,
+        })
     return out
 
 

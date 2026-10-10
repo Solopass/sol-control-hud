@@ -769,3 +769,17 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   word-break: break-word;
   margin-top: 6px;
 }
+
+.status.running {
+  background: color-mix(in srgb, var(--cyan) 20%, transparent);
+  color: var(--cyan);
+  border: 1px solid var(--cyan);
+}
+.live-pulse {
+  animation: livePulse 1.8s infinite ease-in-out;
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+

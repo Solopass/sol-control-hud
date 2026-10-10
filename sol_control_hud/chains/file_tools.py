@@ -299,4 +299,115 @@ def git_changes(args: dict, ctx=None, policy: Policy | None = None) -> dict:
             "reviewable": [f for f in files if "diff" in f]}
 
 
-TOOLS = {"list_files": list_files, "read_text": read_text, "save_note": save_note, "git_changes": git_changes}
+def scan_stale_notes(args: dict, ctx=None, policy: Policy | None = None) -> dict:
+    """Scans notes older than `days` (default 30) under 1Notebook or specified folder for condensation."""
+    policy = policy or POLICY
+    folder = check_read(args.get("folder", r"D:\OBVLT\1Notebook"), policy)
+    days = int(args.get("days", 30))
+    cutoff = datetime.now() - timedelta(days=days)
+    candidates = []
+    limit = int(args.get("limit", 25))
+
+    subdirs = args.get("subdirs") or ["Reviews", "Answers", "Daily", "Scratch"]
+    protected = {"chains", "ideas", "school", "research", "projects", "guides", "templates", "archive", "digests"}
+
+    search_dirs = []
+    if folder.is_dir():
+        search_dirs.append(folder)
+        for s in subdirs:
+            sub = folder / s
+            if sub.is_dir() and sub.name.lower() not in protected:
+                search_dirs.append(sub)
+
+    seen_paths = set()
+    for d in search_dirs:
+        for p in d.glob("*.md"):
+            if not p.is_file() or p.name.startswith("_") or p.name.startswith("."):
+                continue
+            if any(part.lower() in protected for part in p.parts):
+                continue
+            real_p = _real(p)
+            if real_p in seen_paths:
+                continue
+            seen_paths.add(real_p)
+
+            mtime = datetime.fromtimestamp(p.stat().st_mtime)
+            if mtime > cutoff:
+                continue
+
+            try:
+                head = p.read_text(encoding="utf-8-sig", errors="replace")[:2000]
+                fm_m = re.match(r"^---\r?\n(.*?)\r?\n---", head, re.S)
+                fm = yaml.safe_load(fm_m.group(1)) if fm_m else {}
+                if not isinstance(fm, dict):
+                    fm = {}
+            except Exception:
+                fm = {}
+
+            if fm.get("archive") is False or fm.get("keep") is True or str(fm.get("status", "")).lower() in ("permanent", "active"):
+                continue
+
+            text = read_file(p, policy).get("text", "")
+            month = mtime.strftime("%Y-%m")
+            delta = datetime.now() - mtime
+            days_old = int(delta.total_seconds() / 86400)
+            candidates.append({
+                "name": p.name,
+                "path": str(p),
+                "month": month,
+                "days_old": days_old,
+                "text": text[:8000],
+            })
+            if len(candidates) >= limit:
+                break
+        if len(candidates) >= limit:
+            break
+
+    if ctx is not None:
+        ctx.note(f"scanned {len(candidates)} stale note(s) older than {days} days")
+    return {"notes": candidates, "count": len(candidates)}
+
+
+def archive_note(args: dict, ctx=None, policy: Policy | None = None) -> dict:
+    """Safely relocates a note into Archive/<month>/ with a backlink banner (never deletes)."""
+    policy = policy or POLICY
+    src = check_write(args["path"], policy)
+    if not src.is_file():
+        raise FileToolError(f"file does not exist: {src}")
+
+    mtime = datetime.fromtimestamp(src.stat().st_mtime)
+    month = str(args.get("month") or mtime.strftime("%Y-%m"))
+    dest_dir = check_write(args.get("dest_folder") or ((src.parent if src.parent.name == "1Notebook" else src.parents[1]) / "Archive" / month), policy)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    target = dest_dir / src.name
+    if target.exists():
+        target = dest_dir / f"{src.stem}_{int(datetime.now().timestamp())}{src.suffix}"
+
+    digest = str(args.get("digest") or f"Digests/{month} Summary")
+    banner = f"> [!NOTE] Archived Note\n> Condensed into [[{digest}]] on {datetime.now().strftime('%Y-%m-%d')}.\n\n"
+
+    content = src.read_text(encoding="utf-8-sig", errors="replace")
+    fm_m = re.match(r"^(---\r?\n.*?\r?\n---(?:\r?\n)?)", content, re.S)
+    if fm_m:
+        new_content = fm_m.group(1) + banner + content[len(fm_m.group(1)):]
+    else:
+        new_content = banner + content
+
+    target.write_text(new_content, encoding="utf-8")
+    src.unlink()
+
+    manifest = dest_dir / "_archived.md"
+    if not manifest.exists():
+        manifest.write_text(f"# Archived {month}\n\n| File | From | Digest | Archived |\n|---|---|---|---|\n", encoding="utf-8")
+    with open(manifest, "a", encoding="utf-8") as f:
+        f.write(f"| {src.name} | {src.parent.name} | [[{digest}]] | {datetime.now().strftime('%Y-%m-%d')} |\n")
+
+    if ctx is not None:
+        ctx.note(f"archived {src.name} -> {target}")
+    return {"archived": str(target), "source": str(src), "month": month}
+
+
+TOOLS = {"list_files": list_files, "read_text": read_text, "save_note": save_note, "git_changes": git_changes,
+         "scan_stale_notes": scan_stale_notes, "archive_note": archive_note}
+

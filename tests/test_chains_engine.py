@@ -488,4 +488,37 @@ def test_router_client_aborts_on_flag(tmp_path, monkeypatch):
     assert not flag.exists()
 
 
+def test_scan_stale_notes_and_archive_note(area):
+    policy, read, write, other = area
+    rev_dir = write / "Reviews"
+    rev_dir.mkdir(parents=True)
+    stale = rev_dir / "old_review.md"
+    stale.write_text("# Old review\nContent here", encoding="utf-8")
+
+    old_time = time.time() - (40 * 86400)
+    os.utime(stale, (old_time, old_time))
+
+    fresh = rev_dir / "fresh.md"
+    fresh.write_text("# Fresh review", encoding="utf-8")
+
+    protected = rev_dir / "keep.md"
+    protected.write_text("---\narchive: false\n---\nImportant", encoding="utf-8")
+    os.utime(protected, (old_time, old_time))
+
+    res = ft.scan_stale_notes({"folder": str(write), "days": 30}, policy=policy)
+    assert res["count"] == 1
+    assert res["notes"][0]["name"] == "old_review.md"
+
+    arc = ft.archive_note({"path": str(stale), "digest": "Digests/2026-09 Summary"}, policy=policy)
+    assert not stale.exists()
+    archived_file = Path(arc["archived"])
+    assert archived_file.exists()
+    content = archived_file.read_text(encoding="utf-8")
+    assert "[!NOTE] Archived Note" in content
+    assert "Condensed into [[Digests/2026-09 Summary]]" in content
+    manifest = archived_file.parent / "_archived.md"
+    assert manifest.exists() and "old_review.md" in manifest.read_text(encoding="utf-8")
+
+
+
 
