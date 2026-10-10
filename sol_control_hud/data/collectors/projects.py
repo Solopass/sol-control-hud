@@ -317,6 +317,20 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             other = by_port[int(port)]
             busy = f"{other.get('name', '?')}{' · ' + other['label'] if other.get('label') else ''}"
 
+        rev = None
+        try:
+            from ...chains.project_chains import find_latest_review
+            r_info = find_latest_review(name)
+            if r_info:
+                rev = {
+                    "name": r_info["name"],
+                    "path": r_info["path"],
+                    "mtime": r_info["mtime"],
+                    "unreviewed_commits": bool(g and g.get("last_commit") and g["last_commit"] > r_info["mtime"]),
+                }
+        except Exception:
+            pass
+
         mine = (reg.get("user") or {}).get(name) or {}
         hidden = mine["hidden"] if isinstance(mine.get("hidden"), bool) else name in reg["hidden"]
         rows.append({
@@ -331,6 +345,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "media": spec.get("media"),
             "git": g,
             "github": (g or {}).get("github"),
+            "review": rev,
             "live": spec.get("live"),
             "open_file": spec.get("open_file"),
             "port": int(port) if port else None,

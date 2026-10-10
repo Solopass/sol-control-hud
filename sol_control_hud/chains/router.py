@@ -188,9 +188,15 @@ class RouterClient:
                 return raw_t, raw_c, ("answering" if raw_c else "thinking")
             return "", raw_c, ("answering" if raw_c else "generating")
 
+        thought_ended_wall: float | None = None
+
         def _publish_thought(active: bool, ph: str | None = None) -> None:
+            nonlocal thought_ended_wall
             th_text, ans_text, auto_ph = _get_thinking_and_content()
             phase = ph or auto_ph
+            if phase in ("answering", "completed", "done") and thought_ended_wall is None and th_text:
+                thought_ended_wall = time.time()
+            thinking_s = round(thought_ended_wall - start_wall, 1) if thought_ended_wall else None
             try:
                 write_live_thought({
                     "active": active,
@@ -202,39 +208,48 @@ class RouterClient:
                     "tokens": pieces,
                     "started_at": start_wall,
                     "updated_at": time.time(),
+                    "thinking_s": thinking_s,
                 })
             except Exception:
                 pass
 
         _publish_thought(True, "thinking" if reasoning != "off" else "generating")
+        retries_50x = 3
         try:
-            with self.http.stream("POST", f"{self.base_url}/v1/chat/completions", json=body) as r:
-                if r.status_code >= 400:
-                    r.read()
-                    if r.status_code in (502, 503):  # the model is (un)loading or the router is switching presets
-                        raise ModelUnavailable(f"the engine is busy switching models (HTTP {r.status_code}); try again shortly")
-                    raise LLMError(f"HTTP {r.status_code} from the router: {r.text[:300]}")
-                for line in r.iter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    payload = line[5:].strip()
-                    if payload == "[DONE]":
-                        break
-                    chunk = json.loads(payload)
-                    usage = chunk.get("usage") or usage
-                    for choice in chunk.get("choices") or []:
-                        delta = choice.get("delta") or {}
-                        if delta.get("content"):
-                            content.append(delta["content"]); pieces += 1
-                        if delta.get("reasoning_content"):
-                            thinking.append(delta["reasoning_content"]); pieces += 1
-                        finish = choice.get("finish_reason") or finish
-                    now = time.monotonic()
-                    if now - last_thought_write >= 0.2:
-                        _publish_thought(True)
-                        last_thought_write = now
-                    if on_progress and now - last >= 5:
-                        on_progress(pieces); last = now
+            while True:
+                with self.http.stream("POST", f"{self.base_url}/v1/chat/completions", json=body) as r:
+                    if r.status_code >= 400:
+                        r.read()
+                        if r.status_code in (502, 503):  # the model is (un)loading or the router is switching presets
+                            if retries_50x > 0:
+                                retries_50x -= 1
+                                _publish_thought(True, "switching")
+                                time.sleep(3.0)
+                                continue
+                            raise ModelUnavailable(f"the engine is busy switching models (HTTP {r.status_code}); try again shortly")
+                        raise LLMError(f"HTTP {r.status_code} from the router: {r.text[:300]}")
+                    for line in r.iter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            break
+                        chunk = json.loads(payload)
+                        usage = chunk.get("usage") or usage
+                        for choice in chunk.get("choices") or []:
+                            delta = choice.get("delta") or {}
+                            if delta.get("content"):
+                                content.append(delta["content"]); pieces += 1
+                            if delta.get("reasoning_content"):
+                                thinking.append(delta["reasoning_content"]); pieces += 1
+                            finish = choice.get("finish_reason") or finish
+                        now = time.monotonic()
+                        if now - last_thought_write >= 0.2:
+                            _publish_thought(True)
+                            last_thought_write = now
+                        if on_progress and now - last >= 5:
+                            on_progress(pieces); last = now
+                break
         except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError, httpx.WriteError) as e:
             # the router restarted mid-answer (Away <-> Desk switch, game guard, wake): the step runs again later
             raise ModelUnavailable(f"the engine stopped mid-answer ({type(e).__name__}); the step runs again when it's back") from e

@@ -144,7 +144,16 @@
   </article>
 
   <article class="card wide" id="c-chains" data-open="RUN">
-    <h2>Chains <button class="mini" data-act="open" data-target="RUN">open folder</button></h2>
+    <h2>
+      <span>Chains</span>
+      <div class="notes-controls">
+        <select id="chainSelect" class="mini-select" title="Select a chain to run or view"></select>
+        <button class="mini go" id="btnRunChainNow" title="Run immediately without waiting">▶ Run</button>
+        <button class="mini ghost" id="btnQueueChain" title="Queue chain">🌙 Queue</button>
+        <button class="mini ghost" id="btnViewChainResults" title="View latest run result">📄 Results</button>
+        <button class="mini" data-act="open" data-target="RUN">open folder</button>
+      </div>
+    </h2>
     <div class="seg" id="runSeg"></div>
     <div class="chain-progress-box" id="chainProgressBox" hidden>
       <div class="row"><span id="chainStepName" class="small"></span><b id="chainStepPct" class="small"></b></div>

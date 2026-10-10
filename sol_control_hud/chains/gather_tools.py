@@ -25,6 +25,35 @@ MAX_CHARS = 90000            # ~30k tokens: what fits a 32k model with room to a
 REVIEW_MAX_FILE_LINES = 800  # bigger diffs are listed as skipped (a 32k Away model must fit the diff + its answer)
 
 
+def _prune_file_text(text: str, filename: str) -> str:
+    """Semantic pruning for large files exceeding 20k characters."""
+    if len(text) <= 20000:
+        return text
+    lines = text.splitlines()
+    pruned = []
+    in_block_comment = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("/*") and not stripped.endswith("*/"):
+            in_block_comment = True
+            continue
+        if in_block_comment:
+            if "*/" in stripped:
+                in_block_comment = False
+            continue
+        if filename.endswith((".py", ".js", ".ts")):
+            if (
+                stripped.startswith(("def ", "class ", "async def ", "export ", "function ", "import ", "from ", "@"))
+                or stripped.startswith(('"""', "'''"))
+                or not stripped
+            ):
+                pruned.append(line)
+        else:
+            pruned.append(line)
+    result = "\n".join(pruned)
+    return result if len(result) < len(text) else text[:20000] + "\n...(truncated for context length)..."
+
+
 def gather_files(args: dict, ctx=None) -> str:
     items = ft.list_files({"folder": args["folder"], "glob": args.get("glob") or "*.md", "recursive": True,
                            "since_days": args.get("since_days"), "max_files": 300})
@@ -32,6 +61,8 @@ def gather_files(args: dict, ctx=None) -> str:
     parts, used, cut = [], 0, 0
     for it in items:
         text = ft.read_item(it).strip()
+        if len(text) > 20000:
+            text = _prune_file_text(text, it.get("rel", ""))
         block = f"### {it['rel']}\n{text}\n"
         if used + len(block) > int(args.get("max_chars", MAX_CHARS)):
             cut += 1

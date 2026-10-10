@@ -50,6 +50,13 @@ function projRow(p) {
   if (p.running) chips.push(`<span class="pill ok" title="${p.running.where === 'wsl' ? 'runs in WSL' : `pid ${p.running.pid}`}">:${p.running.port}${p.running.up_seconds ? ` · ${upWords(p.running.up_seconds)}` : ''}</span>`);
   else if (p.busy_by) chips.push(`<span class="pill warn" title="Something else holds its port">:${p.port} taken · ${esc(p.busy_by)}</span>`);
   if (g.dirty_files) chips.push(`<span class="pill ${(g.dirty_days || 0) > 3 ? 'red' : 'warn'}" title="Uncommitted changes; the oldest is ${g.dirty_days ?? '?'} days old">${g.dirty_files} uncommitted${g.dirty_days ? ` · ${g.dirty_days}d` : ''}</span>`);
+  if (p.review) {
+    if (p.review.unreviewed_commits) {
+      chips.push(`<span class="pill warn" title="New commits since last review: ${esc(p.review.name)}">unreviewed commits</span>`);
+    } else {
+      chips.push(`<span class="pill ok" title="${esc(p.review.name)}">reviewed ${ago(p.review.mtime)}</span>`);
+    }
+  }
   if (p.hidden) chips.push(`<span class="pill dim" title="${esc(p.why_hidden)}">hidden</span>`);
   const acts = [];
   if (p.running && p.url) acts.push(`<button class="mini" data-p="open" title="${esc(p.url)}">↗ Open</button>`);
@@ -58,7 +65,8 @@ function projRow(p) {
   if (p.running && p.can_stop) acts.push(`<button class="mini danger" data-p="stop" title="Stop it">■</button>`);
   if (p.live) acts.push(`<button class="mini ghost" data-p="live" title="${esc(p.live)}">🌐 Site</button>`);
   if (p.github) acts.push(`<button class="mini ghost" data-p="github" title="${esc(p.github)}">GitHub</button>`);
-  acts.push(`<button class="mini ghost" data-p="bughunt" title="Run Bug Hunt chain on ${esc(p.name)}">🐞 Hunt</button>`);
+  const huntClass = (p.review && p.review.unreviewed_commits) ? 'mini warn' : 'mini ghost';
+  acts.push(`<button class="${huntClass}" data-p="bughunt" title="Run Bug Hunt chain on ${esc(p.name)}">🐞 Hunt</button>`);
   acts.push(`<button class="mini ghost" data-p="editor" title="Open in VS Code">‹/›</button>`);
   acts.push(`<button class="mini ghost" data-p="folder" title="Open the folder">📁</button>`);
   acts.push(`<button class="mini ghost${menuFor === p.name ? ' on' : ''}" data-p="menu" title="Tag or hide">⋯</button>`);

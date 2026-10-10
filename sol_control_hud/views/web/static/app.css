@@ -313,9 +313,10 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 
 /* Obsidian Notes widget */
 .notes-controls { display:flex; gap:6px; align-items:center; }
-.notes-controls select { padding:3px 8px; font-size:11px; max-width:140px; }
 .mini-search { background:var(--badge); border:1px solid var(--line); border-radius:9px; padding:3px 9px; font-size:11px; color:var(--text); width:130px; transition:border-color .2s, width .2s; }
 .mini-search:focus { outline:none; border-color:var(--cyan); width:170px; }
+.mini-select { background:var(--badge); border:1px solid var(--line); border-radius:6px; padding:3px 6px; font-size:11px; color:var(--text); max-width:160px; }
+.mini-select:focus { outline:none; border-color:var(--cyan); }
 .notes-list { display:flex; flex-direction:column; gap:4px; max-height:330px; overflow-y:auto; padding-right:2px; }
 .note-row { display:grid; grid-template-columns:minmax(140px, 1.5fr) minmax(80px, 1fr) auto auto; gap:10px; align-items:center;
   padding:6px 10px; border-radius:8px; background:var(--badge); font-size:13px; transition:background .15s, border-color .15s;

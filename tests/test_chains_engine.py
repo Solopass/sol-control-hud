@@ -38,6 +38,8 @@ class Scripted:
         item = self.script[model].pop(0)
         if isinstance(item, Exception):
             raise item
+        if isinstance(item, ChatResult):
+            return item
         return ChatResult(content=item, finish_reason="stop", completion_tokens=5)
 
 
@@ -236,6 +238,57 @@ def test_router_client_streams_and_maps_reasoning(monkeypatch):
         c.resolve("sol-specialist")
     c.allow_fallback = True
     assert c.resolve("sol-specialist") == "sol-smart"
+
+
+def test_adaptive_length_retry_turns_reasoning_off(store):
+    doc = {"name": "length_test", "steps": [
+        {"id": "gen", "model": "m", "prompt": "write long essay", "reasoning": "high", "max_tokens": 1000, "retries": 1}
+    ]}
+    r1 = ChatResult(content="cut off text...", finish_reason="length", completion_tokens=1000)
+    r2 = ChatResult(content="complete answer here", finish_reason="stop", completion_tokens=1800)
+    client = Scripted({"m": [r1, r2]})
+    rid = Runner(client, store).run(parse(doc), {})
+    assert store.run(rid)["status"] == "succeeded"
+    assert len(client.calls) == 2
+    assert client.calls[0]["reasoning"] == "high"
+    assert client.calls[0]["max_tokens"] == 1000
+    assert client.calls[1]["reasoning"] == "off"
+    assert client.calls[1]["max_tokens"] == 2000
+
+
+def test_router_502_retries_and_recovers(monkeypatch):
+    monkeypatch.setattr("sol_control_hud.chains.router.engine_mode", lambda: "desk")
+    attempts = 0
+
+    def handler(req):
+        nonlocal attempts
+        if req.url.path == "/models":
+            return httpx.Response(200, json=MODELS)
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(502, text="bad gateway (model loading)")
+        sse = "data: " + json.dumps({"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]}) + "\n\ndata: [DONE]\n\n"
+        return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
+
+    c = _router(handler)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    res = c.chat("sol-fast", [{"role": "user", "content": "hi"}])
+    assert res.content == "ok"
+    assert attempts == 2
+
+
+def test_router_502_exhausted_raises_unavailable(monkeypatch):
+    monkeypatch.setattr("sol_control_hud.chains.router.engine_mode", lambda: "desk")
+
+    def handler(req):
+        if req.url.path == "/models":
+            return httpx.Response(200, json=MODELS)
+        return httpx.Response(503, text="service unavailable")
+
+    c = _router(handler)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    with pytest.raises(ModelUnavailable, match="switching models"):
+        c.chat("sol-fast", [{"role": "user", "content": "hi"}])
 
 
 def test_router_client_waits_while_the_game_guard_has_the_ai_off(monkeypatch):

@@ -448,8 +448,15 @@ function renderAiThinking(p) {
 
   if (termCode && statusEl) {
     if (th.active) {
-      statusEl.textContent = th.phase === 'thinking' ? 'Thinking (inner reasoning)…' : 'Answering…';
-      statusEl.style.color = th.phase === 'thinking' ? '#c084fc' : 'var(--cyan)';
+      const elapsed = th.started_at ? (Date.now() / 1000 - th.started_at).toFixed(1) : null;
+      if (th.phase === 'thinking') {
+        statusEl.textContent = `Thinking (inner reasoning)${elapsed ? ` · ${elapsed}s` : ''}…`;
+        statusEl.style.color = '#c084fc';
+      } else {
+        const thoughtInfo = th.thinking_s ? `Thought ${th.thinking_s}s · ` : '';
+        statusEl.textContent = `${thoughtInfo}Answering${elapsed ? ` · ${elapsed}s` : ''}…`;
+        statusEl.style.color = 'var(--cyan)';
+      }
       termCode.className = th.phase === 'thinking' ? 'is-thinking' : 'is-answering';
       const textToShow = th.text || th.preview || 'Generating reasoning tokens…';
       termCode.textContent = textToShow;
@@ -460,7 +467,8 @@ function renderAiThinking(p) {
       const spInfo = sp.tg_tps ? `${sp.tg_tps} tok/s` : (sp.prompt_tps ? `prompt eval: ${sp.prompt_tps} tok/s` : '');
       termCode.textContent = `Generating with ${ops.model || 'local model'}${spInfo ? ` at ${spInfo}` : ''}...\n(Inference active on port ${ops.port || ':11440'})`;
     } else if (th.text && isRecent) {
-      statusEl.textContent = `Completed reasoning session (${agoShort(th.updated_at || Date.now() / 1000)})`;
+      const thoughtInfo = th.thinking_s ? `Thought ${th.thinking_s}s · ` : '';
+      statusEl.textContent = `Completed reasoning session (${thoughtInfo}${agoShort(th.updated_at || Date.now() / 1000)})`;
       statusEl.style.color = 'var(--dim)';
       termCode.className = '';
       termCode.textContent = th.text + (th.preview ? `\n\n[Answer Preview]:\n${th.preview}` : '');
@@ -847,6 +855,15 @@ async function loadControl() {
   setHTML($('answerList'), control.answers.length ? control.answers.map((a) => `<div class="item link" data-answer="${esc(a.file)}">` +
     `<span><b>${esc(a.title)}</b> <span class="dim">· ${esc(when(a.time))}${a.model ? ' · ' + esc(a.model) : ''}</span></span><span class="pv">${esc(a.preview)}</span></div>`).join('')
     : '<div class="empty">no answers yet</div>');
+  const chainSel = $('chainSelect');
+  if (chainSel && control.chains) {
+    const curVal = chainSel.value;
+    chainSel.innerHTML = control.chains.map((c) => `<option value="${esc(c.name)}">${esc(c.name)} (${esc(c.status)})</option>`).join('');
+    if (curVal && Array.from(chainSel.options).some((o) => o.value === curVal)) {
+      chainSel.value = curVal;
+    }
+  }
+  initChainLauncher();
   if (schedEdit) return;                     // don't redraw under an open schedule editor
   setHTML($('chainList'), control.chains.map((c) => {
     const ops = OPS[c.status] || ['run', 'pause'];
@@ -857,6 +874,57 @@ async function loadControl() {
       ops.map((o) => `<button class="mini" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o]}</button>`).join('') +
       (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>';
   }).join('') || '<div class="empty">no chain notes in 1Notebook\\Chains</div>');
+}
+
+function initChainLauncher() {
+  const sel = $('chainSelect');
+  const btnRun = $('btnRunChainNow');
+  const btnQueue = $('btnQueueChain');
+  const btnRes = $('btnViewChainResults');
+  if (btnRun && !btnRun._init) {
+    btnRun._init = true;
+    btnRun.onclick = async () => {
+      const name = sel ? sel.value : null;
+      if (!name) return;
+      btnRun.disabled = true;
+      const r = await post('/api/action', { action: 'chain', target: name, op: 'now' });
+      toast(r ? r.why : `Queued ${name} (running now)`);
+      btnRun.disabled = false;
+      loadControl();
+    };
+  }
+  if (btnQueue && !btnQueue._init) {
+    btnQueue._init = true;
+    btnQueue.onclick = async () => {
+      const name = sel ? sel.value : null;
+      if (!name) return;
+      btnQueue.disabled = true;
+      const r = await post('/api/action', { action: 'chain', target: name, op: 'run' });
+      toast(r ? r.why : `Queued ${name}`);
+      btnQueue.disabled = false;
+      loadControl();
+    };
+  }
+  if (btnRes && !btnRes._init) {
+    btnRes._init = true;
+    btnRes.onclick = async () => {
+      const name = sel ? sel.value : null;
+      if (!name) return;
+      btnRes.disabled = true;
+      try {
+        const a = await (await fetch(`/api/chain-result?name=${encodeURIComponent(name)}`)).json();
+        if (a.ok) {
+          openReader(`${name}: latest result`, a.text);
+        } else {
+          toast(a.why || 'No result found yet');
+        }
+      } catch (err) {
+        toast('Could not fetch chain result');
+      } finally {
+        btnRes.disabled = false;
+      }
+    };
+  }
 }
 // ---------- chain schedules: edit `schedule:` from the card (the server checks it with the runner's own parser)
 let schedEdit = null;

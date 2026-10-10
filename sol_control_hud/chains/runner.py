@@ -271,14 +271,15 @@ class Runner:
             if model != step.model:
                 self.store.event(run_id, "escalated", step.id, to=model, after=last)
             first = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
-            model = self._fit_model(run_id, step, model, first)
+            task_desc = f"{wf.name} · {step.id}{f' ({label})' if label else ''}"
+            model = self._fit_model(run_id, step, model, first, task=task_desc)
             messages = list(first)
             budget = step.max_tokens
+            reasoning_override: str | None = None
             for attempt in range(1, attempts + 1):
                 if self._stopping(run_id):
                     raise Cancelled()
-                task_desc = f"{wf.name} · {step.id}{f' ({label})' if label else ''}"
-                result = self._chat(run_id, step, model, messages, attempt, max_tokens=budget, task=task_desc)
+                result = self._chat(run_id, step, model, messages, attempt, max_tokens=budget, task=task_desc, reasoning=reasoning_override)
                 try:
                     output = self._accept(step, result)
                 except StepFailure as e:
@@ -288,6 +289,8 @@ class Runner:
                     if result.finish_reason == "length":
                         # the same budget would run out again (thinking models): retry once with twice the room
                         budget = min(budget * 2, MAX_RETRY_TOKENS)
+                        reasoning_override = "off"
+                        self.store.event(run_id, "retry_length_override", step.id, budget=budget, reasoning="off")
                         messages = list(first)
                         continue
                     # feed the problem back so the retry can fix it
@@ -340,7 +343,7 @@ class Runner:
         self.store.event(run_id, "critic_revised", step.id, model=model)
         return improved
 
-    def _fit_model(self, run_id: int, step: Step, model: str, messages: list[dict]) -> str:
+    def _fit_model(self, run_id: int, step: Step, model: str, messages: list[dict], task: str | None = None) -> str:
         """Budget check (phase 1.4): the prompt must fit the model's context, else long_model, else a clear stop."""
         fits = getattr(self.client, "fits", None)
         if fits is None:
@@ -352,16 +355,33 @@ class Runner:
             ok2, _, ctx2 = fits(step.long_model, messages, step.max_tokens)
             if ok2:
                 self.store.event(run_id, "long_model", step.id, frm=model, to=step.long_model, prompt_tokens=tokens)
+                try:
+                    from ..data.collectors.ai_ops import write_live_thought
+                    task_label = f"{task or f'Run {run_id} · {step.id}'} [Promoted to {step.long_model} ({tokens} tokens)]"
+                    write_live_thought({
+                        "active": True,
+                        "phase": "escalating",
+                        "model": step.long_model,
+                        "task": task_label,
+                        "thinking": f"Escalated from {model} to {step.long_model}: prompt has ~{tokens} tokens (context limit {ctx}).",
+                        "preview": "",
+                        "tokens": 0,
+                        "started_at": time.time(),
+                        "updated_at": time.time(),
+                    })
+                except Exception:
+                    pass
                 return step.long_model
             ctx = max(ctx or 0, ctx2 or 0)
         raise StepFailure(f"step '{step.id}': the prompt is ~{tokens} tokens but {model} holds {ctx}; split the input "
                           f"with for_each or use a model with a bigger context (long_model)")
 
     def _chat(self, run_id: int, step: Step, model: str, messages: list[dict], attempt: int,
-              max_tokens: int | None = None, task: str | None = None):
+              max_tokens: int | None = None, task: str | None = None, reasoning: str | None = None):
         kw: dict = {"schema": step.schema, "max_tokens": max_tokens or step.max_tokens, "seed": self.seed + attempt}
-        if step.reasoning is not None:
-            kw["reasoning"] = step.reasoning
+        active_reasoning = reasoning if reasoning is not None else step.reasoning
+        if active_reasoning is not None:
+            kw["reasoning"] = active_reasoning
         if step.temperature is not None:
             kw["temperature"] = step.temperature
         if hasattr(self.client, "resolve"):  # router client: keep the run's heartbeat fresh while it writes

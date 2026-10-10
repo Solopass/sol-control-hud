@@ -172,6 +172,7 @@ def read_live_thought(path: Path = THOUGHT_FILE, max_age_s: float = 45.0) -> dic
             "tokens": 0,
             "started_at": None,
             "updated_at": None,
+            "thinking_s": None,
         }
 
 
@@ -229,6 +230,8 @@ def sample_ai_ops(procs: dict | None = None, router_log: Path = ROUTER_LOG, thou
             "text": thought.get("thinking", ""),
             "preview": thought.get("preview", ""),
             "tokens": thought.get("tokens", 0),
+            "started_at": thought.get("started_at"),
             "updated_at": thought.get("updated_at"),
+            "thinking_s": thought.get("thinking_s"),
         },
     }

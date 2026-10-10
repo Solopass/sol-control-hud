@@ -118,8 +118,7 @@ Candidate defects found in {name}:
 
 {{{{First pass}}}}
 
-Many first-pass findings are not real problems. Keep only what can actually bite: crashes, wrong results, data loss, hangs, races, security. Drop style, naming, "consider adding", and anything clearly intentional.
-Reply with at most 8 bullets, highest risk first: **[high|medium]** file: the problem, then the fix in one sentence.
+Reply with at most 8 markdown task checkboxes, highest risk first: - [ ] **[high|medium]** file: the problem, then the fix in one sentence.
 If nothing real is left, reply exactly: No real issues.
 """
     cdir.mkdir(parents=True, exist_ok=True)
