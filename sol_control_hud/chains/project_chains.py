@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from . import chain_note
@@ -10,6 +11,21 @@ from ..paths import DATA_DIR
 CHAINS_DIR = Path(os.environ.get("SOL_CHAINS", r"D:\OBVLT\1Notebook\Chains"))
 REVIEWS_DIR = Path(os.environ.get("SOL_REVIEWS", r"D:\OBVLT\1Notebook\Reviews"))
 WORKSPACE_DIR = Path(os.environ.get("SOL_WORKSPACE", r"D:\Workspace"))
+
+
+def parse_review_tasks(file_path: Path) -> dict:
+    """Parses markdown task checkboxes (- [ ] vs - [x]) in a review note."""
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"total": 0, "open": 0, "resolved": 0}
+    open_count = len(re.findall(r"^[ \t]*- \[[ \t]\]", text, re.MULTILINE))
+    resolved_count = len(re.findall(r"^[ \t]*- \[[xX]\]", text, re.MULTILINE))
+    return {
+        "total": open_count + resolved_count,
+        "open": open_count,
+        "resolved": resolved_count,
+    }
 
 
 def find_chain_for_project(name: str, chains_dir: Path | None = None) -> Path | None:
@@ -173,4 +189,5 @@ def find_latest_review(name: str, reviews_dir: Path | None = None) -> dict | Non
         "path": f"1Notebook/Reviews/{latest.name}",
         "full_path": str(latest),
         "mtime": latest.stat().st_mtime,
+        "tasks": parse_review_tasks(latest),
     }

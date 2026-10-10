@@ -17,11 +17,13 @@ Chains (2026-09-25, OBVLT plans/LOCAL_AI_AUTOMATION_PLAN.md phase 1):
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 import jsonschema
@@ -37,7 +39,21 @@ except ImportError:  # pragma: no cover
         pass
 
 
+LLM_DIR = Path(os.environ.get("SOL_LLM_DIR", r"D:\AI\Cache\llm"))
 MAX_RETRY_TOKENS = 16384  # ceiling when a step that ran out of tokens is retried with more room
+
+
+def compact_text(text: str, max_chars: int = 2000) -> str:
+    """Condenses text exceeding max_chars to preserve key headings, bullets, and findings."""
+    if not isinstance(text, str) or len(text) <= max_chars:
+        return text
+    head_len = int(max_chars * 0.6)
+    tail_len = int(max_chars * 0.35)
+    omitted = len(text) - (head_len + tail_len)
+    if omitted <= 0:
+        return text[:max_chars]
+    marker = f"\n\n... [Compact memory: {omitted} characters omitted] ...\n\n"
+    return text[:head_len].rstrip() + marker + text[-tail_len:].lstrip()
 
 
 class Cancelled(Exception):
@@ -146,7 +162,10 @@ class Runner:
         self._cancel.set()
 
     def _stopping(self, run_id: int) -> bool:
-        return self._cancel.is_set() or self.store.cancel_requested(run_id)
+        if self._cancel.is_set() or self.store.cancel_requested(run_id):
+            return True
+        abort_file = LLM_DIR / "abort_inference.flag"
+        return abort_file.exists()
 
     # ---- entry points
     def run(self, wf: Workflow, inputs: dict, source: str | None = None) -> int:
@@ -300,6 +319,11 @@ class Runner:
                 self.store.event(run_id, "attempt", step.id, model=model, attempt=attempt, ok=True, completion_tokens=result.completion_tokens)
                 if step.critic:
                     output = self._critic_round(run_id, step, model, first, output, budget)
+                if step.compact and isinstance(output, str):
+                    limit = int(step.compact) if isinstance(step.compact, int) and step.compact > 0 else 2000
+                    if len(output) > limit:
+                        output = compact_text(output, limit)
+                        self.store.event(run_id, "compacted", step.id, chars=len(output), limit=limit)
                 self.store.event(run_id, "step_succeeded", step.id, model=model, seconds=round(time.monotonic() - started, 1),
                                  **({"item": label} if label else {}))
                 return output
@@ -417,6 +441,11 @@ class Runner:
             raise ToolError(f"step '{step.id}' ({step.tool}) failed: {reason}") from e
         if ctx.cancelled():
             raise Cancelled()
+        if step.compact and isinstance(output, str):
+            limit = int(step.compact) if isinstance(step.compact, int) and step.compact > 0 else 2000
+            if len(output) > limit:
+                output = compact_text(output, limit)
+                self.store.event(run_id, "compacted", step.id, chars=len(output), limit=limit)
         self.store.event(run_id, "step_succeeded", step.id, tool=step.tool, seconds=round(time.monotonic() - started, 1))
         return output
 

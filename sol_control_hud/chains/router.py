@@ -19,7 +19,9 @@ import httpx
 from .llm import CHARS_PER_TOKEN, ChatResult, LLMError, load_registry
 
 ROUTER_URL = os.environ.get("SOL_ROUTER", "http://127.0.0.1:11440")
-STATE_FILE = Path(os.environ.get("SOL_LLM_STATE", r"D:\AI\Cache\llm\state.json"))
+LLM_DIR = Path(os.environ.get("SOL_LLM_DIR", r"D:\AI\Cache\llm"))
+STATE_FILE = Path(os.environ.get("SOL_LLM_STATE", str(LLM_DIR / "state.json")))
+ABORT_FLAG = LLM_DIR / "abort_inference.flag"
 DESK_FALLBACK = {"sol-specialist": "sol-smart", "sol-coder": "sol-smart", "sol-coder-next": "sol-smart"}
 REASONING = ("off", "on", "low", "medium", "high")
 ANSWER_ROOM = 2048        # a thinking model needs room to think before it answers
@@ -229,6 +231,14 @@ class RouterClient:
                             raise ModelUnavailable(f"the engine is busy switching models (HTTP {r.status_code}); try again shortly")
                         raise LLMError(f"HTTP {r.status_code} from the router: {r.text[:300]}")
                     for line in r.iter_lines():
+                        if ABORT_FLAG.exists():
+                            try:
+                                ABORT_FLAG.unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                            _publish_thought(False, "aborted")
+                            from .workflow import Cancelled
+                            raise Cancelled("inference aborted by user")
                         if not line.startswith("data:"):
                             continue
                         payload = line[5:].strip()

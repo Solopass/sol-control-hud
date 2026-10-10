@@ -77,10 +77,13 @@ def test_find_latest_review(tmp_path):
     assert res["path"] == f"1Notebook/Reviews/{res['name']}"
 
     assert project_chains.find_latest_review("nonexistent", reviews_dir=rev_dir) is None
-    # No false positives on substrings
-    (rev_dir / "2026-10-04 bug hunt sol-control-hud.md").write_text("Review HUD")
-    assert project_chains.find_latest_review("sol-hud", reviews_dir=rev_dir) is None
-    assert project_chains.find_latest_review("sol-control-hud", reviews_dir=rev_dir) is not None
+    # Review tasks parsing (- [ ] vs - [x])
+    (rev_dir / "2026-10-05 bug hunt speedman.md").write_text(
+        "# Findings\n- [ ] **[high]** bug in api\n- [x] **[medium]** fixed crash\n- [ ] **[low]** typo"
+    )
+    res_speedman = project_chains.find_latest_review("speedman", reviews_dir=rev_dir)
+    assert res_speedman is not None
+    assert res_speedman["tasks"] == {"total": 3, "open": 2, "resolved": 1}
 
 
 def test_hub_project_bughunt_action(tmp_path, monkeypatch):

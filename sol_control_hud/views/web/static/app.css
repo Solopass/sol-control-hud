@@ -732,3 +732,40 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
 .chain-thinking-terminal code.is-answering {
   color: #38bdf8;
 }
+
+/* Collapsible reasoning block */
+.think-fold {
+  margin-bottom: 8px;
+  border: 1px solid color-mix(in srgb, #c084fc 35%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, #c084fc 8%, transparent);
+  overflow: hidden;
+}
+.think-fold summary {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #c084fc;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.think-fold summary:hover {
+  background: color-mix(in srgb, #c084fc 15%, transparent);
+}
+.think-fold .think-fold-body {
+  padding: 8px;
+  border-top: 1px solid color-mix(in srgb, #c084fc 20%, transparent);
+  color: #e2e8f0;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.answer-stream {
+  color: #38bdf8;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 6px;
+}

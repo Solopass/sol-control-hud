@@ -327,6 +327,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
                     "path": r_info["path"],
                     "mtime": r_info["mtime"],
                     "unreviewed_commits": bool(g and g.get("last_commit") and g["last_commit"] > r_info["mtime"]),
+                    "tasks": r_info.get("tasks") or {"total": 0, "open": 0, "resolved": 0},
                 }
         except Exception:
             pass

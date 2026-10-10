@@ -284,6 +284,19 @@ class Hub:
                 return {"ok": False, "why": "Away isn't running"}
             (llm / "away-stop.flag").write_text(time.strftime("%Y-%m-%dT%H:%M:%S"), encoding="utf-8")
             return {"ok": True, "why": "stopping: the job goes back in the queue"}
+        if action == "abort_inference":
+            flag = llm / "abort_inference.flag"
+            try:
+                flag.write_text(time.strftime("%Y-%m-%dT%H:%M:%S"), encoding="utf-8")
+            except OSError as e:
+                return {"ok": False, "why": f"Could not write abort flag: {e}"}
+            from .data.collectors.ai_ops import read_live_thought, write_live_thought
+            cur = read_live_thought()
+            cur["active"] = False
+            cur["phase"] = "aborted"
+            write_live_thought(cur)
+            log("abort inference requested from dashboard")
+            return {"ok": True, "why": "Inference abort signal sent"}
         if action in ("away", "away-sleep"):
             script = Path(r"D:\OBVLT\tools\sol-llm.ps1")
             subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), action],

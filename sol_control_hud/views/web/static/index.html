@@ -91,6 +91,7 @@
       <span>Live AI Thinking <span class="dim" id="thinkModelBadge">–</span></span>
       <div class="notes-controls">
         <span class="pill" id="thinkPhasePill">idle</span>
+        <button class="mini danger" id="thinkAbortBtn" hidden title="Abort current inference step">⏹ Abort</button>
         <button class="mini ghost" id="thinkAutoScrollBtn" aria-pressed="true" title="Toggle terminal auto-scroll">↓ Auto</button>
         <button class="mini ghost" id="thinkClearBtn" title="Clear reasoning buffer">Clear</button>
       </div>
@@ -168,6 +169,7 @@
           <span class="small" id="chainThinkStep">Live Reasoning</span>
         </span>
         <div class="chain-thinking-meta">
+          <button class="mini danger" id="chainThinkAbortBtn" hidden title="Abort running chain step">⏹ Abort</button>
           <span class="small dim" id="chainThinkSpeed">– tok/s</span>
           <span class="small dim" id="chainThinkTokens">0 tokens</span>
         </div>

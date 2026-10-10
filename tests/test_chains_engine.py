@@ -15,7 +15,7 @@ from sol_control_hud.chains import file_tools as ft
 from sol_control_hud.chains.gpulock import LockTimeout, gpu_lock, holder
 from sol_control_hud.chains.llm import ChatResult, LLMError
 from sol_control_hud.chains.router import ModelUnavailable, RouterClient
-from sol_control_hud.chains.runner import Runner
+from sol_control_hud.chains.runner import Runner, compact_text
 from sol_control_hud.chains.store import Store
 from sol_control_hud.chains.workflow import WorkflowError, parse
 
@@ -425,3 +425,30 @@ def test_ran_out_of_tokens_retries_with_twice_the_room(store):
     assert store.run(rid)["status"] == "succeeded"
     assert [c["max_tokens"] for c in client.calls] == [3000, 6000]
     assert len(client.calls[1]["messages"]) == 1          # a fresh try, not "your answer was rejected"
+
+
+def test_compact_text_and_step_compaction(store):
+    short = "Short message"
+    assert compact_text(short, 100) == short
+
+    long_text = "HEAD: Important introduction and context. " + ("x" * 200) + " TAIL: Final conclusion and key findings."
+    compacted = compact_text(long_text, max_chars=80)
+    assert len(compacted) < len(long_text)
+    assert "HEAD: Important" in compacted
+    assert "key findings" in compacted
+    assert "[Compact memory:" in compacted
+
+    # Test within Runner
+    client = Scripted({"m": [long_text]})
+    doc = {"name": "compaction_test", "steps": [
+        {"id": "step1", "model": "m", "prompt": "test prompt", "compact": 80}
+    ]}
+    rid = Runner(client, store).run(parse(doc), {})
+    run = store.run(rid)
+    assert run["status"] == "succeeded"
+    saved = store.saved_outputs(rid)
+    out = saved["step1"][-1]
+    assert "[Compact memory:" in out
+    events = store.events(rid)
+    assert any(ev["kind"] == "compacted" and ev["step"] == "step1" for ev in events)
+

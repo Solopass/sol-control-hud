@@ -67,6 +67,7 @@ class Step:
     for_each: dict | None = None          # {"items": "{{ ref }}", "as": "name"}
     continue_on_error: bool = False
     critic: dict | None = None            # {"criteria": str, "model": str | None} (phase 5)
+    compact: int | bool | None = None
 
 
 @dataclass
@@ -84,7 +85,7 @@ CHECK_KEYS = {"path", "min_items", "max_items", "contains", "matches", "equals",
               "min_words", "max_words"}
 REASONING = ("off", "on", "low", "medium", "high")
 STEP_KEYS = {"id", "model", "prompt", "schema", "checks", "retries", "escalate_to", "max_tokens", "tool", "args", "system",
-             "reasoning", "temperature", "long_model", "for_each", "continue_on_error", "critic"}
+             "reasoning", "temperature", "long_model", "for_each", "continue_on_error", "critic", "compact"}
 
 
 def load(path: str | Path) -> Workflow:
@@ -162,7 +163,8 @@ def parse(doc: dict) -> Workflow:
                           reasoning=s.get("reasoning"), temperature=s.get("temperature"), long_model=s.get("long_model"),
                           for_each=({"items": s["for_each"]["items"].strip(), "as": loop_var} if loop_var else None),
                           continue_on_error=bool(s.get("continue_on_error", False)),
-                          critic=({"criteria": str(critic["criteria"]), "model": critic.get("model")} if critic else None)))
+                          critic=({"criteria": str(critic["criteria"]), "model": critic.get("model")} if critic else None),
+                          compact=s.get("compact")))
         seen.add(s["id"])
     return Workflow(name=doc["name"], inputs=inputs, steps=steps, system=doc.get("system"),
                     fallback=bool(doc.get("fallback", False)))

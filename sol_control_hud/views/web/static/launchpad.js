@@ -51,10 +51,18 @@ function projRow(p) {
   else if (p.busy_by) chips.push(`<span class="pill warn" title="Something else holds its port">:${p.port} taken · ${esc(p.busy_by)}</span>`);
   if (g.dirty_files) chips.push(`<span class="pill ${(g.dirty_days || 0) > 3 ? 'red' : 'warn'}" title="Uncommitted changes; the oldest is ${g.dirty_days ?? '?'} days old">${g.dirty_files} uncommitted${g.dirty_days ? ` · ${g.dirty_days}d` : ''}</span>`);
   if (p.review) {
+    const t = p.review.tasks || { total: 0, open: 0, resolved: 0 };
+    if (t.total > 0) {
+      if (t.open === 0) {
+        chips.push(`<span class="pill ok" style="cursor:pointer" data-p="review" title="${t.resolved}/${t.total} findings resolved in Obsidian (click to open): ${esc(p.review.name)}">${t.resolved}/${t.total} resolved</span>`);
+      } else {
+        chips.push(`<span class="pill warn" style="cursor:pointer" data-p="review" title="${t.open} open finding(s) in Obsidian (click to open): ${esc(p.review.name)}">${t.open} open finding${t.open > 1 ? 's' : ''}</span>`);
+      }
+    }
     if (p.review.unreviewed_commits) {
       chips.push(`<span class="pill warn" title="New commits since last review: ${esc(p.review.name)}">unreviewed commits</span>`);
-    } else {
-      chips.push(`<span class="pill ok" title="${esc(p.review.name)}">reviewed ${ago(p.review.mtime)}</span>`);
+    } else if (t.total === 0) {
+      chips.push(`<span class="pill ok" style="cursor:pointer" data-p="review" title="${esc(p.review.name)} (click to open)">reviewed ${ago(p.review.mtime)}</span>`);
     }
   }
   if (p.hidden) chips.push(`<span class="pill dim" title="${esc(p.why_hidden)}">hidden</span>`);
@@ -110,7 +118,7 @@ $('projSearch').oninput = () => loadProjects();
 $('projHidden').onclick = () => { projAll = !projAll; $('projHidden').setAttribute('aria-pressed', String(projAll)); loadProjects(); };
 $('projRefresh').onclick = () => loadProjects();
 $('projList').addEventListener('click', async (e) => {
-  const b = e.target.closest('button[data-p]');
+  const b = e.target.closest('[data-p]');
   if (!b) return;
   const name = b.closest('.jrow').dataset.name, p = projCache.find((x) => x.name === name) || {}, op = b.dataset.p;
   if (op === 'open') return openUrl(p.url);

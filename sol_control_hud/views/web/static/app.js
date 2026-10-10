@@ -376,6 +376,21 @@ function renderSpeed(p) {
 let thinkEventsInit = false;
 let thinkAutoScroll = true;
 
+function formatThinkingHtml(thoughtText, previewText, isThinking, thinkingS) {
+  const parts = [];
+  if (thoughtText && thoughtText.trim()) {
+    const summaryLabel = isThinking
+      ? '💭 Thinking in progress…'
+      : `💭 Thought process (${thinkingS ? `${thinkingS}s` : 'completed'})`;
+    const openAttr = isThinking ? ' open' : '';
+    parts.push(`<details class="think-fold"${openAttr}><summary>${summaryLabel}</summary><div class="think-fold-body">${esc(thoughtText)}</div></details>`);
+  }
+  if (previewText && previewText.trim()) {
+    parts.push(`<div class="answer-stream">${esc(previewText)}</div>`);
+  }
+  return parts.join('');
+}
+
 function initAiThinkingEvents() {
   if (thinkEventsInit) return;
   thinkEventsInit = true;
@@ -394,6 +409,13 @@ function initAiThinkingEvents() {
       if (code) code.textContent = 'Cleared buffer.';
     };
   }
+  const abortBtn = $('thinkAbortBtn');
+  if (abortBtn) {
+    abortBtn.onclick = async () => {
+      const r = await post('/api/action', { action: 'abort_inference' });
+      if (r?.why) toast(r.why);
+    };
+  }
 }
 
 function renderAiThinking(p) {
@@ -402,6 +424,11 @@ function renderAiThinking(p) {
   const ops = p.ai_ops || {};
   const sp = ops.speed || {};
   const th = ops.thinking || {};
+
+  const abortBtn = $('thinkAbortBtn');
+  if (abortBtn) {
+    abortBtn.hidden = !(th.active || ops.active);
+  }
 
   const modelName = ops.model || p.snapshot?.ai_model || '–';
   const badge = $('thinkModelBadge');
@@ -458,8 +485,11 @@ function renderAiThinking(p) {
         statusEl.style.color = 'var(--cyan)';
       }
       termCode.className = th.phase === 'thinking' ? 'is-thinking' : 'is-answering';
-      const textToShow = th.text || th.preview || 'Generating reasoning tokens…';
-      termCode.textContent = textToShow;
+      if (th.text || th.preview) {
+        setHTML(termCode, formatThinkingHtml(th.text, th.preview, th.phase === 'thinking', th.thinking_s));
+      } else {
+        termCode.textContent = 'Generating reasoning tokens…';
+      }
     } else if (ops.active) {
       statusEl.textContent = `Inference active · ${ops.phase || 'generating'}`;
       statusEl.style.color = 'var(--cyan)';
@@ -471,7 +501,7 @@ function renderAiThinking(p) {
       statusEl.textContent = `Completed reasoning session (${thoughtInfo}${agoShort(th.updated_at || Date.now() / 1000)})`;
       statusEl.style.color = 'var(--dim)';
       termCode.className = '';
-      termCode.textContent = th.text + (th.preview ? `\n\n[Answer Preview]:\n${th.preview}` : '');
+      setHTML(termCode, formatThinkingHtml(th.text, th.preview, false, th.thinking_s));
     } else {
       statusEl.textContent = 'No active reasoning stream';
       statusEl.style.color = 'var(--dim)';
@@ -569,6 +599,14 @@ function renderChains(p) {
         const itemInfo = run.items ? ` (${run.item || 1}/${run.items})` : (run.total ? ` (${run.done || 0}/${run.total})` : '');
         stepEl.textContent = `${run.chain} › ${run.step_name || 'step ' + (run.step || 1)}${itemInfo}`;
       }
+      const chainAbortBtn = $('chainThinkAbortBtn');
+      if (chainAbortBtn) {
+        chainAbortBtn.hidden = !isRunning;
+        chainAbortBtn.onclick = async () => {
+          const r = await post('/api/action', { action: 'abort_inference' });
+          if (r?.why) toast(r.why);
+        };
+      }
       if (speedEl) {
         const speedVal = sp.tg_tps != null ? sp.tg_tps : (sp.eval_tps != null ? sp.eval_tps : null);
         speedEl.textContent = (th.active || ops.active) && speedVal ? `${speedVal} tok/s` : '';
@@ -582,10 +620,10 @@ function renderChains(p) {
           termCode.textContent = `⏸ Paused / Waiting:\n${run.waiting}`;
         } else if (th.active && (th.text || th.preview)) {
           termCode.className = isThinking ? 'is-thinking' : 'is-answering';
-          termCode.textContent = th.text || th.preview;
+          setHTML(termCode, formatThinkingHtml(th.text, th.preview, isThinking, th.thinking_s));
         } else if (isRecentChainThought && (th.text || th.preview)) {
           termCode.className = '';
-          termCode.textContent = (th.text ? th.text : '') + (th.preview ? `\n\n[Answer]:\n${th.preview}` : '');
+          setHTML(termCode, formatThinkingHtml(th.text, th.preview, false, th.thinking_s));
         } else if (ops.active) {
           termCode.className = '';
           termCode.textContent = `▶ Generating with ${ops.model || 'model'}...\n(Processing inference on router)`;
