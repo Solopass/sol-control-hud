@@ -156,7 +156,7 @@ class RouterClient:
         return body
 
     def chat(self, model, messages, *, schema=None, max_tokens=8192, seed=None, tools=None, reasoning=None,
-             temperature=None, on_progress=None) -> ChatResult:
+             temperature=None, on_progress=None, task=None) -> ChatResult:
         if tools:
             raise LLMError("the router client doesn't do tool calls; use a tool step")
         engine_model = self.resolve(model)
@@ -165,6 +165,28 @@ class RouterClient:
         content: list[str] = []
         thinking: list[str] = []
         finish, usage, pieces, last = None, {}, 0, time.monotonic()
+        start_wall = time.time()
+        last_thought_write = time.monotonic()
+
+        from ..data.collectors.ai_ops import write_live_thought
+
+        def _publish_thought(active: bool, ph: str) -> None:
+            try:
+                write_live_thought({
+                    "active": active,
+                    "phase": ph,
+                    "model": engine_model,
+                    "task": task,
+                    "thinking": "".join(thinking)[-8000:],
+                    "preview": "".join(content)[-1000:],
+                    "tokens": pieces,
+                    "started_at": start_wall,
+                    "updated_at": time.time(),
+                })
+            except Exception:
+                pass
+
+        _publish_thought(True, "thinking" if reasoning != "off" else "generating")
         try:
             with self.http.stream("POST", f"{self.base_url}/v1/chat/completions", json=body) as r:
                 if r.status_code >= 400:
@@ -187,8 +209,13 @@ class RouterClient:
                         if delta.get("reasoning_content"):
                             thinking.append(delta["reasoning_content"]); pieces += 1
                         finish = choice.get("finish_reason") or finish
-                    if on_progress and time.monotonic() - last >= 5:
-                        on_progress(pieces); last = time.monotonic()
+                    now = time.monotonic()
+                    if now - last_thought_write >= 0.2:
+                        ph = "answering" if content else ("thinking" if thinking else "generating")
+                        _publish_thought(True, ph)
+                        last_thought_write = now
+                    if on_progress and now - last >= 5:
+                        on_progress(pieces); last = now
         except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError, httpx.WriteError) as e:
             # the router restarted mid-answer (Away <-> Desk switch, game guard, wake): the step runs again later
             raise ModelUnavailable(f"the engine stopped mid-answer ({type(e).__name__}); the step runs again when it's back") from e
@@ -196,5 +223,7 @@ class RouterClient:
             raise LLMError(f"{type(e).__name__}: {e}") from e
         except ValueError as e:
             raise LLMError(f"bad reply from the router: {e}") from e
+        finally:
+            _publish_thought(False, "done")
         return ChatResult(content="".join(content), finish_reason=finish, prompt_tokens=usage.get("prompt_tokens"),
                           completion_tokens=usage.get("completion_tokens"), thinking="".join(thinking), model=engine_model)

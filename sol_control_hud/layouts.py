@@ -33,6 +33,7 @@ WIDGETS: dict[str, tuple[str, dict[str, list[int]], str]] = {
     "c-gpu": ("CPU · GPU", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [1, 2], "XL": [2, 2]}, "L"),
     "c-vram": ("VRAM", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-ai": ("Local AI", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
+    "c-ai-thinking": ("Live AI Thinking", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-review": ("Exam assist & review", {"XS": [1, 1], "L": [2, 1]}, "L"),
     "c-chains": ("Chains", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-projects": ("Projects", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
@@ -68,7 +69,7 @@ def default_presets() -> list[dict]:
     return [
         _preset("Everyday", "◧", None),
         _preset("Gaming", "🎮", [("c-gpu", "XS"), ("c-vram", "XS"), ("c-svc", "XS"), ("c-health", "XS")], auto_when="game"),
-        _preset("AI work", "🧠", [("c-ai", "L"), ("c-vram", "L"), ("c-chains", "XL"), ("c-ask", "L"), ("c-awayq", "M"),
+        _preset("AI work", "🧠", [("c-ai", "L"), ("c-ai-thinking", "L"), ("c-vram", "L"), ("c-chains", "XL"), ("c-ask", "L"), ("c-awayq", "M"),
                                  ("c-activity", "L")], ticker=["HW", "AI", "RUN", "SVC"]),
         _preset("Dev", "‹/›", [("c-projects", "XL"), ("c-ports", "L"), ("c-work", "M"), ("c-media", "L"), ("c-notes", "M"),
                               ("c-gpu", "S")], ticker=["HW", "GIT", "APPS", "NOTE", "SVC"]),

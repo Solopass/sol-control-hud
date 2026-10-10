@@ -86,6 +86,42 @@
     <div class="note" id="aiSlow" hidden></div>
   </article>
 
+  <article class="card wide" id="c-ai-thinking" data-open="AI">
+    <h2>
+      <span>Live AI Thinking <span class="dim" id="thinkModelBadge">–</span></span>
+      <div class="notes-controls">
+        <span class="pill" id="thinkPhasePill">idle</span>
+        <button class="mini ghost" id="thinkAutoScrollBtn" aria-pressed="true" title="Toggle terminal auto-scroll">↓ Auto</button>
+        <button class="mini ghost" id="thinkClearBtn" title="Clear reasoning buffer">Clear</button>
+      </div>
+    </h2>
+    <div class="think-ops-grid">
+      <div class="think-stat" title="Current or last generation speed in tokens per second">
+        <span class="think-stat-label">Gen Speed</span>
+        <span class="think-stat-val" id="thinkGenSpeed">– <small>tok/s</small></span>
+      </div>
+      <div class="think-stat" title="Prompt evaluation speed and latency">
+        <span class="think-stat-label">Prompt Eval</span>
+        <span class="think-stat-val" id="thinkPromptSpeed">– <small>tok/s</small></span>
+      </div>
+      <div class="think-stat" title="Speculative drafting acceptance rate and mean draft length">
+        <span class="think-stat-label">Draft Accept</span>
+        <span class="think-stat-val" id="thinkDraftRate">–</span>
+      </div>
+      <div class="think-stat" title="Current reasoning task or active step">
+        <span class="think-stat-label">Active Task</span>
+        <span class="think-stat-val small-text" id="thinkTaskDesc">idle</span>
+      </div>
+    </div>
+    <div class="think-stream-wrap">
+      <div class="think-stream-header">
+        <span id="thinkStreamStatus" class="small dim">No active reasoning stream</span>
+        <span id="thinkTokensCount" class="small dim">0 tokens</span>
+      </div>
+      <pre class="think-terminal" id="thinkTerminal"><code id="thinkTerminalCode">Waiting for local AI reasoning…</code></pre>
+    </div>
+  </article>
+
   <article class="card wide" id="c-review">
     <h2>Exam assist &amp; review <span class="pill" id="revStatus">stopped</span> <span class="dim" id="revCount"></span></h2>
     <div class="buttons">

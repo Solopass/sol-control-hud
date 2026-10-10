@@ -190,6 +190,7 @@ function render(p) {
   renderVram(p);
   renderAi(p);
   renderSpeed(p);
+  renderAiThinking(p);
   renderChains(p);
   renderReview(p);
 
@@ -370,6 +371,106 @@ function renderSpeed(p) {
   }
   note.textContent = `Slow: ${why}`;
   note.hidden = false;
+}
+
+let thinkEventsInit = false;
+let thinkAutoScroll = true;
+
+function initAiThinkingEvents() {
+  if (thinkEventsInit) return;
+  thinkEventsInit = true;
+  const autoBtn = $('thinkAutoScrollBtn');
+  if (autoBtn) {
+    autoBtn.onclick = () => {
+      thinkAutoScroll = !thinkAutoScroll;
+      autoBtn.setAttribute('aria-pressed', String(thinkAutoScroll));
+      autoBtn.textContent = thinkAutoScroll ? '↓ Auto' : '⏸ Paused';
+    };
+  }
+  const clearBtn = $('thinkClearBtn');
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      const code = $('thinkTerminalCode');
+      if (code) code.textContent = 'Cleared buffer.';
+    };
+  }
+}
+
+function renderAiThinking(p) {
+  initAiThinkingEvents();
+  if (typeof cardShown === 'function' && !cardShown('c-ai-thinking')) return;
+  const ops = p.ai_ops || {};
+  const sp = ops.speed || {};
+  const th = ops.thinking || {};
+
+  const modelName = ops.model || p.snapshot?.ai_model || '–';
+  const badge = $('thinkModelBadge');
+  if (badge) badge.textContent = modelName;
+
+  const pill = $('thinkPhasePill');
+  const phase = ops.phase || 'idle';
+  if (pill) {
+    pill.textContent = phase;
+    pill.className = `pill ${phase === 'thinking' ? 'waiting think-pulse' : (phase === 'generating' || phase === 'answering' ? 'done' : '')}`;
+  }
+
+  const genVal = sp.tg_tps != null ? sp.tg_tps : (sp.eval_tps != null ? sp.eval_tps : '–');
+  const genSpeedEl = $('thinkGenSpeed');
+  if (genSpeedEl) {
+    genSpeedEl.innerHTML = `${genVal} <small>tok/s</small>`;
+    genSpeedEl.style.color = (typeof genVal === 'number' && genVal > 80) ? 'var(--cyan)' : 'var(--text)';
+  }
+
+  const promptVal = sp.prompt_tps != null ? `${sp.prompt_tps}` : '–';
+  const promptMs = sp.prompt_ms != null ? ` (${sp.prompt_ms.toFixed(0)}ms)` : '';
+  const promptSpeedEl = $('thinkPromptSpeed');
+  if (promptSpeedEl) promptSpeedEl.innerHTML = `${promptVal}${promptMs ? `<small>${promptMs}</small>` : '<small> tok/s</small>'}`;
+
+  const draftVal = sp.draft_rate != null ? `${(sp.draft_rate * 100).toFixed(1)}%` : '–';
+  const draftMean = sp.draft_mean_len != null ? ` <small>len ${sp.draft_mean_len}</small>` : '';
+  const draftRateEl = $('thinkDraftRate');
+  if (draftRateEl) draftRateEl.innerHTML = `${draftVal}${draftMean}`;
+
+  const ch = p.chains?.running;
+  let taskDesc = ops.task;
+  if (!taskDesc && ch) {
+    taskDesc = `${ch.chain} · ${ch.step_name || 'step ' + ch.step} (${ch.item || ch.done}/${ch.items || ch.total})`;
+  }
+  const taskDescEl = $('thinkTaskDesc');
+  if (taskDescEl) taskDescEl.textContent = taskDesc || (ops.active ? 'Inferring…' : 'idle');
+
+  const termCode = $('thinkTerminalCode');
+  const statusEl = $('thinkStreamStatus');
+  const tokensEl = $('thinkTokensCount');
+
+  if (tokensEl && th.tokens != null) tokensEl.textContent = `${th.tokens} tokens`;
+
+  if (termCode && statusEl) {
+    if (th.active) {
+      statusEl.textContent = th.phase === 'thinking' ? 'Thinking (inner reasoning)…' : 'Answering…';
+      statusEl.style.color = th.phase === 'thinking' ? '#c084fc' : 'var(--cyan)';
+      termCode.className = th.phase === 'thinking' ? 'is-thinking' : 'is-answering';
+      const textToShow = th.text || th.preview || 'Generating reasoning tokens…';
+      termCode.textContent = textToShow;
+    } else if (th.text) {
+      statusEl.textContent = `Completed reasoning session (${agoShort(th.updated_at || Date.now() / 1000)})`;
+      statusEl.style.color = 'var(--dim)';
+      termCode.className = '';
+      termCode.textContent = th.text + (th.preview ? `\n\n[Answer Preview]:\n${th.preview}` : '');
+    } else if (!ops.active) {
+      statusEl.textContent = 'No active reasoning stream';
+      statusEl.style.color = 'var(--dim)';
+      termCode.className = '';
+      if (termCode.textContent === 'Waiting for local AI reasoning…' || !termCode.textContent.trim()) {
+        termCode.textContent = 'Idle — waiting for local AI inference or chain step…';
+      }
+    }
+  }
+
+  const term = $('thinkTerminal');
+  if (term && thinkAutoScroll && th.active) {
+    term.scrollTop = term.scrollHeight;
+  }
 }
 
 function renderAi(p) {

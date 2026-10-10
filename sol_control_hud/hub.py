@@ -673,6 +673,7 @@ class Hub:
                 "away": c["away"].get(), "chains": c["chains"].get(), "activity": c["activity"].get(),
                 "point": self.history.latest(), "models": self._model_rows(),
                 "speed": c["speed"].get(), "heal": c["heal"].get(), "review": self._review_state(),
+                "ai_ops": c["ai_ops"].get() if "ai_ops" in c else {},
                 "layout": {"active": self._layouts["active"], "rev": self._layouts["rev"]}}
 
     @staticmethod
@@ -725,8 +726,14 @@ class Hub:
             lambda: displays.report(self.collector._sampler.last_util, lambda p: gpu.process_name(p, gpu_names)), 10)
         from . import game_guard                       # why the AI is off, and the buttons that answer it
         self.collectors["guard"] = Cached(game_guard.state, 3)
+        from .data.collectors import ai_ops
+        self.collectors["ai_ops"] = Cached(lambda: ai_ops.sample_ai_ops(self.collectors["model_procs"].get()), 1.5)
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+        @app.get("/api/ai-ops")
+        def ai_ops_state() -> dict:
+            return self.collectors["ai_ops"].get() if "ai_ops" in self.collectors else {}
 
         @app.middleware("http")
         async def guard_and_seen(request: Request, call_next):

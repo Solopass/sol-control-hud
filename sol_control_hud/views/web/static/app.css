@@ -475,7 +475,7 @@ body:not(.opt-no-card-accents) .card::before {
 body:not(.opt-no-card-accents) :is(#c-gpu, #c-vram, #c-system, #c-disks)::before {
   background:linear-gradient(90deg, var(--green), var(--cyan));
 }
-body:not(.opt-no-card-accents) :is(#c-ai, #c-chains, #c-awayq, #c-ask)::before {
+body:not(.opt-no-card-accents) :is(#c-ai, #c-ai-thinking, #c-chains, #c-awayq, #c-ask)::before {
   background:linear-gradient(90deg, var(--cyan), #a855f7);
 }
 body:not(.opt-no-card-accents) :is(#c-projects, #c-ports, #c-notes, #c-work, #c-media, #c-solang, #c-week)::before {
@@ -504,6 +504,15 @@ body:not(.opt-no-xs-styled) :is(#c-stab, #c-svc, #c-health, #c-activity, #c-revi
 #c-vram[data-size="l"] canvas.chart { height:130px; }
 /* Local AI: S = the model, mode and answer speed */
 #c-ai[data-size="s"] :is(#modelSwitcher, #aiModels, .buttons) { display:none; }
+/* Live AI Thinking: sizes and views */
+#c-ai-thinking[data-size="xs"] :is(.think-ops-grid, .think-stream-wrap, .notes-controls) { display:none; }
+#c-ai-thinking[data-size="s"] .think-stream-wrap { display:none; }
+#c-ai-thinking[data-size="s"] .think-ops-grid { grid-template-columns: repeat(2, 1fr); }
+#c-ai-thinking[data-size="m"] .think-stream-wrap { max-height:160px; }
+#c-ai-thinking[data-size="l"] .think-stream-wrap { max-height:280px; }
+#c-ai-thinking[data-size="xl"] { display:grid; grid-template-columns: 280px 1fr; gap:14px; }
+#c-ai-thinking[data-size="xl"] .think-ops-grid { grid-template-columns: 1fr; }
+#c-ai-thinking[data-size="xl"] .think-stream-wrap { max-height:380px; }
 /* Chains: S = what runs now, M = + waiting / scheduled */
 #c-chains[data-size="s"] :is(.cols, #chainList, .pipeline), #c-chains[data-size="s"] > h3 { display:none; }
 #c-chains[data-size="m"] #chainList, #c-chains[data-size="m"] > h3 { display:none; }
@@ -583,3 +592,90 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
 .lmheader-btns { display:inline-flex; align-items:center; gap:6px; margin-left:auto; }
 .ltray-btns { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
 .lempty-notice { grid-column:1 / -1; padding:36px 20px; text-align:center; border:2px dashed var(--line); border-radius:var(--radius); color:var(--text); font-size:14px; margin:20px; }
+
+/* Live AI Thinking Widget styles */
+.think-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 10px 0 12px;
+}
+.think-stat {
+  background: color-mix(in srgb, var(--card) 60%, var(--bg));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.think-stat-label {
+  font-size: 11px;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.think-stat-val {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.think-stat-val small {
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--dim);
+}
+.think-stat-val.small-text {
+  font-size: 12px;
+  font-weight: 500;
+}
+.think-stream-wrap {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #090c10;
+  overflow: hidden;
+}
+.think-stream-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--badge) 60%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+.think-terminal {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #94a3b8;
+  overflow-y: auto;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: inherit;
+  min-height: 110px;
+}
+.think-terminal code {
+  font-family: inherit;
+  color: inherit;
+}
+.think-terminal code.is-thinking {
+  color: #c084fc;
+}
+.think-terminal code.is-answering {
+  color: #38bdf8;
+}
+.think-pulse {
+  animation: thinkPulse 1.8s infinite ease-in-out;
+}
+@keyframes thinkPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.96); }
+}

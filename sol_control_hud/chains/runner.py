@@ -364,6 +364,7 @@ class Runner:
             kw["temperature"] = step.temperature
         if hasattr(self.client, "resolve"):  # router client: keep the run's heartbeat fresh while it writes
             kw["on_progress"] = lambda _n: self.store.heartbeat(run_id)
+            kw["task"] = f"Run {run_id} · step {step.id}"
         lock = self.gpu_lock(f"run {run_id} step {step.id}", should_stop=lambda: self._stopping(run_id),
                              on_wait=lambda who: self.store.event(run_id, "waiting_for_gpu", step.id, holder=who)) \
             if self.gpu_lock else nullcontext()
