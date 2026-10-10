@@ -73,7 +73,7 @@ DESK_MODELS = FAST_MODELS | {"sol-smart", "sol-long"}          # served in Desk,
 _FRONT = re.compile(r"\A\ufeff?---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
 _HEADING = re.compile(r"^##\s+(.+?)\s*#*\s*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
-_SETTING = re.compile(r"^(model|reasoning|check|max tokens|retries|system|long model|temperature|hide|critic)\s*:\s*(.+?)\s*$", re.I)
+_SETTING = re.compile(r"^(model|reasoning|check|max tokens|retries|system|long model|temperature|hide|critic|tool|file|path|batch_size|max_items|offset|state_file|filter_music|auto_advance|auto_save|items|urls)\s*:\s*(.+?)\s*$", re.I)
 _FOR_FILES = re.compile(r"^for each file in (.+?) matching (.+?)(?: changed in the last (\d+) days?)?\s*:\s*$", re.I)
 _FOR_LINES = re.compile(r"^for each ([a-z_]\w*) (?:in|of) (.+?)\s*:\s*$", re.I)
 _GATHER = re.compile(r"^gather\s*:\s*(.+?)\s*$", re.I)
@@ -260,7 +260,7 @@ def load_chain(path: str | Path) -> Chain:
         if step.gather:
             if step.prompt or step.loop or step.settings or step.checks:
                 raise ChainError(f"{where}: a `gather:` step only collects; put the prompt and settings in the next step")
-        elif not step.prompt:
+        elif not step.prompt and not step.settings.get("tool"):
             raise ChainError(f"{where} has no prompt: write what the model should do under the heading")
         steps.append(step)
     if not steps:
@@ -288,23 +288,24 @@ def _translate(text: str, chain: Chain, idx: int, where: str, loop_var: str | No
         name = m.group(1).strip()
         key = _norm(name)
         head = key.split(".")[0]
+        subpath = ("." + ".".join(name.split(".")[1:])) if "." in name else ""
         if loop_var and head == loop_var:
             return f"{{{{ {name} }}}}"
         if key == "previous":
             if idx == 0:
                 raise ChainError(f"{where}: {{{{previous}}}} in the first step; there's no step before it")
             prev = chain.steps[idx - 1]
-            return f"{{{{ steps.{prev.id}.output }}}}" if raw else _text_ref(prev)
+            return f"{{{{ steps.{prev.id}.output{subpath} }}}}" if (raw or subpath) else _text_ref(prev)
         if key in BUILTINS:
             return f"{{{{ inputs.{BUILTINS[key]} }}}}"
-        if key in by_name:
-            j, s = by_name[key]
+        if head in by_name:
+            j, s = by_name[head]
             if j >= idx:
                 raise ChainError(f"{where}: {{{{{name}}}}} refers to a step that runs {'later' if j > idx else 'now'}; "
                                  f"a step can only use earlier steps")
-            return f"{{{{ steps.{s.id}.output }}}}" if raw else _text_ref(s)
-        if key in inputs:
-            return f"{{{{ inputs.{inputs[key]} }}}}"
+            return f"{{{{ steps.{s.id}.output{subpath} }}}}" if (raw or subpath) else _text_ref(s)
+        if head in inputs:
+            return f"{{{{ inputs.{inputs[head]}{subpath} }}}}"
         options = [s.name for s in chain.steps[:idx]] + list((chain.meta.get("inputs") or {}).keys()) + \
             (["previous"] if idx else []) + list(BUILTINS) + ([f"{loop_var}.…"] if loop_var else [])
         raise ChainError(f"{where}: I don't know {{{{{name}}}}}. You can use: {', '.join(options) or '(nothing yet)'}")
@@ -333,6 +334,27 @@ def to_workflow(chain: Chain) -> dict:
             else:
                 steps.append({"id": s.id, "tool": "review_changes", "args": {"path": _translate(g["path"], chain, idx, where)}})
                 review_ids.append(s.id)
+            continue
+        if s.settings.get("tool"):
+            tool_name = s.settings["tool"]
+            raw_args = dict(s.settings)
+            raw_args.pop("tool", None)
+            if s.prompt:
+                try:
+                    loaded = yaml.safe_load(s.prompt)
+                    if isinstance(loaded, dict):
+                        raw_args.update(loaded)
+                    elif isinstance(loaded, str) and loaded.strip():
+                        raw_args.setdefault("input", loaded.strip())
+                except Exception:
+                    pass
+            translated_args = {}
+            for k, v in raw_args.items():
+                if isinstance(v, str):
+                    translated_args[k] = _translate(v, chain, idx, where, raw=True)
+                else:
+                    translated_args[k] = v
+            steps.append({"id": s.id, "tool": tool_name, "args": translated_args})
             continue
         var = _loop_var(s)
         st = s.settings
