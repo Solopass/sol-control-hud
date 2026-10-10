@@ -533,6 +533,25 @@ class Hub:
             r = launcher.bulk_add_solang(str(b.get("links") or b.get("source") or ""))
             log(f"solang bulk_add: {r.get('why')}")
             return r
+        if kind == "solang" and op == "queue_status":
+            from .chains import solang_tools
+            return {"ok": True, "status": solang_tools.get_queue_status()}
+        if kind == "solang" and op == "queue_pause":
+            from .chains import solang_tools
+            return solang_tools.set_queue_paused(True)
+        if kind == "solang" and op == "queue_resume":
+            from .chains import solang_tools
+            return solang_tools.set_queue_paused(False)
+        if kind == "solang" and op == "sync_library":
+            from .chains import solang_tools
+            solang_tools.generate_karaoke_library_note()
+            return {"ok": True, "why": "Synced Karaoke Library in 1Notebook"}
+        if kind == "solang" and op == "run_queue_batch":
+            from .chains import solang_tools
+            file_path = str(b.get("file") or r"D:\Output\Takeout\watch-history.html")
+            count = int(b.get("count") or 25)
+            r = solang_tools.run_takeout_queue({"file": file_path, "target_count": count})
+            return {"ok": True, "why": r.get("summary", "Ran queue batch"), "result": r}
         self._refresh_launchpad()                     # act on the current state, not a cached one
         try:
             rows = self.projects_payload()["projects"]

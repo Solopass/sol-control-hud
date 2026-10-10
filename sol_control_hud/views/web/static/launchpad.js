@@ -292,6 +292,51 @@ $('solangForm')?.addEventListener('submit', async (e) => {
   }
 });
 
+// ---------- Solang Takeout Queue Polling & Controls
+async function updateSolangQueueStatus() {
+  if (document.hidden) return;
+  try {
+    const r = await post('/api/action', { action: 'solang', op: 'queue_status' });
+    if (r && r.status) {
+      const s = r.status;
+      const stats = $('solangQueueStats');
+      const pbar = $('solangProgressBar');
+      const detail = $('solangQueueDetail');
+      const pauseBtn = $('solangPauseResumeBtn');
+
+      if (stats) stats.textContent = s.total_found > 0 ? `${s.offset} / ${s.total_found} tracks (${s.percent}%)` : 'Ready to ingest';
+      if (pbar) pbar.style.width = `${Math.min(100, Math.max(0, s.percent || 0))}%`;
+      if (detail) detail.textContent = `${s.ingested_count || 0} songs · ${s.clustered_count || 0} alternate angles`;
+      if (pauseBtn) pauseBtn.textContent = s.paused ? '▶ Resume' : '⏸ Pause';
+    }
+  } catch (_) {}
+}
+
+$('solangRunBatchBtn')?.addEventListener('click', async () => {
+  toast('Running next 25 tracks from Takeout file...');
+  const r = await post('/api/action', { action: 'solang', op: 'run_queue_batch', count: 25 });
+  toast(r.why || 'Batch finished');
+  updateSolangQueueStatus();
+});
+
+$('solangPauseResumeBtn')?.addEventListener('click', async () => {
+  const btn = $('solangPauseResumeBtn');
+  const isPaused = (btn?.textContent || '').includes('Resume');
+  const op = isPaused ? 'queue_resume' : 'queue_pause';
+  await post('/api/action', { action: 'solang', op });
+  toast(isPaused ? 'Resumed queue' : 'Paused queue');
+  updateSolangQueueStatus();
+});
+
+$('solangSyncLibBtn')?.addEventListener('click', async () => {
+  toast('Syncing Obsidian Karaoke Library note...');
+  const r = await post('/api/action', { action: 'solang', op: 'sync_library' });
+  toast(r.why || 'Library synced');
+});
+
+updateSolangQueueStatus();
+setInterval(updateSolangQueueStatus, 15000);
+
 // ---------- polling: every 10 s while visible, every 2 s for a minute after a start or stop
 function refreshLaunchpad() { loadProjects(); loadMedia(); }
 let launchpadTick = 0;

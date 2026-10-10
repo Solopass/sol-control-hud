@@ -174,7 +174,22 @@
       </div>
       <div id="solangResults" style="margin-top:10px;"></div>
     </form>
-    <div class="note">Processes via <b>Tier 1 YouTube Dual CC</b> &rarr; <b>Tier 2 LRCLIB</b> &rarr; <b>Local sol-fast AI</b>. Saved directly to <code>D:\Workspace\solang\data\projects\</code>.</div>
+    <div class="solang-queue-box" style="margin-top:10px; padding:10px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid var(--border, #1e293b);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-weight:600; font-size:12px;">📊 Takeout Queue (15k Scale)</span>
+        <span class="dim small" id="solangQueueStats">Scanning state...</span>
+      </div>
+      <div style="width:100%; height:6px; background:#1e293b; border-radius:3px; overflow:hidden; margin-bottom:8px;">
+        <div id="solangProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, #38bdf8, #818cf8); transition:width 0.3s ease;"></div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="mini" id="solangRunBatchBtn" title="Run next batch of 25 tracks">⚡ Ingest Next 25</button>
+        <button type="button" class="mini" id="solangPauseResumeBtn" title="Pause or resume background queue">⏸ Pause</button>
+        <button type="button" class="mini" id="solangSyncLibBtn" title="Sync Obsidian Karaoke Library MOC in 1Notebook">📚 Sync Obsidian Index</button>
+        <span class="dim small" id="solangQueueDetail" style="margin-left:auto;"></span>
+      </div>
+    </div>
+    <div class="note" style="margin-top:8px;">Processes via <b>Tier 1 YouTube Dual CC</b> &rarr; <b>Tier 2 LRCLIB</b> &rarr; <b>Local sol-fast AI</b>. Multi-video tracks auto-cluster as alternate profiles. Projects saved in <code>D:\Workspace\solang\data\projects\</code>.</div>
   </article>
 
   <article class="card wide" id="c-ask">

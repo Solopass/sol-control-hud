@@ -245,3 +245,58 @@ Write a concise digest of the newly imported Karaoke Studio projects.
     registry = {"sol-fast": {"num_ctx": 8192}, "sol-long": {"num_ctx": 65536}}
     problems = cn.check_chain(note_p, tools, registry)
     assert problems == []
+
+
+def test_generate_karaoke_library_note(tmp_path):
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+
+    p1 = {
+        "id": "proj_1",
+        "title": "Supernova",
+        "artist": "aespa",
+        "duration": 185,
+        "lyrics": [{"line": 1}, {"line": 2}],
+        "mediaSources": [
+            {"id": "src_1", "name": "Official MV", "videoId": "v1"},
+            {"id": "src_2", "name": "Dance Practice", "videoId": "v2"}
+        ]
+    }
+    (projects_dir / "proj_1.kstudio").write_text(json.dumps(p1), encoding="utf-8")
+
+    out_note = tmp_path / "1Notebook" / "Karaoke Library.md"
+    content = st.generate_karaoke_library_note(output_path=out_note, projects_dir=projects_dir)
+
+    assert "Supernova" in content
+    assert "aespa" in content
+    assert "Dance Practice" in content
+    assert "http://127.0.0.1:3000/?project=proj_1" in content
+    assert out_note.exists()
+
+
+def test_queue_status_and_pause(tmp_path):
+    state_file = tmp_path / "state.json"
+    state = {
+        "source_file": "watch.html",
+        "total_found": 100,
+        "offset": 45,
+        "paused": False,
+        "processed": {
+            "v1": {"status": "ingested", "title": "Song 1"},
+            "v2": {"status": "clustered_alternate", "title": "Song 1 (Live)"}
+        }
+    }
+    st.StateManager.save(state_file, state)
+
+    status = st.get_queue_status(state_file)
+    assert status["total_found"] == 100
+    assert status["offset"] == 45
+    assert status["percent"] == 45.0
+    assert status["ingested_count"] == 1
+    assert status["clustered_count"] == 1
+    assert status["paused"] is False
+
+    st.set_queue_paused(True, state_file)
+    status2 = st.get_queue_status(state_file)
+    assert status2["paused"] is True
+
