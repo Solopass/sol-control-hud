@@ -438,7 +438,6 @@ class Hub:
         if target in ("retry_gemini", "bad", "verify"):
             r = w.retry_gemini()
             if r.get("ok") and r.get("item"):
-                self.notify_now("Gemini Solution", f"Ans: {r['item'].get('answer')}")
                 self.cmds.put(("review_update_hud", r["item"]))
             log(f"exam review: retry_gemini -> {r.get('why')}")
             return r
@@ -1038,7 +1037,9 @@ class Hub:
                         self.exam_hud.update_item(arg)
                     ans = arg.get("answer") or ""
                     if ans:
-                        self.notify_now("Exam Solution", f"Ans: {ans[:80]}")
+                        is_gem = bool(arg.get("gemini_retried") or arg.get("model") == "gemini-3.8-flash")
+                        title = "✨ Gemini Solution" if is_gem else "Exam Solution"
+                        self.notify_now(title, f"Ans: {ans[:80]}")
                 elif name == "exit":
                     self._shutdown(arg)
                     return

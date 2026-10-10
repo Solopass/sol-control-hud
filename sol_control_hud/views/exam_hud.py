@@ -391,8 +391,18 @@ class ExamHudWindow:
 
     def _on_click_retry(self) -> None:
         if self.on_retry_gemini:
-            self.bad_btn.config(state=tk.DISABLED, text="Consulting Gemini…")
-            self.on_retry_gemini()
+            if self.bad_btn:
+                self.bad_btn.config(state=tk.DISABLED, text="Consulting Gemini…")
+            def _worker():
+                try:
+                    self.on_retry_gemini()
+                finally:
+                    if self.win and self.bad_btn and self.win.winfo_exists():
+                        is_gem = bool(self._last_item and (self._last_item.get("gemini_retried") or self._last_item.get("model") == "gemini-3.8-flash"))
+                        if not is_gem:
+                            self.win.after(0, lambda: self.bad_btn.config(state=tk.NORMAL, text="🔍 Verify / Retry (Gemini)") if self.bad_btn else None)
+            import threading
+            threading.Thread(target=_worker, name="hud-retry-gemini", daemon=True).start()
 
     def _on_click_snip(self) -> None:
         if self.on_add_snip:
@@ -407,7 +417,12 @@ class ExamHudWindow:
     def _on_click_auto_scroll(self) -> None:
         if self.on_auto_scroll:
             if self.auto_scroll_btn:
-                self.auto_scroll_btn.config(text="Scrolling…")
-                if self.win:
-                    self.win.after(2500, lambda: self.auto_scroll_btn.config(text="⚡ Auto-Scroll") if self.auto_scroll_btn else None)
-            self.on_auto_scroll()
+                self.auto_scroll_btn.config(state=tk.DISABLED, text="Scrolling…")
+            def _worker():
+                try:
+                    self.on_auto_scroll()
+                finally:
+                    if self.win and self.auto_scroll_btn and self.win.winfo_exists():
+                        self.win.after(0, lambda: self.auto_scroll_btn.config(state=tk.NORMAL, text="⚡ Auto-Scroll") if self.auto_scroll_btn else None)
+            import threading
+            threading.Thread(target=_worker, name="hud-auto-scroll", daemon=True).start()

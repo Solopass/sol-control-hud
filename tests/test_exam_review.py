@@ -394,10 +394,10 @@ def test_append_note_renders_markdown_checkboxes(tmp_path):
 
 def test_find_vertical_overlap_and_dedup():
     w, h1, h2, overlap = 10, 50, 50, 20
-    # Create scanlines for image 1
-    raw1_lines = [bytes([i % 256 for i in range(w * 4)]) for i in range(h1)]
+    # Create scanlines for image 1 (distinct pattern per row)
+    raw1_lines = [bytes([(r_idx * 5 + i) % 256 for i in range(w * 4)]) for r_idx in range(h1)]
     # Image 2 overlaps the last 20 rows of image 1, then has 30 new rows
-    raw2_lines = raw1_lines[h1 - overlap :] + [bytes([(i + 30) % 256 for i in range(w * 4)]) for i in range(h2 - overlap)]
+    raw2_lines = raw1_lines[h1 - overlap :] + [bytes([(r_idx * 7 + i) % 256 for i in range(w * 4)]) for r_idx in range(h2 - overlap)]
 
     bgra1 = b"".join(raw1_lines)
     bgra2 = b"".join(raw2_lines)
@@ -450,6 +450,70 @@ def test_passive_scroll_watcher_on_cut_off(tmp_path):
     assert w._pending_scroll is True
     assert w._last_cut_off_png == valid_png
     assert "cut off" in w.state()["text"].lower()
+
+
+def test_find_vertical_overlap_rejects_uniform_padding():
+    w, h1, h2 = 10, 50, 50
+    # Two totally different images that both happen to have 25 lines of uniform white padding
+    white_line = bytes([255] * (w * 4))
+    raw1_lines = [bytes([(r * 3 + i) % 256 for i in range(w * 4)]) for r in range(25)] + [white_line] * 25
+    raw2_lines = [white_line] * 25 + [bytes([(r * 7 + i) % 256 for i in range(w * 4)]) for r in range(25)]
+
+    p1 = qc.png(w, h1, b"".join(raw1_lines))
+    p2 = qc.png(w, h2, b"".join(raw2_lines))
+
+    # Overlap must be 0 because the white lines have no visual features to match
+    stitched = qc.stitch_pngs_vertical([p1, p2], dedup_overlap=True)
+    out_w, out_h = struct.unpack(">II", stitched[16:24])
+    assert out_w == w
+    assert out_h == h1 + h2  # 50 + 50 = 100, no false deduplication of margins!
+
+
+def test_stitch_pngs_vertical_rgba():
+    w, h = 8, 4
+    rgba_bytes = bytes([10, 20, 30, 200] * (w * h))
+    stride = w * 4
+    raw = b"".join(b"\x00" + rgba_bytes[i * stride : (i + 1) * stride] for i in range(h))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    p1 = (b"\x89PNG\r\n\x1a\n"
+          + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))  # color_type 6 = RGBA
+          + chunk(b"IDAT", zlib.compress(raw, 6))
+          + chunk(b"IEND", b""))
+    p2 = p1
+
+    stitched = qc.stitch_pngs_vertical([p1, p2], dedup_overlap=False)
+    out_w, out_h, _, color_type = struct.unpack(">IIBB", stitched[16:26])
+    assert out_w == w
+    assert out_h == h * 2
+    assert color_type == 6
+
+
+def test_retry_gemini_preserves_stitched_after_solve(tmp_path, monkeypatch):
+    valid_png1 = qc.png(10, 5, bytes([255, 0, 0, 255] * 50))
+    valid_png2 = qc.png(10, 5, bytes([0, 255, 0, 255] * 50))
+    w, client = make(tmp_path, [graded()])
+    w.set_rect([10, 20, 100, 100], start=False)
+
+    w._last_png_bytes = valid_png1
+    w.add_snip()
+    stitched = w._stitched_png_bytes
+    assert stitched is not None
+
+    # Process and solve
+    assert w._process(valid_png1, force=True) is True
+    # Stitched bytes must STILL be preserved on the active question
+    assert w._stitched_png_bytes == stitched
+
+    # Gemini retry receives the preserved stitched image
+    captured = []
+    monkeypatch.setattr("sol_control_hud.gemini_solver.solve_with_gemini", lambda images, **k: captured.extend(images) or {"answer": "C", "topic": "Subnetting"})
+    res = w.retry_gemini()
+    assert res["ok"] is True
+    assert captured[0] == stitched
+
 
 
 

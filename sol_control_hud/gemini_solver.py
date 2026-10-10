@@ -40,6 +40,10 @@ Format instructions:
 Required Response Schema (JSON only):
 {{
   "question_type": "multiple_choice | matching | fill_in_the_blank | ordering",
+  "question": "Verbatim question text transcribed from the image",
+  "choices": [
+    {{"label": "A", "text": "choice text"}}
+  ],
   "answer_labels": ["A"],
   "answer_text": "human-readable summary of the answer",
   "matching_pairs": [

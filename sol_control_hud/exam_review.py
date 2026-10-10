@@ -647,7 +647,7 @@ class ReviewWatcher:
             )
             q_type = sol.get("question_type") or (cur or {}).get("question_type") or "multiple_choice"
             raw_labels = sol.get("answer_labels") or []
-            choices = (cur or {}).get("choices") or []
+            choices = sol.get("choices") or (cur or {}).get("choices") or []
             ans_idxs = pick_indexes(raw_labels, choices) if choices else []
             ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_labels]
 
@@ -671,6 +671,7 @@ class ReviewWatcher:
             revised_item = dict(cur or {})
             revised_item.update({
                 "question_type": q_type,
+                "choices": choices,
                 "answer_labels": ans_labels,
                 "correct_labels": ans_labels,
                 "matching_pairs": matching_pairs,
@@ -685,8 +686,8 @@ class ReviewWatcher:
                 "gemini_retried": True,
                 "at": time.strftime("%H:%M:%S"),
             })
-            if not revised_item.get("question") and sol.get("topic"):
-                revised_item["question"] = f"[{sol.get('topic')}]"
+            if not revised_item.get("question"):
+                revised_item["question"] = sol.get("question") or (f"[{sol.get('topic')}]" if sol.get("topic") else "Exam Question")
 
             note_path = str(append_gemini_retry(revised_item, self._notes_dir))
             with self._mu:
@@ -814,9 +815,10 @@ class ReviewWatcher:
                 if key == self._last_key and not force:
                     self._set(status="watching", text="Same question as before")
                     return False
+                if self._last_key is not None and key != self._last_key:
+                    self._additional_snips = []
+                    self._stitched_png_bytes = None
                 self._last_key = key
-                self._additional_snips = []
-                self._stitched_png_bytes = None
                 self._pending_scroll = False
                 self._last_cut_off_png = None
 

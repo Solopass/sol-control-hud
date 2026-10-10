@@ -170,6 +170,10 @@ def find_vertical_overlap(raw1: bytes, h1: int, raw2: bytes, h2: int, stride: in
             continue
         if raw1[s1_end - stride : s1_end] != raw2[s2_end - stride : s2_end]:
             continue
+        # Verify candidate block has visual variation to avoid false positives on uniform blank padding/margins
+        first_line = raw2[:stride]
+        if all(raw2[i * stride : (i + 1) * stride] == first_line for i in range(1, k)):
+            continue
         # Verify full candidate block
         if raw1[s1_start : s1_end] == raw2[s2_start : s2_end]:
             return k
@@ -189,12 +193,14 @@ def stitch_pngs_vertical(png_list: list[bytes], dedup_overlap: bool = True) -> b
 
     combined_raw = bytearray()
     base_w: int | None = None
+    base_color_type: int = 2
     total_h = 0
     stride = 0
 
     for p in valid_pngs:
         idx = 8
         w, h = 0, 0
+        color_type = 2
         idat_chunks = []
         while idx < len(p):
             length = struct.unpack(">I", p[idx:idx + 4])[0]
@@ -202,6 +208,7 @@ def stitch_pngs_vertical(png_list: list[bytes], dedup_overlap: bool = True) -> b
             cdata = p[idx + 8:idx + 8 + length]
             if kind == b"IHDR":
                 w, h = struct.unpack(">II", cdata[:8])
+                color_type = cdata[9] if len(cdata) > 9 else 2
             elif kind == b"IDAT":
                 idat_chunks.append(cdata)
             idx += 12 + length
@@ -209,11 +216,13 @@ def stitch_pngs_vertical(png_list: list[bytes], dedup_overlap: bool = True) -> b
         if w <= 0 or h <= 0 or not idat_chunks:
             continue
 
+        bpp = 4 if color_type == 6 else (1 if color_type == 0 else 3)
         if base_w is None:
             base_w = w
-            stride = 1 + w * 3  # filter byte + RGB
-        elif base_w != w:
-            # Width mismatch: fallback to returning first image rather than corrupting scanlines
+            base_color_type = color_type
+            stride = 1 + w * bpp  # filter byte + pixels
+        elif base_w != w or base_color_type != color_type:
+            # Dimension or format mismatch: fallback to returning first image rather than corrupting scanlines
             return valid_pngs[0]
 
         try:
@@ -241,7 +250,7 @@ def stitch_pngs_vertical(png_list: list[bytes], dedup_overlap: bool = True) -> b
 
     return (
         b"\x89PNG\r\n\x1a\n"
-        + chunk(b"IHDR", struct.pack(">IIBBBBB", base_w, total_h, 8, 2, 0, 0, 0))
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", base_w, total_h, 8, base_color_type, 0, 0, 0))
         + chunk(b"IDAT", zlib.compress(bytes(combined_raw), 6))
         + chunk(b"IEND", b"")
     )
