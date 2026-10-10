@@ -514,6 +514,7 @@ function renderReview(p) {
   const topics = Object.entries(r.topics || {}).sort((a, b) => b[1] - a[1]);
   setHTML($('revTopics'), topics.map(([t, n]) => `<div class="item"><span>${esc(t)}</span><span style="color:var(--cyan)">${n}×</span></div>`).join('')
     || '<div class="empty">no topics recorded yet</div>');
+  dispatchEvent(new CustomEvent('hud:render', { detail: p }));   // layouts.js: XS chips, follow a layout switch
 }
 
 function connect() {
@@ -657,6 +658,7 @@ const OP_LABEL = { run: 'Run now', now: '⏭ Run now', pause: 'Pause', resume: '
 let control = null;
 async function loadControl() {
   if (document.hidden) return;
+  if (typeof cardShown === 'function' && !['c-chains', 'c-ask', 'c-awayq'].some(cardShown)) return;   // hidden in this layout: not polled (layouts.js)
   try { control = await (await fetch('/api/control', { cache: 'no-store' })).json(); } catch (e) { return; }
   if (!$('askModel').options.length) askMode();
   const askState = (a) => a.state.startsWith('running') ? `<span style="color:var(--cyan)">${esc(a.state)}</span>`
@@ -800,6 +802,7 @@ document.querySelectorAll('#range button').forEach((b) => b.onclick = () => {
 setInterval(() => { if (range !== '1h' && !document.hidden) loadHistory(); }, 60000);
 async function loadWeek() {
   if (document.hidden) return;
+  if (typeof cardShown === 'function' && !cardShown('c-week')) return;   // hidden in this layout: not polled (layouts.js)
   let w; try { w = await (await fetch('/api/week', { cache: 'no-store' })).json(); } catch (e) { return; }
   const chains = Object.entries(w.chains || {}).map(([k, n]) => `${n} ${k}`).join(', ') || 'none';
   const stat = (v, label, color) => `<div><b style="color:${color || 'var(--text)'}">${v ?? '–'}</b><span>${label}</span></div>`;
@@ -821,6 +824,7 @@ setInterval(loadWeek, 300000);
 // ---------- E1: the HUD's own health (health.py via /api/health)
 async function loadHealth() {
   if (document.hidden) return;
+  if (typeof cardShown === 'function' && !cardShown('c-health')) return;   // hidden in this layout: not polled (layouts.js)
   let h; try { h = await (await fetch('/api/health', { cache: 'no-store' })).json(); } catch (e) { return; }
   if (!h.ok) return;
   const pill = $('healthPill');
@@ -877,6 +881,7 @@ async function initVaults() {
 }
 
 async function loadNotes() {
+  if (typeof cardShown === 'function' && !cardShown('c-notes')) return;   // hidden in this layout: not polled (layouts.js)
   const container = $('notesList');
   if (!container || document.hidden) return;
   try {
@@ -1139,6 +1144,7 @@ function getPaletteItems(query) {
   }
 
   if (typeof launchpadPaletteItems === 'function') items.push(...launchpadPaletteItems());   // launchpad.js
+  if (typeof layoutPaletteItems === 'function') items.push(...layoutPaletteItems());         // layouts.js
 
   for (const n of allNotesCache) {
     items.push({
@@ -1210,6 +1216,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) load
 // of those was fixed by hand-editing local-ai.json while this page displayed the reason and offered nothing.
 // Only "<name> uses N% of the GPU" can be answered by name; the server decides that, not this.
 async function loadGuard() {
+  if (typeof cardShown === 'function' && !cardShown('c-ai')) return;   // hidden in this layout: not polled (layouts.js)
   let g;
   try { g = await (await fetch('/api/guard', { cache: 'no-store' })).json(); } catch (e) { return; }
   const box = $('guardBox');
@@ -1230,6 +1237,7 @@ setInterval(() => { if (!document.hidden) loadGuard(); }, 5000);
 // drawn on the weak chip and copied across to the Radeon. It felt like lag, and nothing on the machine said so.
 // Two signals: the Windows setting (true even while an app is shut) and what is actually rendering there now.
 async function loadDisplays() {
+  if (typeof cardShown === 'function' && !cardShown('c-gpu')) return;   // hidden in this layout: not polled (layouts.js)
   let d;
   try { d = await (await fetch('/api/displays', { cache: 'no-store' })).json(); } catch (e) { return; }
   const box = $('gpuWrong');
@@ -1284,6 +1292,7 @@ function closedRow(c) {
     + `<span class="acts meta">closed ${portWhen(c.closed_at)}${c.approx ? '*' : ''}</span></div>`;
 }
 async function loadPorts() {
+  if (typeof cardShown === 'function' && !cardShown('c-ports')) return;   // hidden in this layout: not polled (layouts.js)
   let d;
   try { d = await (await fetch('/api/ports', { cache: 'no-store' })).json(); } catch (e) { return; }
   if (!d.ok) return;

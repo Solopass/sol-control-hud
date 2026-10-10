@@ -453,3 +453,92 @@ input.switch:checked::after { left:20px; }
 .chipline { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
 
 .list .item button[data-op="now"] { margin-left:8px; vertical-align:1px; }
+
+/* ---------- ▦ Layouts (layouts.js): presets, sizes, edit mode. A size = a grid span (set inline by layouts.js) plus
+   which parts of the card show; the cards' own renderers are untouched. */
+.card[hidden] { display:none !important; }
+body.layout-pending main.grid { visibility:hidden; }
+main.grid.dense { grid-auto-flow:row dense; }   /* small cards fill gaps; not in Everyday, which stays as it was */
+.xs-chip { display:none; }
+.card[data-size="xs"] { padding:10px 14px; }
+.card[data-size="xs"] > :not(.xs-chip):not(.lbar) { display:none !important; }
+.card[data-size="xs"] > .xs-chip { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.xs-chip .dim { margin-right:6px; }
+
+/* CPU · GPU: S = numbers + temps, M = + engines and cores, L = today, XL = the two halves side by side */
+#c-gpu[data-size="s"] canvas.chart, #c-gpu[data-size="s"] .legend, #c-gpu[data-size="s"] .engines, #c-gpu[data-size="s"] .cores { display:none; }
+#c-gpu[data-size="m"] canvas.chart, #c-gpu[data-size="m"] .legend { display:none; }
+#c-gpu[data-size="xl"] { display:block; columns:2; column-gap:30px; }
+#c-gpu[data-size="xl"] .split-line { display:none; }
+#c-gpu[data-size="xl"] h2:nth-of-type(2) { break-before:column; }
+#c-gpu[data-size="xl"] canvas.chart { height:150px; }
+/* VRAM: S = the number, verdict and note */
+#c-vram[data-size="s"] :is(#vramStack, #vramLegend, #vramHeadroom, #vramIntel, canvas.chart, #vramProcsBox) { display:none; }
+#c-vram[data-size="l"] canvas.chart { height:130px; }
+/* Local AI: S = the model, mode and answer speed */
+#c-ai[data-size="s"] :is(#modelSwitcher, #aiModels, .buttons) { display:none; }
+/* Chains: S = what runs now, M = + waiting / scheduled */
+#c-chains[data-size="s"] :is(.cols, #chainList, .pipeline), #c-chains[data-size="s"] > h3 { display:none; }
+#c-chains[data-size="m"] #chainList, #c-chains[data-size="m"] > h3 { display:none; }
+/* Projects: M = only the ones running now */
+#c-projects[data-size="m"] .jrow:not(:has(> .dot.run)) { display:none; }
+#c-projects[data-size="m"] .projlist:not(:has(.dot.run))::after { content:"nothing running right now"; color:var(--dim); font-size:12px; }
+/* Media APIs: S = each service's head line (state, stuck badge) */
+#c-media[data-size="s"] .mtile > :not(.mhead), #c-media[data-size="s"] #noteForm, #c-media[data-size="s"] > .note { display:none; }
+/* Solang: M = the form without the long explanation */
+#c-solang[data-size="m"] > .note { display:none; }
+/* Ask it overnight: S = what's waiting */
+#c-ask[data-size="s"] :is(#askForm, #askSub), #c-ask[data-size="s"] .cols > div:nth-child(2) { display:none; }
+#c-ask[data-size="s"] .cols { grid-template-columns:1fr; }
+/* Memory · Network: S = the numbers */
+#c-system[data-size="s"] :is(canvas.chart, .legend) { display:none; }
+#c-system[data-size="l"] canvas.chart { height:120px; }
+/* Localhost: S = the counts in its header */
+#c-ports[data-size="s"] :is(#portsList, #portsHistory) { display:none; }
+/* This week: S = the first three numbers */
+#c-week[data-size="s"] .stats > div:nth-child(n+4), #c-week[data-size="s"] #weekDisks { display:none; }
+/* Activity: M = the last five */
+#c-activity[data-size="m"] #feed li:nth-child(n+6) { display:none; }
+#c-activity[data-size="m"] .feed { grid-template-columns:1fr; }
+
+/* the menu */
+#layoutsBtn { white-space:nowrap; }
+.lmenu { position:fixed; z-index:60; min-width:270px; padding:6px; border-radius:12px; background:var(--card);
+  border:1px solid color-mix(in srgb, var(--cyan) 35%, var(--line)); box-shadow:0 12px 40px rgba(0,0,0,.45); }
+.lmenu hr { border:none; border-top:1px solid var(--line); margin:6px 2px; }
+.litem { display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none; border:none; padding:7px 9px;
+  border-radius:8px; cursor:pointer; font-size:13px; }
+.litem:hover { background:var(--badge); }
+.litem.on { color:var(--cyan); }
+.litem.on .lname::after { content:" ✓"; }
+.litem .lic { width:20px; text-align:center; }
+.litem .lname { flex:1; }
+.litem kbd { font-size:10px; color:var(--dim); border:1px solid var(--line); border-radius:4px; padding:0 4px; }
+.lauto { cursor:default; }
+
+/* edit mode */
+body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(--cyan) 45%, transparent); outline-offset:-1px; }
+.lbar { display:flex; align-items:center; gap:6px; margin:-6px -6px 10px; padding:4px 6px; border-radius:8px; background:var(--badge); font-size:12px; }
+.card[data-size="xs"] .lbar { margin:-4px -6px 6px; }
+.lbar .ltitle { flex:1; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lbar button { padding:2px 7px; font-size:11px; }
+.lhandle { cursor:grab; }
+.lsizes { display:inline-flex; gap:2px; }
+.lsizes button.on { color:var(--bg); background:var(--cyan); border-color:var(--cyan); }
+.card.ldragging { opacity:.4; }
+.card.ldrop-before { box-shadow:-4px 0 0 var(--cyan); }
+.card.ldrop-after { box-shadow:4px 0 0 var(--cyan); }
+.ltray { margin:0 22px 14px; padding:10px 14px; border:1px dashed var(--line); border-radius:var(--radius); }
+.ltray h3 { margin:0 0 8px; font-size:13px; }
+.ltray button { margin:2px; }
+.leditbar { position:fixed; z-index:55; left:50%; bottom:16px; transform:translateX(-50%); display:flex; align-items:center; gap:8px;
+  flex-wrap:wrap; max-width:calc(100vw - 32px); padding:8px 12px; border-radius:12px; background:var(--card);
+  border:1px solid color-mix(in srgb, var(--cyan) 45%, var(--line)); box-shadow:0 12px 40px rgba(0,0,0,.5); font-size:13px; }
+.leditbar input { width:140px; } .leditbar input.lshort { width:46px; text-align:center; }
+.leditbar .lgrow { flex:1; }
+.lslides { position:relative; } .lslides summary { cursor:pointer; }
+.lslidepanel { position:absolute; bottom:30px; left:0; width:440px; max-width:calc(100vw - 40px); padding:10px 12px;
+  background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.45); }
+.lslidelist { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; margin-top:8px; font-size:12px; }
+.lmanage .srow { align-items:center; }
+.lmbtns { display:inline-flex; gap:4px; }

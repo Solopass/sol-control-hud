@@ -80,6 +80,7 @@ function projMenu(p) {
     + `<span class="dim small">archived / deprecated also hide it</span></div>`;
 }
 async function loadProjects() {
+  if (typeof cardShown === 'function' && !cardShown('c-projects')) return;   // hidden in this layout: not polled (layouts.js)
   let d;
   try { d = await (await fetch('/api/projects', { cache: 'no-store' })).json(); } catch (e) { return; }
   if (!d.ok || !d.projects) return;
@@ -180,6 +181,7 @@ function mediaTile(t) {
     + `<div class="mbody">${body}</div><div class="acts">${acts.join('')}</div></div>`;
 }
 async function loadMedia() {
+  if (typeof cardShown === 'function' && !cardShown('c-media')) return;   // hidden in this layout: not polled (layouts.js)
   let d;
   try { d = await (await fetch('/api/media', { cache: 'no-store' })).json(); } catch (e) { return; }
   if (!d.ok || !d.tiles) return;
