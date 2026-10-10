@@ -65,6 +65,14 @@ const CHIPS = {
   'c-vram': (s) => `<b>${s.vram_used_gb != null ? s.vram_used_gb.toFixed(1) : '–'}</b> / ${Math.round(s.vram_total_gb || 16)} GB · `
     + (s.vram_spill_impact === 'slow' ? '<span style="color:var(--red)">spilled</span>' : s.vram_tight ? '<span style="color:var(--amber)">tight</span>' : 'ok'),
   'c-ai': (s) => `<b>${esc(s.ai_model || 'no model')}</b> · ${esc(s.ai_state || s.ai_mode || '')}${s.ai_tps ? ` · ${Math.round(s.ai_tps)} tok/s` : ''}`,
+  'c-ai-thinking': () => {
+    const ops = window.payload?.ai_ops || {};
+    const th = ops.thinking || {};
+    const sp = ops.speed || {};
+    if (th.active) return `<b style="color:#c084fc">Thinking</b> · ${sp.tg_tps || '–'} tok/s`;
+    if (ops.active) return `<b style="color:var(--cyan)">Generating</b> · ${sp.tg_tps || '–'} tok/s`;
+    return `Idle${ops.model ? ` · ${esc(ops.model)}` : ''}`;
+  },
   'c-awayq': (s) => (s.ai_mode === 'away' ? `<b style="color:var(--cyan)">Away</b> · ${esc(s.away_line || '')}` : 'Away off'),
   'c-system': (s) => `RAM <b>${pct(s.ram_percent)}</b> · ↓ ${kbs(s.net_down_kb)} · ↑ ${kbs(s.net_up_kb)}`,
   'c-disks': (s) => {

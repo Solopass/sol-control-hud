@@ -139,6 +139,15 @@ def merge(data: dict) -> dict:
                 for w in cp["widgets"]:
                     if w["id"] not in known:
                         w["hidden"] = False              # a brand-new card: show it in the everyday view
+                w_order = {wid: i for i, wid in enumerate(WIDGETS)}
+                cp["widgets"].sort(key=lambda x: w_order.get(x["id"], 999))
+            elif cp["name"] == "AI work":
+                known_shown = {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict) and not w.get("hidden")}
+                if "c-ai-thinking" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-ai-thinking":
+                            w["hidden"] = False
+                            w["size"] = "L"
             presets.append(cp)
     if presets:
         out["presets"] = presets

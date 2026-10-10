@@ -452,12 +452,18 @@ function renderAiThinking(p) {
       termCode.className = th.phase === 'thinking' ? 'is-thinking' : 'is-answering';
       const textToShow = th.text || th.preview || 'Generating reasoning tokens…';
       termCode.textContent = textToShow;
+    } else if (ops.active) {
+      statusEl.textContent = `Inference active · ${ops.phase || 'generating'}`;
+      statusEl.style.color = 'var(--cyan)';
+      termCode.className = '';
+      const spInfo = sp.tg_tps ? `${sp.tg_tps} tok/s` : (sp.prompt_tps ? `prompt eval: ${sp.prompt_tps} tok/s` : '');
+      termCode.textContent = `Generating with ${ops.model || 'local model'}${spInfo ? ` at ${spInfo}` : ''}...\n(Inference active on port ${ops.port || ':11440'})`;
     } else if (th.text) {
       statusEl.textContent = `Completed reasoning session (${agoShort(th.updated_at || Date.now() / 1000)})`;
       statusEl.style.color = 'var(--dim)';
       termCode.className = '';
       termCode.textContent = th.text + (th.preview ? `\n\n[Answer Preview]:\n${th.preview}` : '');
-    } else if (!ops.active) {
+    } else {
       statusEl.textContent = 'No active reasoning stream';
       statusEl.style.color = 'var(--dim)';
       termCode.className = '';
@@ -523,9 +529,8 @@ function renderChains(p) {
     const th = ops.thinking || {};
     const sp = ops.speed || {};
     const isRunning = Boolean(run);
-    const hasThought = Boolean(th.active || (th.text && th.text.trim().length > 0));
 
-    if (isRunning && hasThought) {
+    if (isRunning) {
       thinkWrap.hidden = false;
       const phaseEl = $('chainThinkPhase');
       const stepEl = $('chainThinkStep');
@@ -534,27 +539,42 @@ function renderChains(p) {
       const termCode = $('chainThinkingCode');
       const term = $('chainThinkingTerminal');
 
-      const phase = th.active ? (th.phase || 'thinking') : 'done';
+      const isWaiting = Boolean(run.waiting);
+      const isThinking = Boolean(th.active && th.phase === 'thinking');
+      const isGenerating = Boolean(th.active || ops.active);
+
+      const phase = isWaiting ? 'waiting' : (isThinking ? 'thinking' : (isGenerating ? 'answering' : 'running'));
       if (phaseEl) {
         phaseEl.textContent = phase;
-        phaseEl.className = `pill ${phase === 'thinking' ? 'waiting think-pulse' : 'done'}`;
+        phaseEl.className = `pill ${phase === 'thinking' ? 'waiting think-pulse' : (phase === 'waiting' ? 'warn' : 'done')}`;
       }
       if (stepEl) {
-        stepEl.textContent = run.step_name ? `${run.chain} › ${run.step_name}` : (run.chain || 'Chain');
+        const itemInfo = run.items ? ` (${run.item || 1}/${run.items})` : (run.total ? ` (${run.done || 0}/${run.total})` : '');
+        stepEl.textContent = `${run.chain} › ${run.step_name || 'step ' + (run.step || 1)}${itemInfo}`;
       }
       if (speedEl) {
         const speedVal = sp.tg_tps != null ? sp.tg_tps : (sp.eval_tps != null ? sp.eval_tps : null);
         speedEl.textContent = speedVal ? `${speedVal} tok/s` : '';
       }
-      if (tokensEl && th.tokens != null) {
-        tokensEl.textContent = `${th.tokens} tokens`;
+      if (tokensEl) {
+        tokensEl.textContent = th.tokens ? `${th.tokens} tokens` : '';
       }
       if (termCode) {
-        termCode.className = phase === 'thinking' ? 'is-thinking' : (phase === 'answering' ? 'is-answering' : '');
-        const display = th.text || th.preview || 'Thinking…';
-        termCode.textContent = display;
+        if (isWaiting) {
+          termCode.className = '';
+          termCode.textContent = `⏸ Paused / Waiting:\n${run.waiting}`;
+        } else if (th.active && (th.text || th.preview)) {
+          termCode.className = isThinking ? 'is-thinking' : 'is-answering';
+          termCode.textContent = th.text || th.preview;
+        } else if (th.text) {
+          termCode.className = '';
+          termCode.textContent = th.text + (th.preview ? `\n\n[Answer]:\n${th.preview}` : '');
+        } else {
+          termCode.className = '';
+          termCode.textContent = `▶ Executing step "${run.step_name || 'step ' + run.step}"...\n(Waiting for model output or tool response)`;
+        }
       }
-      if (term && th.active) {
+      if (term && (isThinking || th.active)) {
         term.scrollTop = term.scrollHeight;
       }
     } else {

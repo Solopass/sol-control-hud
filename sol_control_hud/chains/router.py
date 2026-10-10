@@ -170,15 +170,35 @@ class RouterClient:
 
         from ..data.collectors.ai_ops import write_live_thought
 
-        def _publish_thought(active: bool, ph: str) -> None:
+        def _get_thinking_and_content() -> tuple[str, str, str]:
+            raw_c = "".join(content)
+            raw_t = "".join(thinking)
+            if "<think>" in raw_c:
+                parts = raw_c.split("<think>", 1)
+                before = parts[0]
+                after = parts[1]
+                if "</think>" in after:
+                    th, ans = after.split("</think>", 1)
+                    combined_th = (raw_t + "\n" + th).strip() if raw_t else th.strip()
+                    final_ans = (before + ans).strip()
+                    return combined_th, final_ans, ("answering" if final_ans else "thinking")
+                combined_th = (raw_t + "\n" + after).strip() if raw_t else after.strip()
+                return combined_th, before.strip(), "thinking"
+            if raw_t:
+                return raw_t, raw_c, ("answering" if raw_c else "thinking")
+            return "", raw_c, ("answering" if raw_c else "generating")
+
+        def _publish_thought(active: bool, ph: str | None = None) -> None:
+            th_text, ans_text, auto_ph = _get_thinking_and_content()
+            phase = ph or auto_ph
             try:
                 write_live_thought({
                     "active": active,
-                    "phase": ph,
+                    "phase": phase,
                     "model": engine_model,
                     "task": task,
-                    "thinking": "".join(thinking)[-8000:],
-                    "preview": "".join(content)[-1000:],
+                    "thinking": th_text[-8000:],
+                    "preview": ans_text[-1000:],
                     "tokens": pieces,
                     "started_at": start_wall,
                     "updated_at": time.time(),
@@ -211,8 +231,7 @@ class RouterClient:
                         finish = choice.get("finish_reason") or finish
                     now = time.monotonic()
                     if now - last_thought_write >= 0.2:
-                        ph = "answering" if content else ("thinking" if thinking else "generating")
-                        _publish_thought(True, ph)
+                        _publish_thought(True)
                         last_thought_write = now
                     if on_progress and now - last >= 5:
                         on_progress(pieces); last = now
@@ -225,5 +244,6 @@ class RouterClient:
             raise LLMError(f"bad reply from the router: {e}") from e
         finally:
             _publish_thought(False, "done")
-        return ChatResult(content="".join(content), finish_reason=finish, prompt_tokens=usage.get("prompt_tokens"),
-                          completion_tokens=usage.get("completion_tokens"), thinking="".join(thinking), model=engine_model)
+        final_th, final_cnt, _ = _get_thinking_and_content()
+        return ChatResult(content=final_cnt, finish_reason=finish, prompt_tokens=usage.get("prompt_tokens"),
+                          completion_tokens=usage.get("completion_tokens"), thinking=final_th, model=engine_model)

@@ -277,7 +277,8 @@ class Runner:
             for attempt in range(1, attempts + 1):
                 if self._stopping(run_id):
                     raise Cancelled()
-                result = self._chat(run_id, step, model, messages, attempt, max_tokens=budget)
+                task_desc = f"{wf.name} · {step.id}{f' ({label})' if label else ''}"
+                result = self._chat(run_id, step, model, messages, attempt, max_tokens=budget, task=task_desc)
                 try:
                     output = self._accept(step, result)
                 except StepFailure as e:
@@ -356,7 +357,8 @@ class Runner:
         raise StepFailure(f"step '{step.id}': the prompt is ~{tokens} tokens but {model} holds {ctx}; split the input "
                           f"with for_each or use a model with a bigger context (long_model)")
 
-    def _chat(self, run_id: int, step: Step, model: str, messages: list[dict], attempt: int, max_tokens: int | None = None):
+    def _chat(self, run_id: int, step: Step, model: str, messages: list[dict], attempt: int,
+              max_tokens: int | None = None, task: str | None = None):
         kw: dict = {"schema": step.schema, "max_tokens": max_tokens or step.max_tokens, "seed": self.seed + attempt}
         if step.reasoning is not None:
             kw["reasoning"] = step.reasoning
@@ -364,7 +366,7 @@ class Runner:
             kw["temperature"] = step.temperature
         if hasattr(self.client, "resolve"):  # router client: keep the run's heartbeat fresh while it writes
             kw["on_progress"] = lambda _n: self.store.heartbeat(run_id)
-            kw["task"] = f"Run {run_id} · step {step.id}"
+            kw["task"] = task or f"Run {run_id} · step {step.id}"
         lock = self.gpu_lock(f"run {run_id} step {step.id}", should_stop=lambda: self._stopping(run_id),
                              on_wait=lambda who: self.store.event(run_id, "waiting_for_gpu", step.id, holder=who)) \
             if self.gpu_lock else nullcontext()

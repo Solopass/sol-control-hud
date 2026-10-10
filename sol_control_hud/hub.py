@@ -268,6 +268,16 @@ class Hub:
         """The dashboard's buttons. Machine changes go through the same safe paths as the ticker and the Away panel."""
         import subprocess
         llm = Path(r"D:\AI\Cache\llm")
+        if action == "restart":
+            from .paths import ROOT
+            log("restart requested from dashboard: starting detached restart")
+            py = ROOT / ".venv" / "Scripts" / "python.exe"
+            cmd = f'"{py}" -m sol_control_hud --restart'
+            ps = (f"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{cmd}';"
+                  f" CurrentDirectory='{ROOT}'}}; exit $r.ReturnValue")
+            subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                             creationflags=0x08000000)
+            return {"ok": True, "why": "Restarting HUD… reconnecting shortly"}
         if action == "stop_ai":
             state = json.loads((llm / "state.json").read_text(encoding="utf-8")) if (llm / "state.json").exists() else {}
             if state.get("mode") != "away":

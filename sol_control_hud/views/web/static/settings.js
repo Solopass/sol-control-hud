@@ -32,6 +32,7 @@ async function loadSettings() {
     + swRow('notify', 'Notifications', a.notify, 'Away results, chain failures, crashes, disks filling, VRAM spills, stuck media jobs')
     + `<div class="srow"><span><b>Weekly machine digest</b><span class="dim small">Sundays 20:00 in 1Notebook/Digests, beside the Weekly digest chain's note</span></span><button class="mini" data-digest-now>Write it now</button></div>`
     + `<div class="srow"><span><b>Theme</b><span class="dim small">the ticker uses the same one</span></span><select id="setTheme">${$('theme').innerHTML}</select></div>`
+    + '<div class="srow"><span><b>Restart SOL Control HUD</b><span class="dim small">cleanly restart the background HUD process and reconnect</span></span><button class="mini danger" data-restart-hud>🔄 Restart HUD</button></div>'
     + '</section>'
     + '<section><h3>Appearance</h3>'
     + swRow('appearance:card_hover_lift', 'Card hover lift & glow', ap.card_hover_lift !== false, 'tactile elevation and ambient glow when hovering over cards')
@@ -112,7 +113,25 @@ $('settingsBody').addEventListener('change', (e) => {
   const el = e.target.closest('[data-setting]');
   if (el) changeSetting(el);
 });
-$('settingsBtn').onclick = () => { $('settingsModal').hidden = false; loadSettings(); };
+async function requestRestart() {
+  if (!confirm('Restart SOL Control HUD now?')) return;
+  toast('Restarting HUD… reconnecting shortly');
+  $('settingsModal').hidden = true;
+  await post('/api/action', { action: 'restart' });
+}
+const srb = $('settingsRestartBtn');
+if (srb) srb.onclick = requestRestart;
+$('settingsBody').addEventListener('click', (e) => {
+  if (e.target.closest('[data-restart-hud]')) requestRestart();
+});
+$('settingsBtn').onclick = (e) => {
+  if (e.ctrlKey || e.metaKey) {
+    requestRestart();
+    return;
+  }
+  $('settingsModal').hidden = false;
+  loadSettings();
+};
 $('settingsClose').onclick = () => { $('settingsModal').hidden = true; };
 $('settingsModal').addEventListener('click', (e) => { if (e.target.id === 'settingsModal') $('settingsModal').hidden = true; });
 addEventListener('keydown', (e) => { if (e.key === 'Escape') $('settingsModal').hidden = true; });
