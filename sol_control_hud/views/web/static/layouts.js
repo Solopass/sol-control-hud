@@ -8,7 +8,7 @@ let LAYOUT = null;          // the server's state: {active, auto, rev, presets, 
 let EDIT = null;            // while editing: {old: name, preset: working copy}
 const LGRID = document.querySelector('main.grid');
 const lcard = (id) => document.getElementById(id);
-const SIZE_ORDER = ['XS', 'S', 'M', 'L', 'XL'];
+const LC = window.LayoutCore;    // the pure parts (layouts-core.js), tested with node
 
 // which loader feeds which card: a hidden card isn't polled, and is loaded at once when it comes back
 const LOADERS = { 'c-ports': 'loadPorts', 'c-notes': 'loadNotes', 'c-ai': 'loadGuard', 'c-gpu': 'loadDisplays', 'c-week': 'loadWeek',
@@ -36,9 +36,9 @@ function applyPreset(p) {
     if (el.hidden && !hide) comeBack.push(w.id);
     el.hidden = hide;
     el.dataset.size = w.size.toLowerCase();
-    const [c, rows] = r.sizes[w.size] || [1, 1];
-    el.style.gridColumn = `span ${Math.min(c, cols)}`;      // inline: overrides the old .wide / .tall classes
-    el.style.gridRow = `span ${rows}`;
+    const sp = LC.spanFor(r.sizes, w.size, cols);
+    el.style.gridColumn = `span ${sp.cols}`;                 // inline: overrides the old .wide / .tall classes
+    el.style.gridRow = `span ${sp.rows}`;
     ensureChip(el, r);
   }
   LGRID.classList.toggle('dense', p.name !== 'Everyday');
@@ -68,7 +68,7 @@ const CHIPS = {
   'c-awayq': (s) => (s.ai_mode === 'away' ? `<b style="color:var(--cyan)">Away</b> · ${esc(s.away_line || '')}` : 'Away off'),
   'c-system': (s) => `RAM <b>${pct(s.ram_percent)}</b> · ↓ ${kbs(s.net_down_kb)} · ↑ ${kbs(s.net_up_kb)}`,
   'c-disks': (s) => {
-    const d = (s.disks || []).filter((x) => x.free_gb != null).sort((a, b) => (b.percent || 0) - (a.percent || 0))[0];
+    const d = LC.fullestDisk(s.disks);
     return d ? `${esc(d.drive)}: <b>${d.free_gb} GB</b> free · the fullest` : 'disks –';
   },
   'c-stab': (s) => { const n = (s.unexpected_reboots || 0) + (s.gpu_resets || 0);
@@ -211,7 +211,7 @@ function redrawEdit() {
     const el = lcard(w.id); const r = reg(w.id);
     if (!el || !r) continue;
     const bar = el.querySelector(':scope > .lbar');
-    const sizes = SIZE_ORDER.filter((s) => r.sizes[s]);
+    const sizes = LC.sizesOf(r.sizes);
     setHTML(bar, `<button class="lhandle" draggable="true" title="Drag to move (or focus and use the arrow keys)" data-lmove="${esc(w.id)}">⠿</button>`
       + `<span class="ltitle">${esc(r.title)}</span>`
       + `<span class="lsizes">${sizes.map((s) => `<button class="${s === w.size ? 'on' : ''}" data-lsize="${s}" data-lid="${esc(w.id)}" title="size ${s}">${s}</button>`).join('')}</span>`
@@ -224,16 +224,8 @@ function redrawEdit() {
 }
 function wIndex(id) { return EDIT.preset.widgets.findIndex((w) => w.id === id); }
 function moveWidget(id, to) {
-  const ws = EDIT.preset.widgets; const from = wIndex(id);
-  if (from < 0) return;
-  const [w] = ws.splice(from, 1);
-  ws.splice(Math.max(0, Math.min(to, ws.length)), 0, w);
+  EDIT.preset.widgets = LC.moveTo(EDIT.preset.widgets, id, to);
   redrawEdit();
-}
-function visibleNeighbour(id, dir) {   // the index to jump to with the arrow keys: past hidden cards
-  const ws = EDIT.preset.widgets; let i = wIndex(id) + dir;
-  while (i >= 0 && i < ws.length && ws[i].hidden) i += dir;
-  return i;
 }
 LGRID.addEventListener('click', (e) => {
   if (!EDIT) return;
@@ -249,15 +241,14 @@ LGRID.addEventListener('keydown', (e) => {
   const dir = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
   if (!dir) return;
   e.preventDefault();
-  const to = visibleNeighbour(id, dir);
-  if (to >= 0 && to < EDIT.preset.widgets.length) { moveWidget(id, to); lcard(id)?.querySelector('[data-lmove]')?.focus(); }
+  const to = LC.neighbourIndex(EDIT.preset.widgets, id, dir);     // past hidden cards
+  if (to >= 0) { moveWidget(id, to); lcard(id)?.querySelector('[data-lmove]')?.focus(); }
 });
 tray.addEventListener('click', (e) => {
   const b = e.target.closest('[data-lshow]');
   if (!b || !EDIT) return;
-  const w = EDIT.preset.widgets[wIndex(b.dataset.lshow)];
-  w.hidden = false;
-  moveWidget(w.id, EDIT.preset.widgets.length);     // back at the end, where you can see it
+  EDIT.preset.widgets = LC.showAtEnd(EDIT.preset.widgets, b.dataset.lshow);   // back at the end, where you can see it
+  redrawEdit();
 });
 let dragId = null;
 LGRID.addEventListener('dragstart', (e) => {
@@ -282,11 +273,7 @@ LGRID.addEventListener('drop', (e) => {
   e.preventDefault();
   const over = e.target.closest('.card');
   if (over && over.id !== dragId) {
-    const before = over.classList.contains('ldrop-before');
-    const ws = EDIT.preset.widgets; const from = wIndex(dragId);
-    const [w] = ws.splice(from, 1);
-    const to = ws.findIndex((x) => x.id === over.id) + (before ? 0 : 1);
-    ws.splice(to, 0, w);
+    EDIT.preset.widgets = LC.dropReorder(EDIT.preset.widgets, dragId, over.id, over.classList.contains('ldrop-before'));
   }
   endDrag(); redrawEdit();
 });
