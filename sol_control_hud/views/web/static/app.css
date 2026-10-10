@@ -80,8 +80,11 @@ main.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(330px, 
 .card:nth-child(5) { animation-delay:.16s } .card:nth-child(6) { animation-delay:.2s } .card:nth-child(7) { animation-delay:.24s }
 .card:nth-child(n+8) { animation-delay:.28s }
 @keyframes rise { from { opacity:0; transform:translateY(12px); } }
-.card[data-open] { cursor:pointer; }
 .card:hover { border-color:color-mix(in srgb, var(--cyan) 45%, var(--line)); }
+body:not(.opt-no-hover-lift):not(.layout-editing) .card:not(.ldragging):hover {
+  transform:translateY(-2px);
+  box-shadow:0 10px 28px -6px rgba(0,0,0,.45), 0 0 0 1px color-mix(in srgb, var(--cyan) 35%, transparent);
+}
 .card.flash { animation:cardflash 1.2s ease-out; }
 @keyframes cardflash { 0% { box-shadow:0 0 0 2px var(--cyan); } 100% { box-shadow:0 0 0 0 transparent; } }
 .card.wide { grid-column:span 2; }
@@ -465,6 +468,30 @@ main.grid.dense { grid-auto-flow:row dense; }   /* small cards fill gaps; not in
 .card[data-size="xs"] > .xs-chip { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .xs-chip .dim { margin-right:6px; }
 
+/* Category color accents */
+body:not(.opt-no-card-accents) .card::before {
+  content:""; position:absolute; top:0; left:16px; right:16px; height:2px; border-radius:2px; opacity:.85; pointer-events:none;
+}
+body:not(.opt-no-card-accents) :is(#c-gpu, #c-vram, #c-system, #c-disks)::before {
+  background:linear-gradient(90deg, var(--green), var(--cyan));
+}
+body:not(.opt-no-card-accents) :is(#c-ai, #c-chains, #c-awayq, #c-ask)::before {
+  background:linear-gradient(90deg, var(--cyan), #a855f7);
+}
+body:not(.opt-no-card-accents) :is(#c-projects, #c-ports, #c-notes, #c-work, #c-media, #c-solang, #c-week)::before {
+  background:linear-gradient(90deg, var(--amber), var(--cyan));
+}
+body:not(.opt-no-card-accents) :is(#c-stab, #c-svc, #c-health, #c-activity, #c-review)::before {
+  background:linear-gradient(90deg, #10b981, var(--cyan));
+}
+
+/* XS status strips */
+body:not(.opt-no-xs-styled) .card[data-size="xs"] { padding:8px 14px; border-left:3px solid var(--cyan); }
+body:not(.opt-no-xs-styled) :is(#c-gpu, #c-vram, #c-system, #c-disks)[data-size="xs"] { border-left-color:var(--green); }
+body:not(.opt-no-xs-styled) :is(#c-projects, #c-ports, #c-notes, #c-work, #c-media, #c-solang, #c-week)[data-size="xs"] { border-left-color:var(--amber); }
+body:not(.opt-no-xs-styled) :is(#c-stab, #c-svc, #c-health, #c-activity, #c-review)[data-size="xs"] { border-left-color:#10b981; }
+
+
 /* CPU · GPU: S = numbers + temps, M = + engines and cores, L = today, XL = the two halves side by side */
 #c-gpu[data-size="s"] canvas.chart, #c-gpu[data-size="s"] .legend, #c-gpu[data-size="s"] .engines, #c-gpu[data-size="s"] .cores { display:none; }
 #c-gpu[data-size="m"] canvas.chart, #c-gpu[data-size="m"] .legend { display:none; }
@@ -505,6 +532,15 @@ main.grid.dense { grid-auto-flow:row dense; }   /* small cards fill gaps; not in
 #layoutsBtn { white-space:nowrap; }
 .lmenu { position:fixed; z-index:60; min-width:270px; padding:6px; border-radius:12px; background:var(--card);
   border:1px solid color-mix(in srgb, var(--cyan) 35%, var(--line)); box-shadow:0 12px 40px rgba(0,0,0,.45); }
+body:not(.opt-no-frosted) :is(.lmenu, .leditbar, .modal .sheet) {
+  backdrop-filter:blur(16px);
+  background:color-mix(in srgb, var(--card) 85%, transparent);
+}
+.lmenu:not([hidden]) { animation:lmenupopin .18s cubic-bezier(.2, .9, .2, 1); }
+@keyframes lmenupopin {
+  from { opacity:0; transform:translateY(-6px) scale(.98); }
+  to { opacity:1; transform:translateY(0) scale(1); }
+}
 .lmenu hr { border:none; border-top:1px solid var(--line); margin:6px 2px; }
 .litem { display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:none; border:none; padding:7px 9px;
   border-radius:8px; cursor:pointer; font-size:13px; }
@@ -524,10 +560,12 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
 .lbar button { padding:2px 7px; font-size:11px; }
 .lhandle { cursor:grab; }
 .lsizes { display:inline-flex; gap:2px; }
+.lsizes button { border-radius:6px; transition:all .15s ease; }
+.lsizes button:hover { background:color-mix(in srgb, var(--cyan) 25%, var(--badge)); }
 .lsizes button.on { color:var(--bg); background:var(--cyan); border-color:var(--cyan); }
-.card.ldragging { opacity:.4; }
-.card.ldrop-before { box-shadow:-4px 0 0 var(--cyan); }
-.card.ldrop-after { box-shadow:4px 0 0 var(--cyan); }
+.card.ldragging { opacity:.35; transform:scale(.98); cursor:grabbing; }
+.card.ldrop-before { box-shadow:-4px 0 0 var(--cyan), 0 0 14px color-mix(in srgb, var(--cyan) 50%, transparent); }
+.card.ldrop-after { box-shadow:4px 0 0 var(--cyan), 0 0 14px color-mix(in srgb, var(--cyan) 50%, transparent); }
 .ltray { margin:0 22px 14px; padding:10px 14px; border:1px dashed var(--line); border-radius:var(--radius); }
 .ltray h3 { margin:0 0 8px; font-size:13px; }
 .ltray button { margin:2px; }

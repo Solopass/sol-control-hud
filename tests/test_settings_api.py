@@ -38,6 +38,8 @@ def test_read_lists_everything(the_hub):
     d = settings_api.read(the_hub)
     assert set(d["app"]) == {"ticker_shown", "start_at_login", "dashboard_at_start", "notify", "hud_heal"}
     assert d["app"]["hud_heal"] is False
+    assert set(d["appearance"]) == {"card_hover_lift", "card_accents", "xs_chip_style", "frosted_glass"}
+    assert d["appearance"]["card_hover_lift"] is True
     t = d["ticker"]
     assert t["preset"] == "balanced" and t["interval_seconds"] == 6 and t["alerts_sound"] is True
     assert any(s["tag"] == "APPS" for s in t["slides"]) and {p["key"] for p in t["presets"]} == set(PRESETS)
@@ -72,6 +74,15 @@ def test_bad_values_are_refused(the_hub):
 def test_hud_heal_is_saved(the_hub):
     assert settings_api.change(the_hub, "hud_heal", True)["ok"]
     assert hub.load_settings().get("hud_heal") is True
+
+
+def test_appearance_settings_saved(the_hub):
+    assert settings_api.change(the_hub, "appearance:card_hover_lift", False)["ok"]
+    assert hub.load_settings().get("appearance", {}).get("card_hover_lift") is False
+    d = settings_api.read(the_hub)
+    assert d["appearance"]["card_hover_lift"] is False
+    with pytest.raises(settings_api.SettingError):
+        settings_api.change(the_hub, "appearance:unknown_prop", True)
 
 
 class FakeRegistry:

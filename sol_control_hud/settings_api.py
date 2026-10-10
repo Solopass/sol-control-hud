@@ -41,6 +41,12 @@ def read(hub) -> dict:
             "notify": bool(views.get("notify")),
             "hud_heal": bool(hub.settings.get("hud_heal", False)),
         },
+        "appearance": {
+            "card_hover_lift": bool((hub.settings.get("appearance") or {}).get("card_hover_lift", True)),
+            "card_accents": bool((hub.settings.get("appearance") or {}).get("card_accents", True)),
+            "xs_chip_style": bool((hub.settings.get("appearance") or {}).get("xs_chip_style", True)),
+            "frosted_glass": bool((hub.settings.get("appearance") or {}).get("frosted_glass", True)),
+        },
         "ticker": {
             "available": t is not None,
             "preset": _preset_of(ts),
@@ -98,6 +104,18 @@ def change(hub, key: str, value) -> dict:
         save_settings(hub.settings)
         return {"ok": True, "why": "the HUD's own spill heal is " + ("on (the watcher heals too: two may reload)"
                                                                      if _bool(value) else "off (the watcher heals)")}
+    if key.startswith("appearance:"):
+        from .hub import save_settings
+        target = key.split(":", 1)[1]
+        valid = {"card_hover_lift", "card_accents", "xs_chip_style", "frosted_glass"}
+        if target not in valid:
+            raise SettingError(f"unknown appearance setting {target!r}")
+        appr = dict(hub.settings.get("appearance") or {})
+        val = _bool(value)
+        appr[target] = val
+        hub.settings["appearance"] = appr
+        save_settings(hub.settings)
+        return {"ok": True, "why": f"{target.replace('_', ' ')}: {'on' if val else 'off'}"}
     if key == "preset":
         if value not in PRESETS:
             raise SettingError(f"unknown preset {value!r}")

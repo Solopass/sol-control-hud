@@ -12,10 +12,19 @@ function infoRow(label, hint) {
   return `<div class="srow"><span><b>${esc(label)}</b><span class="dim small">${esc(hint)}</span></span></div>`;
 }
 
+function applyAppearance(ap) {
+  if (!ap) return;
+  if ('card_hover_lift' in ap) document.body.classList.toggle('opt-no-hover-lift', ap.card_hover_lift === false);
+  if ('card_accents' in ap) document.body.classList.toggle('opt-no-card-accents', ap.card_accents === false);
+  if ('xs_chip_style' in ap) document.body.classList.toggle('opt-no-xs-styled', ap.xs_chip_style === false);
+  if ('frosted_glass' in ap) document.body.classList.toggle('opt-no-frosted', ap.frosted_glass === false);
+}
+
 async function loadSettings() {
   let d;
   try { d = await (await fetch('/api/settings', { cache: 'no-store' })).json(); } catch (e) { return; }
-  const a = d.app || {}, t = d.ticker || {};
+  const a = d.app || {}, t = d.ticker || {}, ap = d.appearance || {};
+  applyAppearance(ap);
   let html = '<section><h3>App</h3>'
     + swRow('ticker_shown', 'Show the taskbar ticker', a.ticker_shown, 'when hidden it stays in the tray')
     + swRow('start_at_login', 'Start when Windows starts', a.start_at_login)
@@ -23,6 +32,12 @@ async function loadSettings() {
     + swRow('notify', 'Notifications', a.notify, 'Away results, chain failures, crashes, disks filling, VRAM spills, stuck media jobs')
     + `<div class="srow"><span><b>Weekly machine digest</b><span class="dim small">Sundays 20:00 in 1Notebook/Digests, beside the Weekly digest chain's note</span></span><button class="mini" data-digest-now>Write it now</button></div>`
     + `<div class="srow"><span><b>Theme</b><span class="dim small">the ticker uses the same one</span></span><select id="setTheme">${$('theme').innerHTML}</select></div>`
+    + '</section>'
+    + '<section><h3>Appearance</h3>'
+    + swRow('appearance:card_hover_lift', 'Card hover lift & glow', ap.card_hover_lift !== false, 'tactile elevation and ambient glow when hovering over cards')
+    + swRow('appearance:card_accents', 'Category color accents', ap.card_accents !== false, 'color-coded top edge accent line for hardware, AI, dev, and health')
+    + swRow('appearance:xs_chip_style', 'Styled XS status strips', ap.xs_chip_style !== false, 'subsystem accent line and alert indicators on compact 1-line cards')
+    + swRow('appearance:frosted_glass', 'Frosted glass menus', ap.frosted_glass !== false, 'backdrop blur effect on dropdowns, edit bar, and modals')
     + '</section>';
   if (t.available) {
     const preset = t.presets.find((p) => p.key === t.preset);
@@ -67,6 +82,10 @@ async function loadSettings() {
 
 async function changeSetting(el) {
   const key = el.dataset.setting, value = el.type === 'checkbox' ? el.checked : el.value;
+  if (key.startsWith('appearance:')) {
+    const target = key.split(':')[1];
+    applyAppearance({ [target]: value });
+  }
   const r = await post('/api/action', { action: 'setting', target: key, value });
   toast(r.why || (r.ok ? 'saved' : 'that did not work'));
   setTimeout(loadSettings, 700);           // the ticker applies it on its own thread
@@ -97,3 +116,4 @@ $('settingsBtn').onclick = () => { $('settingsModal').hidden = false; loadSettin
 $('settingsClose').onclick = () => { $('settingsModal').hidden = true; };
 $('settingsModal').addEventListener('click', (e) => { if (e.target.id === 'settingsModal') $('settingsModal').hidden = true; });
 addEventListener('keydown', (e) => { if (e.key === 'Escape') $('settingsModal').hidden = true; });
+loadSettings();

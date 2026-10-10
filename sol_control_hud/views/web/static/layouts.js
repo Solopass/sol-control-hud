@@ -171,6 +171,7 @@ function renderLayoutButton() {
 function renderLayoutMenu() {
   const items = (LAYOUT?.presets || []).map((p, i) => `<button class="litem${p.name === LAYOUT.active ? ' on' : ''}" data-lname="${esc(p.name)}">`
     + `<span class="lic">${esc(p.icon || '▦')}</span><span class="lname">${esc(p.name)}</span>`
+    + `<span class="dim small">${p.widgets.filter((w) => !w.hidden).length} cards</span>`
     + `${p.auto_when ? `<span class="dim small">auto: ${esc(p.auto_when)}</span>` : ''}`
     + `${i < 9 ? `<kbd>Alt+${i + 1}</kbd>` : ''}</button>`).join('');
   setHTML(layoutMenu, items + '<hr>'
