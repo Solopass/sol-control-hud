@@ -452,3 +452,40 @@ def test_compact_text_and_step_compaction(store):
     events = store.events(rid)
     assert any(ev["kind"] == "compacted" and ev["step"] == "step1" for ev in events)
 
+
+def test_abort_inference_flag_stops_run(store, tmp_path, monkeypatch):
+    from sol_control_hud.chains import runner
+    llm_dir = tmp_path / "llm"
+    llm_dir.mkdir()
+    monkeypatch.setattr(runner, "LLM_DIR", llm_dir)
+    wf = parse(THREE)
+
+    class AbortDuringA(Scripted):
+        def chat(self, model, messages, **kw):
+            (llm_dir / "abort_inference.flag").write_text("abort", encoding="utf-8")
+            return super().chat(model, messages, **kw)
+
+    rid = Runner(AbortDuringA({"m": ["a1"]}), store).run(wf, {"topic": "x"})
+    assert store.run(rid)["status"] == "cancelled"
+
+
+def test_router_client_aborts_on_flag(tmp_path, monkeypatch):
+    monkeypatch.setattr("sol_control_hud.chains.router.engine_mode", lambda: "desk")
+    flag = tmp_path / "abort_inference.flag"
+    flag.write_text("abort", encoding="utf-8")
+    monkeypatch.setattr("sol_control_hud.chains.router.ABORT_FLAG", flag)
+
+    def handler(req):
+        if req.url.path == "/models":
+            return httpx.Response(200, json=MODELS)
+        sse = 'data: {"choices": [{"delta": {"content": "hello"}}]}\n\n'
+        return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
+
+    c = _router(handler)
+    from sol_control_hud.chains.workflow import Cancelled
+    with pytest.raises(Cancelled):
+        c.chat("sol-fast", [{"role": "user", "content": "hi"}], reasoning="off")
+    assert not flag.exists()
+
+
+

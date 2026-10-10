@@ -48,6 +48,10 @@ class WorkflowError(ValueError):
     pass
 
 
+class Cancelled(Exception):
+    pass
+
+
 @dataclass
 class Step:
     id: str

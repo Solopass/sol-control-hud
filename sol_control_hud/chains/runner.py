@@ -30,7 +30,7 @@ import jsonschema
 
 from .llm import ChatClient, LLMError
 from .store import WHOLE, Store
-from .workflow import Step, Workflow, WorkflowError, references, render, resolve_args
+from .workflow import Cancelled, Step, Workflow, WorkflowError, references, render, resolve_args
 
 try:  # optional: the router client's "not served right now" signal
     from .router import ModelUnavailable
@@ -54,10 +54,6 @@ def compact_text(text: str, max_chars: int = 2000) -> str:
         return text[:max_chars]
     marker = f"\n\n... [Compact memory: {omitted} characters omitted] ...\n\n"
     return text[:head_len].rstrip() + marker + text[-tail_len:].lstrip()
-
-
-class Cancelled(Exception):
-    pass
 
 
 @dataclass
