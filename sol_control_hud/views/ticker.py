@@ -100,6 +100,7 @@ def activate_existing_instance() -> None:
 
 
 ACK_FILE = Path(r"D:\OBVLT\reports\stability-ack.json")
+DAILY_VAULT = Path(r"D:\Polymatica Vault")      # the daily note: <year>\<date>.md (a name, so tests can point it elsewhere)
 
 
 def write_crash_ack(path: Path, now: str | None = None) -> dict:
@@ -608,11 +609,11 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
         elif "NOTE" in tag_u:
             year = time.strftime("%Y")
             date_str = time.strftime("%Y-%m-%d")
-            note_path = Path(r"D:\Polymatica Vault") / year / f"{date_str}.md"
+            note_path = DAILY_VAULT / year / f"{date_str}.md"
             if not note_path.exists():
                 try:
                     note_path.parent.mkdir(parents=True, exist_ok=True)
-                    tmpl_path = Path(r"D:\Polymatica Vault\templates\Titled post.md")
+                    tmpl_path = DAILY_VAULT / "templates" / "Titled post.md"
                     init_content = tmpl_path.read_text(encoding="utf-8") if tmpl_path.exists() else "hidden: false\ntitle: \ntags: \nNote:\n\n"
                     note_path.write_text(init_content, encoding="utf-8")
                 except Exception:
@@ -632,8 +633,8 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             if not opened:
                 if note_path.exists():
                     os.startfile(str(note_path))
-                elif Path(r"D:\Polymatica Vault").exists():
-                    os.startfile(r"D:\Polymatica Vault")
+                elif DAILY_VAULT.exists():
+                    os.startfile(str(DAILY_VAULT))
         elif "GIT" in tag_u:
             ws_dir = Path(r"D:\Workspace")
             if ws_dir.exists():
