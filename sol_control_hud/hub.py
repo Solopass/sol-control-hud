@@ -409,6 +409,19 @@ class Hub:
             return r
         if action in ("project", "media"):
             return self._launch(action, target, str((body or {}).get("op", "")), body or {})
+        if action == "project_bughunt":
+            from .chains import project_chains
+            r = project_chains.queue_bug_hunt(target)
+            log(f"project bughunt {target}: {r.get('why')}")
+            return r
+        if action == "open_project_review":
+            from .chains import project_chains
+            rev = project_chains.find_latest_review(target)
+            if not rev:
+                return {"ok": False, "why": f"No review note found yet for {target}"}
+            from .data.collectors import notes
+            return notes.open_note("OBVLT", rev["path"])
+
         if action in ("guard_ignore", "guard_resume"):
             # the guard turned the AI off for something that is not a game: say so once, instead of editing the
             # config by hand (09-25 Notepad and Edge, 09-27 claude x3, 10-07/08 steamwebhelper x5)

@@ -58,6 +58,7 @@ function projRow(p) {
   if (p.running && p.can_stop) acts.push(`<button class="mini danger" data-p="stop" title="Stop it">■</button>`);
   if (p.live) acts.push(`<button class="mini ghost" data-p="live" title="${esc(p.live)}">🌐 Site</button>`);
   if (p.github) acts.push(`<button class="mini ghost" data-p="github" title="${esc(p.github)}">GitHub</button>`);
+  acts.push(`<button class="mini ghost" data-p="bughunt" title="Run Bug Hunt chain on ${esc(p.name)}">🐞 Hunt</button>`);
   acts.push(`<button class="mini ghost" data-p="editor" title="Open in VS Code">‹/›</button>`);
   acts.push(`<button class="mini ghost" data-p="folder" title="Open the folder">📁</button>`);
   acts.push(`<button class="mini ghost${menuFor === p.name ? ' on' : ''}" data-p="menu" title="Tag or hide">⋯</button>`);
@@ -75,6 +76,9 @@ function projMenu(p) {
   const tags = TAGS.map((t) => `<button class="mini ${mine === t ? 'on' : 'ghost'}" data-p="tag" data-tag="${t}">${t}</button>`).join('');
   return `<div class="jmenu"><span class="dim small">tag</span>${tags}`
     + (mine ? `<button class="mini ghost" data-p="tag" data-tag="" title="Use the README's status again">clear</button>` : '')
+    + `<span class="sep"></span>`
+    + `<button class="mini ghost" data-p="bughunt" title="Run Bug Hunt prompt chain on this project">🐞 Bug Hunt</button>`
+    + `<button class="mini ghost" data-p="review" title="Open latest review note in Obsidian">📝 Review note</button>`
     + `<span class="sep"></span>`
     + (p.hidden ? `<button class="mini" data-p="show">show again</button>` : `<button class="mini ghost" data-p="hide" title="Fold it into + hidden">hide</button>`)
     + `<span class="dim small">archived / deprecated also hide it</span></div>`;
@@ -104,6 +108,18 @@ $('projList').addEventListener('click', async (e) => {
   if (op === 'open') return openUrl(p.url);
   if (op === 'live') return openUrl(p.live);
   if (op === 'github') return openUrl(p.github);
+  if (op === 'bughunt') {
+    b.disabled = true;
+    const r = await post('/api/action', { action: 'project_bughunt', target: name });
+    toast(r.why || (r.ok ? `Queued Bug Hunt for ${p.title || name}` : 'Could not queue bug hunt'));
+    b.disabled = false;
+    return;
+  }
+  if (op === 'review') {
+    const r = await post('/api/action', { action: 'open_project_review', target: name });
+    if (!r.ok) toast(r.why || 'No review note found yet');
+    return;
+  }
   if (op === 'menu') { menuFor = menuFor === name ? null : name; return loadProjects(); }
   if (op === 'tag' || op === 'hide' || op === 'show') {
     const r = await post('/api/action', { action: 'project', target: name, op, tag: b.dataset.tag || '' });
