@@ -1310,13 +1310,110 @@ def tell_running_hub(port: int, show: str | None) -> bool:
         return False
 
 
+LOG_MAX_BYTES = 1_000_000
+
+
+def rotate_log(path: Path = None, max_bytes: int = LOG_MAX_BYTES) -> bool:
+    """At start, before the log is opened (Windows can't rename a file the running HUD holds open): a hub.log over
+    max_bytes becomes hub.log.old (replacing the previous one). True when it rotated. ticker.log does the same."""
+    path = path or LOG_FILE
+    try:
+        if path.exists() and path.stat().st_size > max_bytes:
+            path.replace(path.with_suffix(".log.old"))
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def hub_answers(port: int, timeout: float = 1.5) -> bool:
+    import httpx
+    try:
+        return httpx.get(f"http://127.0.0.1:{port}/api/snapshot", timeout=timeout).status_code == 200
+    except Exception:
+        return False
+
+
+def lock_free(path: Path = None) -> bool:
+    """No HUD holds the single-instance lock."""
+    try:
+        with open(path or LOCK_FILE, "a+b") as f:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        return True
+    except OSError:
+        return False
+
+
+def ask_exit(port: int) -> bool:
+    import httpx
+    try:
+        return httpx.post(f"http://127.0.0.1:{port}/api/views", json={"exit": True}, headers={"X-SOL-Control": "1"},
+                          timeout=5).status_code == 200
+    except Exception:
+        return False
+
+
+def start_detached() -> bool:
+    """Start the HUD fully detached (no console, not a child of whoever asked), like sol-control.ps1 does."""
+    import subprocess
+    from .paths import ROOT
+    pyw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
+    cmd = f'"{pyw}" -m sol_control_hud'
+    ps = (f"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{cmd}';"
+          f" CurrentDirectory='{ROOT}'}}; exit $r.ReturnValue")
+    r = subprocess.run(["powershell.exe", "-NoProfile", "-Command", ps], capture_output=True, creationflags=0x08000000)
+    return r.returncode == 0
+
+
+def restart_hub(port: int, wait_s: float = 25.0, answers=None, free=None, exit_=None, start=None,
+                sleep=time.sleep, clock=time.monotonic, say=print) -> int:
+    """`python -m sol_control_hud --restart`: ask the running HUD to exit cleanly (so it logs "exit" and the health
+    card doesn't count a crash), wait until it's gone, start a fresh detached copy, wait until it answers.
+    Never kills: a HUD that doesn't answer the exit request is a problem worth seeing, so this stops and says so."""
+    answers = answers or (lambda: hub_answers(port))
+    free = free or lock_free
+    exit_ = exit_ or (lambda: ask_exit(port))
+    start = start or start_detached
+    if not free() or answers():
+        log("restart requested (--restart): asking the running HUD to exit")
+        if not exit_():
+            say("The running HUD didn't accept the exit request (is it hung?). Nothing was killed: check data/hub.log, "
+                "then close it from the tray or Task Manager.")
+            return 1
+        deadline = clock() + wait_s
+        while clock() < deadline and (not free() or answers()):
+            sleep(0.5)
+        if not free():
+            say(f"The HUD was asked to exit but is still running after {wait_s:.0f} s. Nothing was killed.")
+            return 1
+    if not start():
+        say("Could not start the HUD (see data/hub.log).")
+        return 1
+    deadline = clock() + wait_s
+    while clock() < deadline:
+        if answers():
+            say(f"HUD restarted: http://127.0.0.1:{port}")
+            return 0
+        sleep(0.5)
+    say(f"Started, but it isn't answering yet after {wait_s:.0f} s: check data/hub.log.")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="python -m sol_control_hud")
     p.add_argument("--show", choices=["ticker", "dashboard", "both", "tray"], help="which views to show this time")
     p.add_argument("--open-dashboard", action="store_true",
                    help="open the dashboard on top of your saved views (the Desktop shortcut 'SOL Dashboard')")
+    p.add_argument("--restart", action="store_true",
+                   help="ask the running HUD to exit cleanly, then start a fresh one (use this, never kill it)")
     args = p.parse_args(argv)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if args.restart:
+        sys.exit(restart_hub(port_of(load_settings())))
+    rotate_log()
     if sys.stdout is None or sys.stderr is None:   # pythonw: uvicorn/print would crash on a None stream
         stream = open(LOG_FILE, "a", encoding="utf-8", buffering=1)
         sys.stdout, sys.stderr = sys.stdout or stream, sys.stderr or stream

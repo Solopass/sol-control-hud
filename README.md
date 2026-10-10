@@ -29,6 +29,7 @@ Away screen and the doctor from here. Next: `D:\OBVLT\plans\SOL_CONTROL_HUD_NEXT
 ```powershell
 .\sol-ticker.ps1                                          # the ticker
 .\open-hud.ps1                                            # the web dashboard (http://127.0.0.1:7900)
+.\sol-control.ps1 -Restart                                # restart it cleanly (agents: never kill it, see AGENTS.md)
 .\.venv\Scripts\python.exe -m sol_control_hud.chains      # chains: note, run, chain, daemon, forge, check, runs, show
 .\.venv\Scripts\pythonw.exe -m sol_control_hud.away       # the Away screen (started by tools\sol-llm.ps1)
 .\.venv\Scripts\python.exe -m sol_control_hud.doctor --json
@@ -43,7 +44,9 @@ Setup: `uv venv --python "C:\Program Files\Python314\python.exe" .venv` then
 - Tests use a temporary data folder (`tests\conftest.py`): `data\` here is the live machine's state.
 
 ## Working on it
-- **Every commit runs the tests** (`.githooks/pre-commit`; enable in a fresh clone with `git config core.hooksPath .githooks`). Skip once only on purpose: `git commit --no-verify`.
+- **Every commit runs the checks** (`.githooks/pre-commit`: no new undefined names, staged `.js` must parse, then the tests; enable in a fresh clone with `git config core.hooksPath .githooks`). Skip once only on purpose: `git commit --no-verify`.
+- **Agents** (Claude, Gemini): read `AGENTS.md`. Restart with `.\sol-control.ps1 -Restart`; never kill the process.
+- **Logs:** `data\hub.log` (becomes `hub.log.old` past 1 MB, at the next start), `data\ticker.log`, `data\swallowed.log`.
 - Icon: `scripts\make_icon.py` draws `sol_control_hud\assets\sol.ico` and the dashboard's `sol.svg`.
 
 ## Rules the code keeps

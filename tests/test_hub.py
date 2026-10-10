@@ -263,3 +263,49 @@ def test_the_hub_shuts_the_ticker_down_for_a_game(the_hub):
     the_hub._tick()
     assert calls == ["down", "back"]
     assert hub.snap_game_on(Snapshot(ai_mode="off", ai_reason="manual")) is False
+
+
+def test_restart_asks_politely_and_never_kills():
+    said, started = [], []
+    t = {"now": 0.0}
+    tick = lambda s: t.__setitem__("now", t["now"] + s)        # noqa: E731
+    clock = lambda: t["now"]                                     # noqa: E731
+    state = {"running": True}
+
+    def exit_():
+        state["running"] = False                                 # it exits when asked
+        return True
+
+    def start():
+        started.append(1)
+        state["running"] = True
+        return True
+    rc = hub.restart_hub(7900, answers=lambda: state["running"], free=lambda: not state["running"], exit_=exit_,
+                         start=start, sleep=tick, clock=clock, say=said.append)
+    assert rc == 0 and started == [1] and "restarted" in said[-1]
+
+    said.clear()                                                 # a HUD that refuses the exit request
+    rc = hub.restart_hub(7900, answers=lambda: True, free=lambda: False, exit_=lambda: False, start=lambda: started.append(2),
+                         sleep=tick, clock=clock, say=said.append)
+    assert rc == 1 and 2 not in started and "Nothing was killed" in said[-1]
+
+    said.clear()                                                 # accepts, but never goes away
+    rc = hub.restart_hub(7900, wait_s=3, answers=lambda: True, free=lambda: False, exit_=lambda: True,
+                         start=lambda: started.append(3), sleep=tick, clock=clock, say=said.append)
+    assert rc == 1 and 3 not in started and "still running" in said[-1]
+
+    said.clear()                                                 # nothing running: just starts it
+    state["running"] = False
+    rc = hub.restart_hub(7900, answers=lambda: state["running"], free=lambda: not state["running"],
+                         exit_=lambda: pytest.fail("nothing to ask"), start=start, sleep=tick, clock=clock, say=said.append)
+    assert rc == 0
+
+
+def test_hub_log_rotates_at_start_when_big(tmp_path):
+    log = tmp_path / "hub.log"
+    log.write_text("x" * 50)
+    assert hub.rotate_log(log, max_bytes=100) is False and log.exists()
+    log.write_text("y" * 200)
+    (tmp_path / "hub.log.old").write_text("older")
+    assert hub.rotate_log(log, max_bytes=100) is True
+    assert not log.exists() and (tmp_path / "hub.log.old").read_text() == "y" * 200
