@@ -442,8 +442,9 @@ function renderAiThinking(p) {
   const termCode = $('thinkTerminalCode');
   const statusEl = $('thinkStreamStatus');
   const tokensEl = $('thinkTokensCount');
+  const isRecent = Boolean(th.updated_at && ((Date.now() / 1000 - th.updated_at) < 300));
 
-  if (tokensEl && th.tokens != null) tokensEl.textContent = `${th.tokens} tokens`;
+  if (tokensEl) tokensEl.textContent = (th.active || isRecent) && th.tokens ? `${th.tokens} tokens` : '';
 
   if (termCode && statusEl) {
     if (th.active) {
@@ -458,7 +459,7 @@ function renderAiThinking(p) {
       termCode.className = '';
       const spInfo = sp.tg_tps ? `${sp.tg_tps} tok/s` : (sp.prompt_tps ? `prompt eval: ${sp.prompt_tps} tok/s` : '');
       termCode.textContent = `Generating with ${ops.model || 'local model'}${spInfo ? ` at ${spInfo}` : ''}...\n(Inference active on port ${ops.port || ':11440'})`;
-    } else if (th.text) {
+    } else if (th.text && isRecent) {
       statusEl.textContent = `Completed reasoning session (${agoShort(th.updated_at || Date.now() / 1000)})`;
       statusEl.style.color = 'var(--dim)';
       termCode.className = '';
@@ -541,9 +542,17 @@ function renderChains(p) {
 
       const isWaiting = Boolean(run.waiting);
       const isThinking = Boolean(th.active && th.phase === 'thinking');
-      const isGenerating = Boolean(th.active || ops.active);
+      const taskMatches = Boolean(
+        th.task && (
+          th.task.includes(run.chain) ||
+          (run.step_name && th.task.includes(run.step_name))
+        )
+      );
+      const isRecentChainThought = Boolean(
+        taskMatches && th.updated_at && ((Date.now() / 1000 - th.updated_at) < 30)
+      );
 
-      const phase = isWaiting ? 'waiting' : (isThinking ? 'thinking' : (isGenerating ? 'answering' : 'running'));
+      const phase = isWaiting ? 'waiting' : (isThinking ? 'thinking' : (th.active ? 'answering' : (ops.active ? 'generating' : 'running')));
       if (phaseEl) {
         phaseEl.textContent = phase;
         phaseEl.className = `pill ${phase === 'thinking' ? 'waiting think-pulse' : (phase === 'waiting' ? 'warn' : 'done')}`;
@@ -554,10 +563,10 @@ function renderChains(p) {
       }
       if (speedEl) {
         const speedVal = sp.tg_tps != null ? sp.tg_tps : (sp.eval_tps != null ? sp.eval_tps : null);
-        speedEl.textContent = speedVal ? `${speedVal} tok/s` : '';
+        speedEl.textContent = (th.active || ops.active) && speedVal ? `${speedVal} tok/s` : '';
       }
       if (tokensEl) {
-        tokensEl.textContent = th.tokens ? `${th.tokens} tokens` : '';
+        tokensEl.textContent = (th.active || isRecentChainThought) && th.tokens ? `${th.tokens} tokens` : '';
       }
       if (termCode) {
         if (isWaiting) {
@@ -566,9 +575,12 @@ function renderChains(p) {
         } else if (th.active && (th.text || th.preview)) {
           termCode.className = isThinking ? 'is-thinking' : 'is-answering';
           termCode.textContent = th.text || th.preview;
-        } else if (th.text) {
+        } else if (isRecentChainThought && (th.text || th.preview)) {
           termCode.className = '';
-          termCode.textContent = th.text + (th.preview ? `\n\n[Answer]:\n${th.preview}` : '');
+          termCode.textContent = (th.text ? th.text : '') + (th.preview ? `\n\n[Answer]:\n${th.preview}` : '');
+        } else if (ops.active) {
+          termCode.className = '';
+          termCode.textContent = `▶ Generating with ${ops.model || 'model'}...\n(Processing inference on router)`;
         } else {
           termCode.className = '';
           termCode.textContent = `▶ Executing step "${run.step_name || 'step ' + run.step}"...\n(Waiting for model output or tool response)`;

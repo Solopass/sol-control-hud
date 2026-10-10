@@ -8,6 +8,10 @@ import os
 import tempfile
 
 os.environ["SOL_CONTROL_DATA"] = tempfile.mkdtemp(prefix="sol-control-hud-tests-")
+_test_llm_dir = tempfile.mkdtemp(prefix="sol-llm-tests-")
+os.environ["SOL_LLM_DIR"] = _test_llm_dir
+os.environ["SOL_LLM_THOUGHT"] = os.path.join(_test_llm_dir, "live_thought.json")
+
 
 
 import pytest  # noqa: E402
