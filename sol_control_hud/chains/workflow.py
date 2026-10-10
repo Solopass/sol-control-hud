@@ -199,6 +199,8 @@ def render(template: str, context: dict) -> str:
         cur = _lookup(match.group(1), context)
         if isinstance(cur, str):
             return cur
+        if isinstance(cur, dict) and "text" in cur:
+            return str(cur["text"])
         out = yaml.safe_dump(cur, default_flow_style=True, allow_unicode=True).strip()
         # a lone number/bool dumps as "3\n...": that document-end marker landed in prompts ("Part 1\n... of 5")
         return out[:-4] if out.endswith("\n...") else out

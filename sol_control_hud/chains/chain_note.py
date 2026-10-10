@@ -463,6 +463,8 @@ def _label(item) -> str:
 def _as_text(out) -> str:
     if isinstance(out, str):
         return out.strip()
+    if isinstance(out, dict) and "text" in out:
+        return str(out["text"]).strip()
     if isinstance(out, dict) and set(out) == {"error"}:
         return f"_(skipped: {out['error']})_"
     return "```json\n" + json.dumps(out, indent=2, ensure_ascii=False) + "\n```"

@@ -358,21 +358,18 @@ def extract_takeout_links(args: dict, ctx: ToolContext | None = None) -> dict:
     all_items = TakeoutParser.parse_file(p, filter_music=filter_music)
     total_found = len(all_items)
 
-    # Determine offset
-    offset = args.get("offset")
-    if offset is not None:
-        offset = int(offset)
-    else:
-        # If the file path matches previous state, resume from saved offset
-        if state.get("source_file") == str(p):
-            offset = int(state.get("offset", 0))
-        else:
-            offset = 0
-
-    # Filter out already processed items from previous runs
+    # Determine offset and remaining unprocessed items
+    explicit_offset = args.get("offset")
     processed_map = state.get("processed", {})
-    unprocessed_items = [it for it in all_items if it["videoId"] not in processed_map]
-    remaining_items = unprocessed_items[offset:] if offset < len(unprocessed_items) else []
+
+    if explicit_offset is not None:
+        # Explicit offset manually requested
+        offset = int(explicit_offset)
+        remaining_items = all_items[offset:] if offset < len(all_items) else []
+    else:
+        # Auto-resume mode: all items not yet in processed_map
+        remaining_items = [it for it in all_items if it["videoId"] not in processed_map]
+        offset = len(processed_map)
 
     # Select batch
     batch = remaining_items[:max_items]
@@ -475,6 +472,7 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
 
     ingested: list[dict] = []
     already_exists: list[dict] = []
+    clustered: list[dict] = []
     failed: list[dict] = []
     all_results: list[dict] = []
 
@@ -484,7 +482,8 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
         if ctx:
             ctx.note(f"ingesting tracks {i + 1}-{min(i + len(chunk), len(video_ids))} of {len(video_ids)} to Solang")
 
-        payload = json.dumps({"urls": chunk, "autoSave": auto_save}).encode("utf-8")
+        chunk_urls = [f"https://www.youtube.com/watch?v={v}" for v in chunk]
+        payload = json.dumps({"urls": chunk_urls, "autoSave": auto_save}).encode("utf-8")
         req = urllib.request.Request(
             f"{solang_url}/api/youtube/bulk-ingest",
             data=payload,
@@ -507,6 +506,8 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
                         ingested.append(item)
                     elif status == "already_exists":
                         already_exists.append(item)
+                    elif status == "clustered_alternate":
+                        clustered.append(item)
                     else:
                         failed.append(item)
 
@@ -533,12 +534,13 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
         StateManager.save(state_p, state)
 
     # Format output summary
-    summary_msg = f"Processed {len(video_ids)} tracks: {len(ingested)} newly ingested, {len(already_exists)} already existed, {len(failed)} failed."
+    summary_msg = f"Processed {len(video_ids)} tracks: {len(ingested)} newly ingested, {len(clustered)} clustered as alternates, {len(already_exists)} already existed, {len(failed)} failed."
     
     report_lines = [
         f"### Solang Ingestion Results",
         f"- **Total Processed:** {len(video_ids)}",
         f"- **Newly Ingested:** {len(ingested)}",
+        f"- **Clustered as Alternates:** {len(clustered)}",
         f"- **Already in Studio:** {len(already_exists)}",
         f"- **Failed / No Lyrics:** {len(failed)}",
         ""
@@ -548,6 +550,12 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
         report_lines.append("#### Newly Added Projects:")
         for it in ingested:
             report_lines.append(f"- **{it.get('title')}** (`{it.get('videoId')}`) - *Source: {it.get('source', 'Dual CC/LRCLIB')}*")
+        report_lines.append("")
+
+    if clustered:
+        report_lines.append("#### Clustered Alternate Videos:")
+        for it in clustered:
+            report_lines.append(f"- **{it.get('title')}** (`{it.get('videoId')}`) - *Angle: {it.get('variation', 'Alternate')}*")
         report_lines.append("")
 
     if already_exists:
@@ -572,9 +580,11 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
     return {
         "total": len(video_ids),
         "ingested_count": len(ingested),
+        "clustered_count": len(clustered),
         "already_exists_count": len(already_exists),
         "failed_count": len(failed),
         "ingested": ingested,
+        "clustered": clustered,
         "already_exists": already_exists,
         "failed": failed,
         "items": all_results,

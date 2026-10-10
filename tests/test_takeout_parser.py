@@ -166,7 +166,13 @@ def test_extract_takeout_links_tool(tmp_path, monkeypatch):
     assert res1["next_offset"] == 10
     assert res1["remaining_unprocessed"] == 20
 
-    # Batch 2: next 15 (auto resumes)
+    # Simulate batch 1 items recorded in state processed map
+    state = st.StateManager.load(state_file)
+    for it in res1["items"]:
+        state["processed"][it["videoId"]] = {"status": "ingested", "title": it["title"]}
+    st.StateManager.save(state_file, state)
+
+    # Batch 2: next 15 (auto resumes without skipping any tracks)
     res2 = st.extract_takeout_links({
         "file": str(test_file),
         "max_items": 15,
@@ -177,6 +183,9 @@ def test_extract_takeout_links_tool(tmp_path, monkeypatch):
     assert res2["offset"] == 10
     assert res2["next_offset"] == 25
     assert res2["remaining_unprocessed"] == 5
+    # Verify the items are exactly items 10 through 24
+    expected_ids = [f"vid_{i:07d}" for i in range(10, 25)]
+    assert res2["video_ids"] == expected_ids
 
 
 def test_chain_note_with_tools_compilation(tmp_path, monkeypatch):
