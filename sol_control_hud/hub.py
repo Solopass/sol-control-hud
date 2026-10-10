@@ -452,9 +452,12 @@ class Hub:
             exam_review.save_settings(s)
             log("exam review: saved Gemini API key to exam-review.json")
             return {"ok": True, "why": "Gemini API key saved"}
-        if target == "add_snip":
+        if target in ("add_snip", "snip", "snip_same"):
             r = w.add_snip()
             log(f"exam review: add_snip -> {r.get('why')}")
+            if r.get("ok"):
+                self.cmds.put(("review_snip_added", r.get("count", 2)))
+                self.notify_now("Exam Snip Added", f"Captured scroll part ({r.get('count', 2)} parts stitched)")
             return r
         if target in ("pick_snip", "pick_part2"):
             self.cmds.put(("review_pick_snip", None))
@@ -1017,7 +1020,7 @@ class Hub:
                 elif name == "review_snip_added":
                     if self.exam_hud and getattr(self.exam_hud, "snip_btn", None):
                         count = arg or 2
-                        self.exam_hud.snip_btn.config(text=f"➕ Add Snip ({count} parts)")
+                        self.exam_hud.snip_btn.config(text=f"✓ Stitched ({count} parts)")
                 elif name == "review_toggle_hud":
                     self._ensure_exam_hud()
                     if self.exam_hud:
@@ -1202,7 +1205,8 @@ class Hub:
                 self.exam_hud = ExamHudWindow(
                     self.root,
                     on_retry_gemini=lambda: self.review_action("retry_gemini"),
-                    on_add_snip=lambda: self.review_action("pick_snip"),
+                    on_add_snip=lambda: self.review_action("snip"),
+                    on_pick_snip=lambda: self.review_action("pick_snip"),
                 )
             except Exception as e:
                 log(f"exam hud init failed: {e}")

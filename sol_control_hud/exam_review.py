@@ -398,7 +398,18 @@ def append_note(item: dict, notes_dir: Path | None = None, now: datetime | None 
     else:
         choices = item.get("choices") or []
         if choices:
-            body += "\n".join(f"- {c['label']}. {c['text']}" for c in choices) + "\n\n"
+            sel_labels = set(item.get("answer_labels") or item.get("correct_labels") or [])
+            if not sel_labels and item.get("answer"):
+                sel_labels = set(re.findall(r"\b([A-Z])\b", str(item.get("answer"))))
+            c_lines = []
+            for c in choices:
+                lb = c.get("label", "").strip()
+                txt = c.get("text", "")
+                if lb in sel_labels:
+                    c_lines.append(f"- [x] **{lb}.** {txt}")
+                else:
+                    c_lines.append(f"- [ ] {lb}. {txt}")
+            body += "\n".join(c_lines) + "\n\n"
         body += f"**Answer:** {item.get('answer') or item.get('correct')}\n\n"
 
     if item.get("yours") and item.get("yours") != "(none)":
@@ -467,6 +478,7 @@ class ReviewWatcher:
         self._last_key: str | None = None
         self._last_png_bytes: bytes | None = None
         self._additional_snips: list[bytes] = []
+        self._stitched_png_bytes: bytes | None = None
         rect = load_settings(settings_path).get("rect")
         self._s = {"status": "stopped", "text": "Set a box around the question area, then start.",
                    "rect": rect if isinstance(rect, list) and len(rect) == 4 else None,
@@ -538,41 +550,48 @@ class ReviewWatcher:
         self._last_key = None
         self._last_png_bytes = None
         self._additional_snips = []
+        self._stitched_png_bytes = None
         self._set(current=None, history=[], correct=0, wrong=0, answered=0, topics={})
         return {"ok": True, "why": "cleared this session's list"}
 
     def add_snip(self, rect: list[int] | None = None) -> dict:
-        """Capture an additional in-memory snip for tall/scrolled multi-page questions."""
+        """Capture an additional in-memory snip for tall/scrolled multi-page questions, stitching vertically."""
         target_rect = rect or self._s.get("rect")
         if not target_rect:
             return {"ok": False, "why": "No capture box set"}
         try:
+            from .quiz_capture import stitch_pngs_vertical
             png = self._grab_png(target_rect)
             self._additional_snips.append(png)
+            all_parts = ([self._last_png_bytes] if self._last_png_bytes else []) + self._additional_snips
+            self._stitched_png_bytes = stitch_pngs_vertical(all_parts)
             count = len(self._additional_snips) + (1 if self._last_png_bytes else 0)
-            msg = f"Added scroll snip #{len(self._additional_snips)} ({count} parts in memory)"
+            msg = f"Captured scroll snip #{len(self._additional_snips)} ({count} parts stitched in memory)"
             self._set(text=msg)
-            return {"ok": True, "why": msg, "count": count}
+            return {"ok": True, "why": msg, "count": count, "stitched": bool(self._stitched_png_bytes)}
         except Exception as e:
             return {"ok": False, "why": f"Failed to capture scroll snip: {e}"}
 
     def retry_gemini(self, model: str = "gemini-3.8-flash") -> dict:
         """User marked current answer bad: send in-memory images to Gemini API for a new answer."""
         cur = self._s.get("current")
-        if not cur and not self._last_png_bytes:
+        if not cur and not self._last_png_bytes and not self._stitched_png_bytes:
             return {"ok": False, "why": "No active question to re-solve"}
 
         images = []
-        if self._last_png_bytes:
-            images.append(self._last_png_bytes)
-        elif self._s.get("rect"):
-            try:
-                png = self._grab_png(self._s["rect"])
-                self._last_png_bytes = png
-                images.append(png)
-            except Exception:
-                pass
-        images.extend(self._additional_snips)
+        if self._stitched_png_bytes:
+            images.append(self._stitched_png_bytes)
+        else:
+            if self._last_png_bytes:
+                images.append(self._last_png_bytes)
+            elif self._s.get("rect"):
+                try:
+                    png = self._grab_png(self._s["rect"])
+                    self._last_png_bytes = png
+                    images.append(png)
+                except Exception:
+                    pass
+            images.extend(self._additional_snips)
         if not images:
             return {"ok": False, "why": "No screenshot in memory"}
 
@@ -740,6 +759,7 @@ class ReviewWatcher:
                     return False
                 self._last_key = key
                 self._additional_snips = []
+                self._stitched_png_bytes = None
 
                 # Solve immediately in real time: no waiting for grading, no grading checks or restrictions!
                 self._set(status="answering", text="Solving question in real time…")

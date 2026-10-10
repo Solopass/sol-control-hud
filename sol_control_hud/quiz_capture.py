@@ -145,3 +145,61 @@ def grab_png(rect, max_side: int = MAX_SIDE) -> bytes:
     k = min(1.0, max_side / max(w, h))
     ow, oh = max(1, round(w * k)), max(1, round(h * k))
     return png(*grab(rect, ow, oh))
+
+
+def stitch_pngs_vertical(png_list: list[bytes]) -> bytes:
+    """Stitches multiple PNG byte sequences vertically into a single seamless PNG."""
+    valid_pngs = [p for p in png_list if p and p.startswith(b"\x89PNG\r\n\x1a\n")]
+    if not valid_pngs:
+        return b""
+    if len(valid_pngs) == 1:
+        return valid_pngs[0]
+
+    raw_scanlines: list[bytes] = []
+    base_w: int | None = None
+    total_h = 0
+
+    for p in valid_pngs:
+        idx = 8
+        w, h = 0, 0
+        idat_chunks = []
+        while idx < len(p):
+            length = struct.unpack(">I", p[idx:idx + 4])[0]
+            kind = p[idx + 4:idx + 8]
+            cdata = p[idx + 8:idx + 8 + length]
+            if kind == b"IHDR":
+                w, h = struct.unpack(">II", cdata[:8])
+            elif kind == b"IDAT":
+                idat_chunks.append(cdata)
+            idx += 12 + length
+
+        if w <= 0 or h <= 0 or not idat_chunks:
+            continue
+
+        if base_w is None:
+            base_w = w
+        elif base_w != w:
+            # Width mismatch: fallback to returning first image rather than corrupting scanlines
+            return valid_pngs[0]
+
+        try:
+            decomp = zlib.decompress(b"".join(idat_chunks))
+            raw_scanlines.append(decomp)
+            total_h += h
+        except Exception:
+            continue
+
+    if not raw_scanlines or base_w is None or total_h <= 0:
+        return valid_pngs[0]
+
+    combined_raw = b"".join(raw_scanlines)
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", base_w, total_h, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(combined_raw, 6))
+        + chunk(b"IEND", b"")
+    )

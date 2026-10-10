@@ -843,6 +843,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
         actions_menu.add_separator()
         actions_menu.add_command(label="⚡ Toggle Floating Exam HUD", command=lambda: self.hub.review_action("hud") if self.hub else None)
         actions_menu.add_command(label="🎯 Set Exam Box & Start", command=lambda: self.hub.review_action("pick") if self.hub else None)
+        actions_menu.add_command(label="📜 Snip Scrolled Part (Same Box)", command=lambda: self.hub.review_action("snip") if self.hub else None)
         crashes = self.latest_snap.unexpected_reboots + self.latest_snap.gpu_resets
         if crashes > 0:
             actions_menu.add_separator()

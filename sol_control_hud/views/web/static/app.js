@@ -486,10 +486,15 @@ function renderReview(p) {
         c.ordered_sequence.map(s => `<li style="padding:2px 0">${esc(s)}</li>`).join('') +
         `</ol></div>`;
     } else {
-      const mark = (lb) => (c.answer_labels || c.correct_labels || []).includes(lb) ? 'right' : (c.your_labels || []).includes(lb) ? 'mine' : '';
-      contentHtml = (c.choices || []).map((o) => `<div class="rev-opt ${mark(o.label)}"><b>${esc(o.label)}.</b> ${esc(o.text)}` +
-        `${(c.your_labels || []).includes(o.label) ? ' <span class="dim small">your selection</span>' : ''}` +
-        `${(c.answer_labels || c.correct_labels || []).includes(o.label) ? ` <span class="small" style="color:${isGemini ? 'var(--cyan)' : 'var(--green)'}">✓ answer</span>` : ''}</div>`).join('');
+      const ansLabels = c.answer_labels || c.correct_labels || [];
+      const mark = (lb) => ansLabels.includes(lb) ? 'right' : (c.your_labels || []).includes(lb) ? 'mine' : '';
+      contentHtml = (c.choices || []).map((o) => {
+        const isRight = ansLabels.includes(o.label);
+        const box = isRight ? '☑ ' : '☐ ';
+        return `<div class="rev-opt ${mark(o.label)}"><b>${box}${esc(o.label)}.</b> ${esc(o.text)}` +
+          `${(c.your_labels || []).includes(o.label) ? ' <span class="dim small">your selection</span>' : ''}` +
+          `${isRight ? ` <span class="small" style="color:${isGemini ? 'var(--cyan)' : 'var(--green)'}">✓ answer</span>` : ''}</div>`;
+      }).join('');
     }
 
     const exhibitHtml = c.exhibit_text ? `<details style="margin:6px 0;font-size:0.85rem"><summary class="dim" style="cursor:pointer">📊 Exhibit / Diagram</summary><pre style="background:var(--card);padding:6px;border-radius:4px;overflow-x:auto">${esc(c.exhibit_text)}</pre></details>` : '';

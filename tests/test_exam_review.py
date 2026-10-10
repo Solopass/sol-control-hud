@@ -327,3 +327,68 @@ def test_review_slide_fallback_answer():
     sl = sn.review_slide(r)
     assert "Ans: router ospf 1" in sl["text"]
 
+
+def test_stitch_pngs_vertical():
+    # 2 images of width 10, height 5
+    bgra1 = bytes([255, 0, 0, 255] * 50)
+    bgra2 = bytes([0, 255, 0, 255] * 50)
+    p1 = qc.png(10, 5, bgra1)
+    p2 = qc.png(10, 5, bgra2)
+
+    stitched = qc.stitch_pngs_vertical([p1, p2])
+    assert stitched.startswith(b"\x89PNG\r\n\x1a\n")
+    # Verify dimensions in IHDR
+    w, h = struct.unpack(">II", stitched[16:24])
+    assert w == 10
+    assert h == 10  # 5 + 5
+
+
+def test_add_snip_uses_saved_box_and_stitches(tmp_path, monkeypatch):
+    valid_png = qc.png(10, 5, bytes([255, 0, 0, 255] * 50))
+    w, client = make(tmp_path, [graded()])
+    w._grab_png = lambda r: valid_png
+    w.set_rect([10, 20, 100, 100], start=False)
+    assert w._process(valid_png, force=True) is True
+
+    # First scroll snip
+    res1 = w.add_snip()
+    assert res1["ok"] is True
+    assert res1["count"] == 2
+    assert len(w._additional_snips) == 1
+    assert w._stitched_png_bytes is not None
+
+    # retry_gemini passes the stitched PNG
+    captured_images = []
+    def mock_solve(images, **kwargs):
+        captured_images.extend(images)
+        return {"answer": "C", "topic": "Subnetting"}
+
+    monkeypatch.setattr("sol_control_hud.gemini_solver.solve_with_gemini", mock_solve)
+    res = w.retry_gemini()
+    assert res["ok"] is True
+    assert len(captured_images) == 1
+    assert captured_images[0] == w._stitched_png_bytes
+
+
+def test_append_note_renders_markdown_checkboxes(tmp_path):
+    item = {
+        "question": "Which of the following are private IPv4 addresses? (Choose two)",
+        "choices": [
+            {"label": "A", "text": "10.0.0.1"},
+            {"label": "B", "text": "8.8.8.8"},
+            {"label": "C", "text": "172.16.0.1"},
+            {"label": "D", "text": "1.1.1.1"},
+        ],
+        "answer_labels": ["A", "C"],
+        "answer": "A, C",
+        "topic": "Private IP Addressing",
+        "explanation": "10.0.0.0/8 and 172.16.0.0/12 are RFC 1918 private ranges.",
+    }
+    note_path = er.append_note(item, notes_dir=tmp_path)
+    content = note_path.read_text(encoding="utf-8")
+    assert "- [x] **A.** 10.0.0.1" in content
+    assert "- [ ] B. 8.8.8.8" in content
+    assert "- [x] **C.** 172.16.0.1" in content
+    assert "- [ ] D. 1.1.1.1" in content
+
+

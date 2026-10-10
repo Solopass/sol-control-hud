@@ -22,10 +22,12 @@ class ExamHudWindow:
         parent: tk.Misc,
         on_retry_gemini: Callable[[], None] | None = None,
         on_add_snip: Callable[[], None] | None = None,
+        on_pick_snip: Callable[[], None] | None = None,
     ):
         self.parent = parent
         self.on_retry_gemini = on_retry_gemini
         self.on_add_snip = on_add_snip
+        self.on_pick_snip = on_pick_snip
         self.win: tk.Toplevel | None = None
         self.title_lbl: tk.Label | None = None
         self.badge_lbl: tk.Label | None = None
@@ -139,8 +141,12 @@ class ExamHudWindow:
         self.txt.pack(fill=tk.BOTH, expand=True)
         self.txt.tag_configure("question", font=("Segoe UI", 10, "bold"), foreground="#f8fafc")
         self.txt.tag_configure("bold", font=("Segoe UI", 10, "bold"), foreground="#e2e8f0")
+        self.txt.tag_configure("normal", foreground="#e2e8f0")
+        self.txt.tag_configure("muted", foreground="#64748b")
         self.txt.tag_configure("cyan", foreground="#38bdf8")
         self.txt.tag_configure("green", foreground="#4ade80")
+        self.txt.tag_configure("selected", font=("Segoe UI", 10, "bold"), foreground="#4ade80")
+        self.txt.tag_configure("selected_gemini", font=("Segoe UI", 10, "bold"), foreground="#38bdf8")
         self.txt.tag_configure("code", font=("Consolas", 10), foreground="#38bdf8")
 
         # Bottom Action Bar
@@ -165,7 +171,7 @@ class ExamHudWindow:
 
         self.snip_btn = tk.Button(
             btn_frame,
-            text="➕ Add Snip (Scroll)",
+            text="📜 Snip Scroll",
             command=self._on_click_snip,
             bg="#334155",
             fg="#cbd5e1",
@@ -178,6 +184,7 @@ class ExamHudWindow:
             cursor="hand2",
         )
         self.snip_btn.pack(side=tk.LEFT, padx=8)
+        self.snip_btn.bind("<Button-3>", lambda e: self._on_right_click_snip())
 
         self.copy_btn = tk.Button(
             btn_frame,
@@ -266,7 +273,7 @@ class ExamHudWindow:
             self.bad_btn.config(state=tk.NORMAL, text="🔍 Verify / Retry (Gemini)")
 
         if self.snip_btn:
-            self.snip_btn.config(text="➕ Add Snip (Scroll)")
+            self.snip_btn.config(text="📜 Snip Scroll")
 
         # Show Copy Command button for fill_in_the_blank, otherwise hide it
         if self.copy_btn:
@@ -320,10 +327,16 @@ class ExamHudWindow:
                 self.txt.insert(tk.END, "\n")
         else:
             choices = item.get("choices") or []
+            sel_labels = set(item.get("answer_labels") or item.get("correct_labels") or [])
+            if not sel_labels and item.get("answer"):
+                sel_labels = set(re.findall(r"\b([A-Z])\b", str(item.get("answer"))))
             for c in choices:
-                lb, txt = c.get("label", ""), c.get("text", "")
-                self.txt.insert(tk.END, f"  {lb}. ", "cyan")
-                self.txt.insert(tk.END, f"{txt}\n")
+                lb, txt = c.get("label", "").strip(), c.get("text", "")
+                is_sel = lb in sel_labels
+                box_icon = "☑ " if is_sel else "☐ "
+                tag_icon = "selected_gemini" if (is_sel and is_gemini) else ("selected" if is_sel else "muted")
+                self.txt.insert(tk.END, f"  {box_icon}{lb}. ", tag_icon)
+                self.txt.insert(tk.END, f"{txt}\n", "bold" if is_sel else "normal")
             if choices:
                 self.txt.insert(tk.END, "\n")
 
@@ -362,4 +375,10 @@ class ExamHudWindow:
 
     def _on_click_snip(self) -> None:
         if self.on_add_snip:
+            self.on_add_snip()
+
+    def _on_right_click_snip(self) -> None:
+        if self.on_pick_snip:
+            self.on_pick_snip()
+        elif self.on_add_snip:
             self.on_add_snip()
