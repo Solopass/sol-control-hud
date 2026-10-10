@@ -157,3 +157,27 @@ def test_clean_preset_ignores_non_dict_widget_elements():
     gpu_w = next(w for w in p["widgets"] if w["id"] == "c-gpu")
     assert gpu_w["size"] == "L" and not gpu_w["hidden"]
 
+
+def test_auto_when_reassignment_clears_conflict():
+    d = L.default_data()
+    gaming = next(p for p in d["presets"] if p["name"] == "Gaming")
+    assert gaming.get("auto_when") == "game"
+    d, _ = L.apply_action(d, {"action": "save", "preset": {"name": "Turbo Gaming", "auto_when": "game", "widgets": []}})
+    gaming = next(p for p in d["presets"] if p["name"] == "Gaming")
+    turbo = next(p for p in d["presets"] if p["name"] == "Turbo Gaming")
+    assert gaming.get("auto_when") is None
+    assert turbo.get("auto_when") == "game"
+
+
+def test_import_presets():
+    d = L.default_data()
+    d, msg = L.apply_action(d, {"action": "import", "presets": [{"name": "Minimal", "widgets": [{"id": "c-gpu", "size": "XS"}]}]})
+    assert "imported 1" in msg
+    assert any(p["name"] == "Minimal 2" for p in d["presets"])
+
+    with pytest.raises(L.Bad):
+        L.apply_action(d, {"action": "import", "presets": []})
+    with pytest.raises(L.Bad):
+        L.apply_action(d, {"action": "import", "presets": [{"name": ""}]})
+
+

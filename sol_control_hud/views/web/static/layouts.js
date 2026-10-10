@@ -76,12 +76,54 @@ const CHIPS = {
   'c-svc': (s) => Object.entries(s.services || {}).map(([k, v]) => `<span style="color:${v ? 'var(--green)' : 'var(--red)'}">●</span> ${esc(k)}`).join(' &nbsp;'),
   'c-health': () => `<b>${esc(lcard('healthPill')?.textContent || '…')}</b>`,
   'c-work': (s) => `note <b>${s.note_words ?? '–'}</b> words · ${s.git_dirty_count ?? '–'} repos changed`,
+  'c-chains': (s) => {
+    if (s.chain_running) return `<b style="color:var(--cyan)">${esc(s.chain_running)}</b>${s.chain_step ? ` · ${esc(s.chain_step)}` : ''}`;
+    if (s.chain_pending_count) return `idle · <b>${s.chain_pending_count}</b> waiting`;
+    if (s.chain_next) return `idle · next: <b>${esc(s.chain_next)}</b>`;
+    return 'idle';
+  },
+  'c-projects': (s) => {
+    const apps = s.apps_running || [];
+    return apps.length ? `<b>${apps.length} running</b>: ${esc(apps.slice(0, 2).join(', '))}${apps.length > 2 ? '…' : ''}` : 'nothing running';
+  },
+  'c-media': (s) => {
+    const med = s.media_running || [];
+    if (med.length) return `<b>${med.length} active</b> (${esc(med.join(', '))})`;
+    if (s.media_playing) return `playing: <b>${esc(s.media_title || '')}</b>`;
+    return 'all idle';
+  },
+  'c-ports': () => {
+    const count = lcard('portsSummary')?.textContent?.trim() || '';
+    return count ? `<b>${esc(count)}</b>` : 'local listeners';
+  },
+  'c-notes': (s) => {
+    const sum = lcard('notesSummary')?.textContent?.trim() || '';
+    return sum ? `<b>${esc(sum)}</b>` : (s.note_words ? `daily note: <b>${s.note_words} words</b>` : 'no edits yet');
+  },
+  'c-week': () => {
+    const h = lcard('weekHours')?.textContent?.trim() || '';
+    return h ? `<b>${esc(h)}</b> this week` : 'weekly activity';
+  },
+  'c-activity': (s, p) => {
+    const acts = p?.activity || [];
+    const first = acts[0];
+    return first ? `<span style="color:${first.color || 'var(--dim)'}">${esc(first.text)}</span>` : 'no recent activity';
+  },
+  'c-ask': () => {
+    const c = lcard('askPendingCount')?.textContent?.trim();
+    return c ? `<b>${esc(c)}</b> waiting` : 'idle';
+  },
+  'c-solang': () => 'speed reader & vocab',
+  'c-review': (s) => {
+    const r = s.review || {};
+    return r.active ? `<b style="color:var(--cyan)">active</b> · ${esc(r.title || '')}` : 'idle';
+  },
 };
 function updateChips(p) {
   const s = p?.snapshot || {};
   for (const el of LGRID.querySelectorAll('.card[data-size="xs"]')) {
     const chip = el.querySelector(':scope > .xs-chip'); const fn = CHIPS[el.id];
-    if (chip && fn) { try { setHTML(chip, `<span class="dim">${esc(chip.dataset.title)}</span> ${fn(s)}`); } catch (e) { console.error(e); } }
+    if (chip && fn) { try { setHTML(chip, `<span class="dim">${esc(chip.dataset.title)}</span> ${fn(s, p)}`); } catch (e) { console.error(e); } }
   }
 }
 
@@ -166,13 +208,35 @@ layoutMenu.addEventListener('change', async (e) => {
   if (e.target.id === 'layoutAuto') { const r = await layoutPost({ action: 'auto', on: e.target.checked }); toast(r?.why || ''); }
 });
 
-// Alt+1…9 switch presets (not while typing)
+// Alt+1…9 switch presets, Alt+E toggles Edit mode (not while typing)
 addEventListener('keydown', (e) => {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'e' || e.key === 'E')) {
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
+    e.preventDefault();
+    closeLayoutMenu();
+    if (EDIT) { endEdit(); applyPreset(activePreset()); toast('edit cancelled'); }
+    else { startEdit(); }
+    return;
+  }
   if (!e.altKey || e.ctrlKey || e.metaKey || EDIT) return;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
   const n = Number(e.key);
   const p = LAYOUT?.presets?.[n - 1];
   if (n >= 1 && n <= 9 && p) { e.preventDefault(); activateLayout(p.name); }
+});
+
+// Edit mode keyboard shortcuts (Ctrl+S / Cmd+S, Enter inside input)
+addEventListener('keydown', (e) => {
+  if (!EDIT) return;
+  if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+    e.preventDefault();
+    editBar.querySelector('#leDone')?.click();
+    return;
+  }
+  if (e.key === 'Enter' && (e.target.id === 'leName' || e.target.id === 'leIcon')) {
+    e.preventDefault();
+    editBar.querySelector('#leDone')?.click();
+  }
 });
 
 // the Ctrl+K palette (app.js asks for these)
@@ -217,10 +281,26 @@ function redrawEdit() {
       + `<span class="lsizes">${sizes.map((s) => `<button class="${s === w.size ? 'on' : ''}" data-lsize="${s}" data-lid="${esc(w.id)}" title="size ${s}">${s}</button>`).join('')}</span>`
       + `<button class="lhide" data-lhide="${esc(w.id)}" title="Hide this card (it goes to the tray below)">👁</button>`);
   }
+  const visible = EDIT.preset.widgets.filter((w) => !w.hidden);
+  let emptyBox = LGRID.querySelector('.lempty-notice');
+  if (!visible.length) {
+    if (!emptyBox) {
+      emptyBox = document.createElement('div');
+      emptyBox.className = 'lempty-notice';
+      emptyBox.innerHTML = '<b>All cards hidden.</b><br><span class="dim">Click cards in the tray below to show them.</span>';
+      LGRID.appendChild(emptyBox);
+    }
+  } else if (emptyBox) {
+    emptyBox.remove();
+  }
   const hidden = EDIT.preset.widgets.filter((w) => w.hidden);
   tray.hidden = false;
   setHTML(tray, `<h3>Hidden in “${esc(EDIT.preset.name)}” <span class="dim">click to add back</span></h3>`
-    + (hidden.length ? hidden.map((w) => `<button class="mini" data-lshow="${esc(w.id)}">＋ ${esc(reg(w.id)?.title || w.id)}</button>`).join(' ') : '<span class="dim">nothing hidden</span>'));
+    + (hidden.length
+      ? `<div class="ltray-btns"><button class="mini go" id="ltrayShowAll" title="Unhide all cards at once">＋ Show all (${hidden.length})</button> `
+        + hidden.map((w) => `<button class="mini" data-lshow="${esc(w.id)}">＋ ${esc(reg(w.id)?.title || w.id)}</button>`).join(' ')
+        + `</div>`
+      : '<span class="dim">nothing hidden</span>'));
 }
 function wIndex(id) { return EDIT.preset.widgets.findIndex((w) => w.id === id); }
 function moveWidget(id, to) {
@@ -245,6 +325,12 @@ LGRID.addEventListener('keydown', (e) => {
   if (to >= 0) { moveWidget(id, to); lcard(id)?.querySelector('[data-lmove]')?.focus(); }
 });
 tray.addEventListener('click', (e) => {
+  if (e.target.id === 'ltrayShowAll' || e.target.closest('#ltrayShowAll')) {
+    if (!EDIT) return;
+    for (const w of EDIT.preset.widgets) w.hidden = false;
+    redrawEdit();
+    return;
+  }
   const b = e.target.closest('[data-lshow]');
   if (!b || !EDIT) return;
   EDIT.preset.widgets = LC.showAtEnd(EDIT.preset.widgets, b.dataset.lshow);   // back at the end, where you can see it
@@ -289,12 +375,16 @@ function renderEditBar() {
   const slides = LAYOUT.slides || [];
   const own = Array.isArray(p.ticker_slides);
   const wasOpen = editBar.querySelector('.lslides')?.open;
+  const gameHold = (LAYOUT.presets || []).find((x) => x.name !== p.name && x.auto_when === 'game');
+  const awayHold = (LAYOUT.presets || []).find((x) => x.name !== p.name && x.auto_when === 'away');
+  const gameTxt = gameHold ? `while a game runs (replaces ${gameHold.name})` : 'while a game runs';
+  const awayTxt = awayHold ? `while Away runs (replaces ${awayHold.name})` : 'while Away runs';
   setHTML(editBar, `<b>Editing</b>`
     + `<input id="leName" maxlength="40" value="${esc(p.name)}" title="Name">`
     + `<input id="leIcon" maxlength="4" value="${esc(p.icon || '')}" title="Icon (an emoji or a character)" class="lshort">`
     + `<select id="leAuto" title="Switch to this layout by itself"><option value="">no auto-switch</option>`
-    + `<option value="game"${p.auto_when === 'game' ? ' selected' : ''}>while a game runs</option>`
-    + `<option value="away"${p.auto_when === 'away' ? ' selected' : ''}>while Away runs</option></select>`
+    + `<option value="game"${p.auto_when === 'game' ? ' selected' : ''}>${esc(gameTxt)}</option>`
+    + `<option value="away"${p.auto_when === 'away' ? ' selected' : ''}>${esc(awayTxt)}</option></select>`
     + `<details class="lslides"${wasOpen ? ' open' : ''}><summary>Ticker: ${own ? `${p.ticker_slides.length} slides` : 'my Settings'}</summary>`
     + `<div class="lslidepanel"><label><input type="checkbox" id="leOwnSlides"${own ? ' checked' : ''}> this layout picks the ticker's slides</label>`
     + `<div class="lslidelist">${slides.map((s) => `<label><input type="checkbox" data-lslide="${esc(s.tag)}"${own && p.ticker_slides.includes(s.tag) ? ' checked' : ''}${own ? '' : ' disabled'}> ${esc(s.label)}</label>`).join('')}</div></div></details>`
@@ -325,6 +415,8 @@ editBar.addEventListener('click', async (e) => {
   }
   if (e.target.id === 'leDone') {
     const p = EDIT.preset;
+    const visible = p.widgets.filter((w) => !w.hidden);
+    if (!visible.length) { toast('A layout needs at least one visible card'); return; }
     p.name = editBar.querySelector('#leName').value.trim();
     p.icon = editBar.querySelector('#leIcon').value.trim();
     p.auto_when = editBar.querySelector('#leAuto').value || null;
@@ -337,6 +429,7 @@ editBar.addEventListener('click', async (e) => {
 function endEdit() {
   EDIT = null;
   document.body.classList.remove('layout-editing');
+  LGRID.querySelector('.lempty-notice')?.remove();
   for (const b of LGRID.querySelectorAll('.lbar')) b.remove();
   editBar.hidden = true; tray.hidden = true;
 }
@@ -344,7 +437,10 @@ function endEdit() {
 // ---------- manage presets: order, delete, reset
 const manage = document.createElement('div');
 manage.className = 'modal'; manage.hidden = true;
-manage.innerHTML = '<div class="sheet lmanage"><header><h2>Layout presets</h2><button class="mini ghost" data-lclose>✕</button></header><div id="lmanageList"></div>'
+manage.innerHTML = '<div class="sheet lmanage"><header><h2>Layout presets</h2>'
+  + '<div class="lmheader-btns"><button class="mini ghost" id="lmExport" title="Copy all presets to clipboard as JSON">Export JSON</button>'
+  + '<button class="mini ghost" id="lmImport" title="Import presets from JSON">Import JSON</button>'
+  + '<button class="mini ghost" data-lclose>✕</button></div></header><div id="lmanageList"></div>'
   + '<div class="note">The first nine are Alt+1…Alt+9. Starter presets can be reset to how they shipped.</div></div>';
 document.body.appendChild(manage);
 function openManage() { renderManage(); manage.hidden = false; }
@@ -355,11 +451,53 @@ function renderManage() {
     + `<span class="dim small">${p.widgets.filter((w) => !w.hidden).length} cards${p.auto_when ? ` · auto: ${esc(p.auto_when)}` : ''}${p.ticker_slides ? ` · ticker: ${p.ticker_slides.length} slides` : ''}</span></span>`
     + `<span class="lmbtns"><button class="mini ghost" data-lup="${esc(p.name)}" data-to="${i - 1}"${i === 0 ? ' disabled' : ''}>↑</button>`
     + `<button class="mini ghost" data-lup="${esc(p.name)}" data-to="${i + 1}"${i === ps.length - 1 ? ' disabled' : ''}>↓</button>`
+    + `<button class="mini ghost" data-lcopy="${esc(p.name)}" title="Duplicate this preset">Copy</button>`
     + (starters.includes(p.name) ? `<button class="mini ghost" data-lreset="${esc(p.name)}">Reset</button>` : '')
     + `<button class="mini danger" data-ldel="${esc(p.name)}"${ps.length === 1 ? ' disabled' : ''}>Delete</button></span></div>`).join(''));
 }
 manage.addEventListener('click', async (e) => {
   if (e.target === manage || e.target.closest('[data-lclose]')) { manage.hidden = true; return; }
+  if (e.target.id === 'lmExport' || e.target.closest('#lmExport')) {
+    const text = JSON.stringify(LAYOUT.presets, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Presets copied to clipboard as JSON');
+    } catch {
+      prompt('Presets JSON:', text);
+    }
+    return;
+  }
+  if (e.target.id === 'lmImport' || e.target.closest('#lmImport')) {
+    let clip = '';
+    try { clip = await navigator.clipboard.readText(); } catch {}
+    const prefill = (clip && (clip.trim().startsWith('{') || clip.trim().startsWith('['))) ? clip : '';
+    const input = prompt('Paste presets JSON (single preset or array):', prefill);
+    if (!input) return;
+    try {
+      const parsed = JSON.parse(input);
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+      const r = await layoutPost({ action: 'import', presets: list });
+      if (r?.ok) { toast(r.why); renderManage(); }
+      else { toast(r?.why || 'Import failed'); }
+    } catch (err) {
+      toast(`Invalid JSON: ${err.message}`);
+    }
+    return;
+  }
+  const cp = e.target.closest('[data-lcopy]');
+  if (cp) {
+    const srcName = cp.dataset.lcopy;
+    const src = (LAYOUT.presets || []).find((p) => p.name === srcName);
+    if (!src) return;
+    let newName = `${srcName} copy`;
+    let n = 2;
+    const names = (LAYOUT.presets || []).map((p) => p.name);
+    while (names.includes(newName)) { newName = `${srcName} copy ${n++}`; }
+    const r = await layoutPost({ action: 'save', preset: { ...JSON.parse(JSON.stringify(src)), name: newName, auto_when: null } });
+    if (r?.ok) { toast(`Copied to “${newName}”`); renderManage(); }
+    else { toast(r?.why || 'could not duplicate'); }
+    return;
+  }
   const up = e.target.closest('[data-lup]');
   if (up) { await layoutPost({ action: 'move', name: up.dataset.lup, to: Number(up.dataset.to) }); renderManage(); }
   const rs = e.target.closest('[data-lreset]');
@@ -367,7 +505,13 @@ manage.addEventListener('click', async (e) => {
   const del = e.target.closest('[data-ldel]');
   if (del && confirm(`Delete the preset “${del.dataset.ldel}”?`)) { const r = await layoutPost({ action: 'delete', name: del.dataset.ldel }); toast(r?.why || ''); renderManage(); }
 });
-addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (!manage.hidden) manage.hidden = true; else closeLayoutMenu(); } });
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (!manage.hidden) { manage.hidden = true; return; }
+    if (!layoutMenu.hidden) { closeLayoutMenu(); return; }
+    if (EDIT) { endEdit(); applyPreset(activePreset()); toast('edit cancelled'); return; }
+  }
+});
 
 document.body.classList.add('layout-pending');
 setTimeout(() => document.body.classList.remove('layout-pending'), 1500);   // never leave the page blank

@@ -542,3 +542,6 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
 .lslidelist { display:grid; grid-template-columns:1fr 1fr; gap:3px 12px; margin-top:8px; font-size:12px; }
 .lmanage .srow { align-items:center; }
 .lmbtns { display:inline-flex; gap:4px; }
+.lmheader-btns { display:inline-flex; align-items:center; gap:6px; margin-left:auto; }
+.ltray-btns { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+.lempty-notice { grid-column:1 / -1; padding:36px 20px; text-align:center; border:2px dashed var(--line); border-radius:var(--radius); color:var(--text); font-size:14px; margin:20px; }

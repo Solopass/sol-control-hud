@@ -918,15 +918,18 @@ class Hub:
             procs = []
             for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
                 try:
+                    pid = p.info.get("pid")
+                    if pid is None:
+                        continue
                     mem_info = p.info.get("memory_info")
                     mem_mb = (mem_info.rss if mem_info else 0) / (1024 * 1024)
                     procs.append({
-                        "pid": p.info["pid"],
+                        "pid": pid,
                         "name": p.info.get("name") or "",
                         "cpu": p.info.get("cpu_percent") or 0.0,
                         "mem_mb": round(mem_mb, 1),
                     })
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, AttributeError):
                     continue
             top_cpu = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:5]
             top_mem = sorted(procs, key=lambda x: x["mem_mb"], reverse=True)[:5]

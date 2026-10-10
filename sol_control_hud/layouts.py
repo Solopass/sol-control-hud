@@ -33,23 +33,23 @@ WIDGETS: dict[str, tuple[str, dict[str, list[int]], str]] = {
     "c-gpu": ("CPU · GPU", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [1, 2], "XL": [2, 2]}, "L"),
     "c-vram": ("VRAM", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-ai": ("Local AI", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
-    "c-review": ("Exam assist & review", {"L": [2, 1]}, "L"),
-    "c-chains": ("Chains", {"S": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
-    "c-projects": ("Projects", {"M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
-    "c-media": ("Media APIs", {"S": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
-    "c-solang": ("Solang", {"M": [1, 1], "L": [2, 1]}, "L"),
-    "c-ask": ("Ask it overnight", {"S": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
+    "c-review": ("Exam assist & review", {"XS": [1, 1], "L": [2, 1]}, "L"),
+    "c-chains": ("Chains", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
+    "c-projects": ("Projects", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
+    "c-media": ("Media APIs", {"XS": [1, 1], "S": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
+    "c-solang": ("Solang", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "L"),
+    "c-ask": ("Ask it overnight", {"XS": [1, 1], "S": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-awayq": ("Away & queue", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-system": ("Memory · Network", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-disks": ("Disks", {"XS": [1, 1], "M": [1, 1]}, "M"),
-    "c-ports": ("Localhost", {"S": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
+    "c-ports": ("Localhost", {"XS": [1, 1], "S": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-stab": ("Stability & backups", {"XS": [1, 1], "M": [1, 1]}, "M"),
     "c-svc": ("Services", {"XS": [1, 1], "M": [1, 1]}, "M"),
     "c-health": ("HUD health", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-work": ("Workspace", {"XS": [1, 1], "M": [1, 1]}, "M"),
-    "c-notes": ("Obsidian Notes", {"M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
-    "c-week": ("This week", {"S": [1, 1], "M": [1, 1]}, "M"),
-    "c-activity": ("Activity", {"M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
+    "c-notes": ("Obsidian Notes", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
+    "c-week": ("This week", {"XS": [1, 1], "S": [1, 1], "M": [1, 1]}, "M"),
+    "c-activity": ("Activity", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
 }
 TICKER_SLIDES = ("HW", "AI", "RUN", "SVC", "DISK", "SYS", "NOTE", "GIT", "NET", "MEDIA", "APPS")
 
@@ -196,6 +196,10 @@ def apply_action(data: dict, body: dict) -> tuple[dict, str]:
     if act == "save":                                    # create or replace (by name; `old` renames)
         p = clean_preset(body.get("preset") or {})
         old = str(body.get("old") or p["name"])
+        if p.get("auto_when"):
+            for other in data["presets"]:
+                if other["name"] != old and other.get("auto_when") == p["auto_when"]:
+                    other["auto_when"] = None
         if old in names:
             if p["name"] != old and p["name"] in names:
                 raise Bad(f"there is already a preset called {p['name']!r}")
@@ -240,6 +244,37 @@ def apply_action(data: dict, body: dict) -> tuple[dict, str]:
     if act == "auto":
         data["auto"] = bool(body.get("on"))
         return data, f"auto-switch {'on' if data['auto'] else 'off'}"
+    if act == "import":
+        raw_list = body.get("presets")
+        if isinstance(raw_list, dict):
+            raw_list = [raw_list]
+        if not isinstance(raw_list, list) or not raw_list:
+            raise Bad("no presets to import")
+        imported = 0
+        for raw in raw_list:
+            try:
+                cp = clean_preset(raw)
+            except Bad:
+                continue
+            base_name = cp["name"]
+            cand_name = base_name
+            num = 2
+            existing = [x["name"] for x in data["presets"]]
+            while cand_name in existing:
+                cand_name = f"{base_name} {num}"
+                num += 1
+            if len(data["presets"]) >= MAX_PRESETS:
+                break
+            cp["name"] = cand_name
+            if cp.get("auto_when"):
+                for other in data["presets"]:
+                    if other.get("auto_when") == cp["auto_when"]:
+                        other["auto_when"] = None
+            data["presets"].append(cp)
+            imported += 1
+        if not imported:
+            raise Bad("no valid presets to import")
+        return data, f"imported {imported} preset(s)"
     raise Bad(f"unknown action {act!r}")
 
 
