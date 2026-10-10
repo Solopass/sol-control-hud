@@ -148,10 +148,18 @@ def find_latest_review(name: str, reviews_dir: Path | None = None) -> dict | Non
         return None
 
     norm = name.strip().lower()
+    norm_tokens = norm.replace("-", " ").replace("_", " ")
     matches: list[Path] = []
     for p in rdir.glob("*.md"):
         stem = p.stem.lower()
-        if norm in stem or (norm == "media-api" and "bug hunt" in stem and not any(other in stem for other in ("speed", "suno", "voice", "polymatica"))):
+        stem_tokens = stem.replace("-", " ").replace("_", " ")
+        is_match = (
+            (f" {norm_tokens} " in f" {stem_tokens} ")
+            or (stem_tokens.startswith(f"{norm_tokens} "))
+            or (stem_tokens.endswith(f" {norm_tokens}"))
+            or (norm == "media-api" and "bug hunt" in stem and not any(other in stem for other in ("speed", "suno", "voice", "polymatica")))
+        )
+        if is_match:
             matches.append(p)
 
     if not matches:
