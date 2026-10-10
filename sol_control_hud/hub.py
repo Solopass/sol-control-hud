@@ -234,6 +234,10 @@ class Hub:
         self._last_media_check = 0.0
         self._media_stuck_seen: set[str] = set()
         self._last_digest_check = 0.0
+        from . import layouts                      # the dashboard's layout presets (data/layouts.json)
+        self._layouts = layouts.load()
+        self._layout_auto = layouts.Auto()
+        self._layouts_lock = threading.Lock()
         from .views.web.feed import History
         self.history = History()
 
@@ -649,7 +653,8 @@ class Hub:
                 "router": c["llama_swap"].get(), "wsl": c["wsl"].get(), "stability": c["stability"].get(),
                 "away": c["away"].get(), "chains": c["chains"].get(), "activity": c["activity"].get(),
                 "point": self.history.latest(), "models": self._model_rows(),
-                "speed": c["speed"].get(), "heal": c["heal"].get(), "review": self._review_state()}
+                "speed": c["speed"].get(), "heal": c["heal"].get(), "review": self._review_state(),
+                "layout": {"active": self._layouts["active"], "rev": self._layouts["rev"]}}
 
     @staticmethod
     def _review_state() -> dict:
@@ -752,6 +757,15 @@ class Hub:
             from .views.ticker import THEMES
             theme = getattr(self.ticker, "theme_name", "cyber-cyan")
             return {"themes": THEMES, "theme": theme, "port": self.port, "pid": os.getpid()}
+
+        @app.get("/api/layouts")
+        def layouts_read() -> dict:
+            """The layout presets, the cards and their sizes, the ticker's slides (layouts.py)."""
+            return self.layout_state()
+
+        @app.post("/api/layouts")
+        def layouts_change(body: dict = Body(default={})) -> dict:
+            return self.layout_action(body)
 
         @app.post("/api/action")
         def action(body: dict = Body(default={})) -> dict:
@@ -1082,6 +1096,48 @@ class Hub:
             return f"HUD: {', '.join(stopped)} stopped updating"
         return f"HUD ended without Exit {r['restarts']['day']}x today"
 
+    # ---- dashboard layout presets (layouts.py)
+    def layout_state(self) -> dict:
+        from . import layouts
+        from .views.ticker_base import SLIDE_LABELS
+        return {"ok": True, **self._layouts, "widgets": layouts.registry(),
+                "slides": [{"tag": tag, "label": label} for tag, label in SLIDE_LABELS]}
+
+    def _ticker_for(self, data: dict, name: str) -> None:
+        """Give the ticker the slides preset `name` asks for (sets data["ticker_base"]; the caller saves)."""
+        from . import layouts
+        current = dict(getattr(self.ticker, "slides_enabled", None) or {})
+        slides, data["ticker_base"] = layouts.ticker_changes(data, name, current)
+        if slides and self.ticker is not None:
+            turn_on = [k for k, v in slides.items() if v and not current.get(k, True)]
+            turn_off = [k for k, v in slides.items() if not v and current.get(k, True)]
+            for tag in turn_on + turn_off:            # on first: the ticker refuses to switch off its last slide
+                self.cmds.put(("slide", (tag, slides[tag])))
+
+    def layout_action(self, body: dict) -> dict:
+        import copy
+        from . import layouts
+        with self._layouts_lock:
+            try:
+                new, why = layouts.apply_action(self._layouts, body or {})
+            except layouts.Bad as e:
+                return {"ok": False, "why": str(e)}
+            active_changed = new["active"] != self._layouts["active"]
+            touched_active = body.get("action") in ("save", "reset") and new["active"] == (body.get("preset") or {}).get("name", body.get("name"))
+            if active_changed or touched_active:
+                self._ticker_for(new, new["active"])
+            self._layouts = layouts.save(copy.deepcopy(new))
+        log(why)
+        return {**self.layout_state(), "why": why}
+
+    def _auto_layout(self, snap) -> None:
+        """A game / Away started or ended: switch the layout (and the ticker's slides) if a preset asks for it."""
+        from . import layouts
+        target = self._layout_auto.step(self._layouts, layouts.condition(snap))
+        if target:
+            r = self.layout_action({"action": "activate", "name": target})
+            log(f"layout auto-switch -> {target} ({'ok' if r.get('ok') else r.get('why')})")
+
     def _weekly_digest(self, snap) -> list:
         """Sunday 20:00 (or the first minute after it, outside quiet hours): write the machine's week (digest.py) and
         return its notice for the notifier, which holds it during a game like any other."""
@@ -1126,6 +1182,7 @@ class Hub:
                 self._last_health = time.monotonic()
                 self.collector.health_alert = self._health_alert()
             snap = self.collector.get_snapshot()
+            self._auto_layout(snap)
             self.history.add(snap)
             if self.metrics:
                 self.metrics.add(snap)
