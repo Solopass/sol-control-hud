@@ -1290,7 +1290,8 @@ class Hub:
         log(f"exit: {why}")
         for step in (lambda: self.tray and self.tray.stop(), lambda: setattr(self.server, "should_exit", True),
                      lambda: self.metrics and self.metrics.close(),
-                     self._stop_review, self.collector.stop, self.guard.stop, self.ticker._save_settings, self.root.destroy):
+                     self._stop_review, self.collector.stop, self.guard.stop,
+                     lambda: self.ticker and self.ticker._save_settings(), self.root.destroy):
             try:
                 step()
             except Exception:  # noqa: BLE001 - leave no matter what

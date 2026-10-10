@@ -108,7 +108,9 @@ def clean_preset(p: dict) -> dict:
             raise Bad("ticker_slides has no known slide")
     seen, widgets = set(), []
     for w in p.get("widgets") or []:
-        wid = str((w or {}).get("id") or "")
+        if not isinstance(w, dict):
+            continue
+        wid = str(w.get("id") or "")
         if wid not in WIDGETS or wid in seen:
             continue
         seen.add(wid)
@@ -218,7 +220,11 @@ def apply_action(data: dict, body: dict) -> tuple[dict, str]:
             data["active"] = data["presets"][0]["name"]
         return data, f"deleted {name}"
     if act == "move":                                    # reorder the presets themselves (menu order, Alt+N)
-        name, to = str(body.get("name") or ""), int(body.get("to", -1))
+        name = str(body.get("name") or "")
+        try:
+            to = int(body.get("to", -1))
+        except (TypeError, ValueError):
+            raise Bad("which preset, and where?")
         if name not in names or not 0 <= to < len(names):
             raise Bad("which preset, and where?")
         p = data["presets"].pop(names.index(name))

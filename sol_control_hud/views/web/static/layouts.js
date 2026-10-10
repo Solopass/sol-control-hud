@@ -288,13 +288,14 @@ function renderEditBar() {
   const starter = ['Everyday', 'Gaming', 'AI work', 'Dev', 'Overnight', 'Minimal'].includes(EDIT.old);
   const slides = LAYOUT.slides || [];
   const own = Array.isArray(p.ticker_slides);
+  const wasOpen = editBar.querySelector('.lslides')?.open;
   setHTML(editBar, `<b>Editing</b>`
     + `<input id="leName" maxlength="40" value="${esc(p.name)}" title="Name">`
     + `<input id="leIcon" maxlength="4" value="${esc(p.icon || '')}" title="Icon (an emoji or a character)" class="lshort">`
     + `<select id="leAuto" title="Switch to this layout by itself"><option value="">no auto-switch</option>`
     + `<option value="game"${p.auto_when === 'game' ? ' selected' : ''}>while a game runs</option>`
     + `<option value="away"${p.auto_when === 'away' ? ' selected' : ''}>while Away runs</option></select>`
-    + `<details class="lslides"><summary>Ticker: ${own ? `${p.ticker_slides.length} slides` : 'my Settings'}</summary>`
+    + `<details class="lslides"${wasOpen ? ' open' : ''}><summary>Ticker: ${own ? `${p.ticker_slides.length} slides` : 'my Settings'}</summary>`
     + `<div class="lslidepanel"><label><input type="checkbox" id="leOwnSlides"${own ? ' checked' : ''}> this layout picks the ticker's slides</label>`
     + `<div class="lslidelist">${slides.map((s) => `<label><input type="checkbox" data-lslide="${esc(s.tag)}"${own && p.ticker_slides.includes(s.tag) ? ' checked' : ''}${own ? '' : ' disabled'}> ${esc(s.label)}</label>`).join('')}</div></div></details>`
     + `<span class="lgrow"></span>`

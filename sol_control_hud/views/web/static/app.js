@@ -247,6 +247,7 @@ function render(p) {
 
   renderFeed(p.activity || []);
   addPoint(p.point); drawCharts();
+  dispatchEvent(new CustomEvent('hud:render', { detail: p }));   // layouts.js: XS chips, follow a layout switch
 }
 
 function renderAlerts(list) {
@@ -514,7 +515,6 @@ function renderReview(p) {
   const topics = Object.entries(r.topics || {}).sort((a, b) => b[1] - a[1]);
   setHTML($('revTopics'), topics.map(([t, n]) => `<div class="item"><span>${esc(t)}</span><span style="color:var(--cyan)">${n}×</span></div>`).join('')
     || '<div class="empty">no topics recorded yet</div>');
-  dispatchEvent(new CustomEvent('hud:render', { detail: p }));   // layouts.js: XS chips, follow a layout switch
 }
 
 function connect() {

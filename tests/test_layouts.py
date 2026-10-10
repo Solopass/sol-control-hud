@@ -146,3 +146,14 @@ def test_the_api(tmp_path, monkeypatch):
     assert json.loads((tmp_path / "layouts.json").read_text(encoding="utf-8"))["active"] == "AI work"
     bad = c.post("/api/layouts", json={"action": "activate", "name": "Nope"}, headers={"X-SOL-Control": "1"}).json()
     assert bad["ok"] is False and "Nope" in bad["why"]
+    bad_move = c.post("/api/layouts", json={"action": "move", "name": "AI work", "to": "not-an-int"}, headers={"X-SOL-Control": "1"}).json()
+    assert bad_move["ok"] is False and "where" in bad_move["why"]
+
+
+def test_clean_preset_ignores_non_dict_widget_elements():
+    p = L.clean_preset({"name": "Test", "widgets": ["string-widget", 123, None, {"id": "c-gpu", "size": "L"}]})
+    assert p["name"] == "Test"
+    assert len(p["widgets"]) == len(L.WIDGETS)
+    gpu_w = next(w for w in p["widgets"] if w["id"] == "c-gpu")
+    assert gpu_w["size"] == "L" and not gpu_w["hidden"]
+
