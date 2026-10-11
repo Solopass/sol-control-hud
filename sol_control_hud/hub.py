@@ -1211,7 +1211,10 @@ class Hub:
     def _auto_layout(self, snap) -> None:
         """A game / Away started or ended: switch the layout (and the ticker's slides) if a preset asks for it."""
         from . import layouts
-        target = self._layout_auto.step(self._layouts, layouts.condition(snap))
+        cond = layouts.condition(snap)
+        if cond == "game" and not self.settings.get("game_auto_layout", False):
+            cond = None
+        target = self._layout_auto.step(self._layouts, cond)
         if target:
             r = self.layout_action({"action": "activate", "name": target})
             log(f"layout auto-switch -> {target} ({'ok' if r.get('ok') else r.get('why')})")
