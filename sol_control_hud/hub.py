@@ -479,6 +479,21 @@ class Hub:
                 self.collectors["projects"].value = None
             return r
 
+        if action == "start_overnight":
+            from .chains import overnight
+            chains = (body or {}).get("chains", [])
+            disp_mode = str((body or {}).get("display_mode", "dpms_off"))
+            sleep_done = bool((body or {}).get("sleep_when_done", False))
+            r = overnight.start_overnight(chains, display_mode=disp_mode, sleep_when_done=sleep_done)
+            log(f"overnight start: {r.get('why')}")
+            return r
+
+        if action == "cancel_overnight":
+            from .chains import overnight
+            r = overnight.cancel_overnight()
+            log(f"overnight cancel: {r.get('why')}")
+            return r
+
         if action in ("guard_ignore", "guard_resume"):
             # the guard turned the AI off for something that is not a game: say so once, instead of editing the
             # config by hand (09-25 Notepad and Edge, 09-27 claude x3, 10-07/08 steamwebhelper x5)
@@ -907,6 +922,16 @@ class Hub:
             except control.ControlError as e:
                 return {"ok": False, "why": str(e)}
 
+        @app.get("/api/overnight")
+        def overnight_state() -> dict:
+            from .chains import overnight
+            return {
+                "ok": True,
+                "state": overnight.get_overnight_state(),
+                "presets": overnight.PRESETS,
+                "chains": overnight.list_available_chains(),
+            }
+
         @app.get("/api/vaults")
         def vaults_list() -> dict:
             from .data.collectors import notes
@@ -1184,6 +1209,16 @@ class Hub:
                     return
         except queue.Empty:
             pass
+
+        now = time.time()
+        if now - getattr(self, "_last_overnight_check", 0) >= 3.0:
+            self._last_overnight_check = now
+            try:
+                from .chains import overnight
+                overnight.check_and_advance()
+            except Exception:
+                pass
+
         self.root.after(250, self._pump)
 
     def health_report(self) -> dict:

@@ -1932,6 +1932,155 @@ $('portsList').addEventListener('click', async (e) => {
 });
 setInterval(() => { if (!document.hidden) loadPorts(); }, 5000);
 
+// ---------- Overnight Runner
+let overnightInit = false;
+let overnightData = null;
+
+function initOvernightEvents() {
+  if (overnightInit) return;
+  overnightInit = true;
+
+  const btnStart = $('btnStartOvernight');
+  if (btnStart) {
+    btnStart.onclick = async () => {
+      const checkedBoxes = Array.from(document.querySelectorAll('#overnightChainList input[type="checkbox"]:checked'));
+      const chains = checkedBoxes.map((cb) => cb.value);
+      if (!chains.length) {
+        toast('Select at least one chain to run tonight');
+        return;
+      }
+      const dispRadio = document.querySelector('input[name="overnightDisplayMode"]:checked');
+      const displayMode = dispRadio ? dispRadio.value : 'dpms_off';
+      const sleepDone = Boolean($('overnightSleepDone')?.checked);
+
+      btnStart.disabled = true;
+      const r = await post('/api/action', {
+        action: 'start_overnight',
+        chains,
+        display_mode: displayMode,
+        sleep_when_done: sleepDone,
+      });
+      toast(r?.why || (r?.ok ? 'Overnight run started' : 'Could not start overnight run'));
+      btnStart.disabled = false;
+      loadOvernight();
+    };
+  }
+
+  const btnCancel = $('btnCancelOvernight');
+  if (btnCancel) {
+    btnCancel.onclick = async () => {
+      if (!confirm('Cancel the overnight run?')) return;
+      btnCancel.disabled = true;
+      const r = await post('/api/action', { action: 'cancel_overnight' });
+      toast(r?.why || 'Cancelled overnight run');
+      btnCancel.disabled = false;
+      loadOvernight();
+    };
+  }
+
+  const presetsEl = $('overnightPresets');
+  if (presetsEl) {
+    presetsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-preset]');
+      if (!btn || !overnightData) return;
+      const presetKey = btn.dataset.preset;
+      const p = (overnightData.presets || {})[presetKey];
+      if (!p) return;
+      const targetChains = new Set(p.chains || []);
+      document.querySelectorAll('#overnightChainList input[type="checkbox"]').forEach((cb) => {
+        cb.checked = targetChains.has(cb.value);
+      });
+      toast(`Selected preset: ${p.label}`);
+    });
+  }
+}
+
+async function loadOvernight() {
+  initOvernightEvents();
+  if (typeof cardShown === 'function' && !cardShown('c-overnight')) return;
+  let d;
+  try {
+    d = await (await fetch('/api/overnight', { cache: 'no-store' })).json();
+  } catch (e) {
+    return;
+  }
+  if (!d?.ok) return;
+  overnightData = d;
+  const state = d.state || {};
+  const presets = d.presets || {};
+  const chains = d.chains || [];
+
+  const statusPill = $('overnightStatusPill');
+  const banner = $('overnightActiveBanner');
+  const btnStart = $('btnStartOvernight');
+  const btnCancel = $('btnCancelOvernight');
+
+  if (state.active) {
+    if (statusPill) {
+      statusPill.textContent = 'running';
+      statusPill.className = 'pill waiting live-pulse';
+    }
+    if (banner) banner.hidden = false;
+    if (btnStart) btnStart.hidden = true;
+    if (btnCancel) btnCancel.hidden = false;
+
+    const currEl = $('overnightCurrentChain');
+    if (currEl) currEl.innerHTML = `<b>Running:</b> ${esc(state.current || 'initializing…')}`;
+
+    const elapsedEl = $('overnightElapsed');
+    if (elapsedEl && state.started_at) {
+      const min = Math.max(1, Math.round((Date.now() / 1000 - state.started_at) / 60));
+      elapsedEl.textContent = `elapsed: ${min}m`;
+    }
+
+    const total = (state.completed?.length || 0) + (state.queue?.length || 0) + (state.current ? 1 : 0);
+    const done = state.completed?.length || 0;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    const bar = $('overnightProgressBar');
+    if (bar) {
+      const inner = bar.querySelector('i');
+      if (inner) inner.style.width = `${pct}%`;
+    }
+
+    const qInfo = $('overnightQueueInfo');
+    if (qInfo) {
+      const nextUp = (state.queue || []).join(' → ') || 'none (last chain)';
+      qInfo.textContent = `Remaining queue: ${nextUp} · Completed: ${(state.completed || []).join(', ') || 'none yet'}`;
+    }
+  } else {
+    if (statusPill) {
+      statusPill.textContent = state.status || 'idle';
+      statusPill.className = state.status === 'completed' ? 'pill ok' : 'pill';
+    }
+    if (banner) banner.hidden = true;
+    if (btnStart) btnStart.hidden = false;
+    if (btnCancel) btnCancel.hidden = true;
+  }
+
+  // Render presets buttons if empty
+  const presetsEl = $('overnightPresets');
+  if (presetsEl && !presetsEl.children.length) {
+    setHTML(presetsEl, Object.entries(presets).map(([k, p]) =>
+      `<button class="mini ghost" data-preset="${esc(k)}" title="${esc(p.description || '')}">🌟 ${esc(p.label)}</button>`
+    ).join(''));
+  }
+
+  // Render chains checklist if empty
+  const chainListEl = $('overnightChainList');
+  if (chainListEl && (chainListEl.querySelector('.empty') || !chainListEl.children.length)) {
+    if (chains.length) {
+      setHTML(chainListEl, chains.map((c) =>
+        `<label class="overnight-item">` +
+        `<input type="checkbox" value="${esc(c.name)}">` +
+        `<span><b>${esc(c.name)}</b> <small class="dim">(${c.steps} steps · ${esc(c.model)})</small></span>` +
+        `</label>`
+      ).join(''));
+    } else {
+      setHTML(chainListEl, '<div class="empty">No chains found in 1Notebook/Chains</div>');
+    }
+  }
+}
+
 (async function start() {
   try {
     const meta = await (await fetch('/api/meta', { cache: 'no-store' })).json();
@@ -1947,5 +2096,7 @@ setInterval(() => { if (!document.hidden) loadPorts(); }, 5000);
   loadGuard();
   await initVaults();
   loadNotes();
+  loadOvernight();
+  setInterval(() => { if (!document.hidden) loadOvernight(); }, 4000);
   if (!document.hidden) connect();
 })();

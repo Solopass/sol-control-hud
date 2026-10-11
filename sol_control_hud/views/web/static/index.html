@@ -192,6 +192,51 @@
     <div class="chainlist" id="chainList"><div class="empty">loading…</div></div>
   </article>
 
+  <article class="card wide" id="c-overnight" data-open="RUN">
+    <h2>
+      <span>🌙 Overnight AI Run <span class="pill" id="overnightStatusPill">idle</span></span>
+      <div class="notes-controls">
+        <button class="mini danger" id="btnCancelOvernight" hidden title="Stop overnight run">⏹ Cancel</button>
+        <button class="mini go" id="btnStartOvernight" title="Start overnight session with selected chains">🌙 Start Overnight</button>
+      </div>
+    </h2>
+
+    <div class="overnight-active-banner" id="overnightActiveBanner" hidden>
+      <div class="row">
+        <span id="overnightCurrentChain"><b>Running:</b> –</span>
+        <span class="dim small" id="overnightElapsed">elapsed: 0m</span>
+      </div>
+      <div class="bar" id="overnightProgressBar"><i></i></div>
+      <div class="row small dim" id="overnightQueueInfo">Queue: –</div>
+    </div>
+
+    <div class="overnight-config" id="overnightConfig">
+      <div class="overnight-section-title">Presets</div>
+      <div class="overnight-presets" id="overnightPresets"></div>
+
+      <div class="overnight-section-title">Chains to Run Tonight</div>
+      <div class="overnight-chain-checklist" id="overnightChainList">
+        <div class="empty">loading chains…</div>
+      </div>
+
+      <div class="overnight-section-title">Display &amp; Power Settings</div>
+      <div class="overnight-options">
+        <label class="radio-label" title="Turns off physical monitors (DPMS standby) while keeping PC awake for inference">
+          <input type="radio" name="overnightDisplayMode" value="dpms_off" checked> 🖥️ Monitors Off (Physical DPMS standby)
+        </label>
+        <label class="radio-label" title="Launches pitch-black OLED Away screen with dim progress and deliberate wake key">
+          <input type="radio" name="overnightDisplayMode" value="away_screen"> 🌌 Away Screen (OLED low-emission guard)
+        </label>
+        <label class="radio-label" title="Keeps current display state">
+          <input type="radio" name="overnightDisplayMode" value="none"> 💻 Leave Displays On
+        </label>
+        <label class="checkbox-label" style="margin-top: 6px;">
+          <input type="checkbox" id="overnightSleepDone"> 💤 Sleep PC when all chains complete
+        </label>
+      </div>
+    </div>
+  </article>
+
   <article class="card wide" id="c-projects">
     <h2>
       <span>Projects <span class="dim" id="projSummary">D:\Workspace</span></span>
