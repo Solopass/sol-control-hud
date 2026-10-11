@@ -203,3 +203,23 @@ def test_loop_parts_fit_the_steps_model(monkeypatch):
     assert chain_note.part_tokens("sol-fast", chain_note.GROUP_TOKENS) == 8192 - chain_note.PART_RESERVE_TOKENS
     assert chain_note.part_tokens("sol-smart", chain_note.CHUNK_TOKENS) == chain_note.CHUNK_TOKENS
     assert chain_note.part_tokens("unknown", 20000) == 20000
+
+
+def test_tool_step_nested_args(tmp_path):
+    p = tmp_path / "ToolChain.md"
+    p.write_text("""---
+type: chain
+---
+## Scan
+tool: scan_stale_notes
+args:
+  days: 7
+  limit: 10
+""", encoding="utf-8")
+    c = cn.load_chain(p)
+    wf = cn.to_workflow(c)
+    scan_step = next(s for s in wf["steps"] if s["id"] == "scan")
+    assert scan_step["tool"] == "scan_stale_notes"
+    assert scan_step["args"]["days"] == 7
+    assert scan_step["args"]["limit"] == 10
+

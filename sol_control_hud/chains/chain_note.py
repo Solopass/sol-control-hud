@@ -358,6 +358,8 @@ def to_workflow(chain: Chain) -> dict:
                 try:
                     loaded = yaml.safe_load(s.prompt)
                     if isinstance(loaded, dict):
+                        if "args" in loaded and isinstance(loaded["args"], dict):
+                            raw_args.update(loaded["args"])
                         raw_args.update(loaded)
                     elif isinstance(loaded, str) and loaded.strip():
                         raw_args.setdefault("input", loaded.strip())

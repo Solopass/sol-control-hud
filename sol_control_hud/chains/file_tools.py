@@ -303,10 +303,11 @@ def scan_stale_notes(args: dict, ctx=None, policy: Policy | None = None) -> dict
     """Scans notes older than `days` (default 30) under 1Notebook or specified folder for condensation."""
     policy = policy or POLICY
     folder = check_read(args.get("folder", r"D:\OBVLT\1Notebook"), policy)
-    days = int(args.get("days", 30))
+    nested = args.get("args") if isinstance(args.get("args"), dict) else {}
+    days = int(args.get("days") or nested.get("days") or 30)
     cutoff = datetime.now() - timedelta(days=days)
     candidates = []
-    limit = int(args.get("limit", 25))
+    limit = int(args.get("limit") or nested.get("limit") or 25)
 
     subdirs = args.get("subdirs") or ["Reviews", "Answers", "Daily", "Scratch"]
     protected = {"chains", "ideas", "school", "research", "projects", "guides", "templates", "archive", "digests"}
