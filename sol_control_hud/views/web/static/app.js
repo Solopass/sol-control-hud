@@ -1153,18 +1153,25 @@ document.addEventListener('click', async (e) => {
   }
   if (r?.why) toast(r.why);
   if (r && !r.ok && t.dataset.model) pendingModels.delete(t.dataset.model);
-}, true);document.addEventListener('click', async (e) => {
+}, true);
+
+document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-chain],[data-remove],[data-answer],[data-result]');
-  if (!t) return;
+  if (!t || t.disabled) return;
   e.stopPropagation();
   if (t.dataset.confirm && !confirm(t.dataset.confirm)) return;
-  let r = null;
-  if (t.dataset.chain) r = await post('/api/action', { action: 'chain', target: t.dataset.chain, op: t.dataset.op });
-  else if (t.dataset.remove) r = await post('/api/action', { action: 'ask_remove', target: t.dataset.remove });
-  else if (t.dataset.answer) { const a = await (await fetch(`/api/answer?file=${encodeURIComponent(t.dataset.answer)}`)).json(); if (a.ok) openReader(t.dataset.answer.replace(/\.md$/, ''), a.text); else toast(a.why); return; }
-  else if (t.dataset.result) { const a = await (await fetch(`/api/chain-result?name=${encodeURIComponent(t.dataset.result)}`)).json(); if (a.ok) openReader(`${t.dataset.result}: latest result`, a.text); else toast(a.why); return; }
-  if (r?.why) toast(r.why);
-  loadControl();
+  t.disabled = true;
+  try {
+    let r = null;
+    if (t.dataset.chain) r = await post('/api/action', { action: 'chain', target: t.dataset.chain, op: t.dataset.op });
+    else if (t.dataset.remove) r = await post('/api/action', { action: 'ask_remove', target: t.dataset.remove });
+    else if (t.dataset.answer) { const a = await (await fetch(`/api/answer?file=${encodeURIComponent(t.dataset.answer)}`)).json(); if (a.ok) openReader(t.dataset.answer.replace(/\.md$/, ''), a.text); else toast(a.why); return; }
+    else if (t.dataset.result) { const a = await (await fetch(`/api/chain-result?name=${encodeURIComponent(t.dataset.result)}`)).json(); if (a.ok) openReader(`${t.dataset.result}: latest result`, a.text); else toast(a.why); return; }
+    if (r?.why) toast(r.why);
+    loadControl();
+  } finally {
+    t.disabled = false;
+  }
 }, true);
 // "Run now" swaps the Away models (tonight) for the Desk ones (right away); the choice is remembered per browser.
 function askMode() {
