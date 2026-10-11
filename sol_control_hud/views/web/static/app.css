@@ -409,6 +409,22 @@ button.swap-run:hover { border-color:var(--amber); color:var(--amber); }
   border-top:1px dashed var(--line); margin-top:3px; }
 .jmenu .sep { width:10px; }
 button.mini.on { border-color:var(--cyan); color:var(--cyan); background:color-mix(in srgb, var(--cyan) 14%, var(--card)); }
+/* Projects: review findings checklist panel */
+.jreview-box { grid-column:1 / -1; display:flex; flex-direction:column; gap:6px; padding:8px 10px;
+  border-top:1px dashed color-mix(in srgb, var(--amber) 40%, var(--line)); margin-top:4px;
+  background:color-mix(in srgb, var(--amber) 6%, var(--card)); border-radius:6px; }
+.jreview-header { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12px; }
+.jreview-header .rtitle { font-weight:600; display:flex; align-items:center; gap:6px; }
+.jreview-header .ractions { display:flex; gap:6px; align-items:center; }
+.jreview-list { display:flex; flex-direction:column; gap:4px; max-height:220px; overflow-y:auto; padding-right:4px; }
+.review-task-item { display:flex; align-items:baseline; gap:8px; font-size:12px; line-height:1.4; padding:2px 0; }
+.review-task-item.resolved .task-text { text-decoration:line-through; opacity:0.6; }
+.review-task-item input[type=checkbox] { accent-color:var(--cyan); cursor:pointer; margin-top:2px; flex:none; }
+.review-task-item .task-text { flex:1; word-break:break-word; }
+.sev-badge { font-size:9px; text-transform:uppercase; font-weight:700; padding:1px 5px; border-radius:4px; letter-spacing:0.04em; flex:none; }
+.sev-badge.critical, .sev-badge.high { background:color-mix(in srgb, var(--red) 22%, transparent); color:var(--red); border:1px solid color-mix(in srgb, var(--red) 40%, transparent); }
+.sev-badge.medium { background:color-mix(in srgb, var(--amber) 22%, transparent); color:var(--amber); border:1px solid color-mix(in srgb, var(--amber) 40%, transparent); }
+.sev-badge.low { background:color-mix(in srgb, var(--cyan) 18%, transparent); color:var(--cyan); border:1px solid color-mix(in srgb, var(--cyan) 40%, transparent); }
 /* Media: recording or link -> transcript note */
 .notebox { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
 .notebox h3 { margin:0 0 6px; display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }

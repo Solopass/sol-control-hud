@@ -9,6 +9,7 @@ const liveOpen = {};             // media name -> last Live answer
 const OPEN_WAIT_MS = 300000;    // a start can include a build (OmniTools: ~1.5 min after its code changed)
 const TAGS = ['active', 'paused', 'idea', 'finished', 'archived', 'deprecated'];
 let menuFor = null;              // the project whose ⋯ menu is open
+let reviewFor = null;            // the project whose review findings box is open
 
 function ago(epoch) {
   if (!epoch) return '';
@@ -54,9 +55,9 @@ function projRow(p) {
     const t = p.review.tasks || { total: 0, open: 0, resolved: 0 };
     if (t.total > 0) {
       if (t.open === 0) {
-        chips.push(`<span class="pill ok" style="cursor:pointer" data-p="review" title="${t.resolved}/${t.total} findings resolved in Obsidian (click to open): ${esc(p.review.name)}">${t.resolved}/${t.total} resolved</span>`);
+        chips.push(`<span class="pill ok" style="cursor:pointer" data-p="review-tasks" title="${t.resolved}/${t.total} findings resolved in Obsidian (click to view findings): ${esc(p.review.name)}">${t.resolved}/${t.total} resolved</span>`);
       } else {
-        chips.push(`<span class="pill warn" style="cursor:pointer" data-p="review" title="${t.open} open finding(s) in Obsidian (click to open): ${esc(p.review.name)}">${t.open} open finding${t.open > 1 ? 's' : ''}</span>`);
+        chips.push(`<span class="pill warn" style="cursor:pointer" data-p="review-tasks" title="${t.open} open finding(s) in Obsidian (click to view findings): ${esc(p.review.name)}">${t.open} open finding${t.open > 1 ? 's' : ''}</span>`);
       }
     }
     if (p.review.unreviewed_commits) {
@@ -85,7 +86,8 @@ function projRow(p) {
     + `<div class="meta" title="${esc(p.description)}">${esc(p.description || '')}</div>`
     + `<div class="meta small" title="${esc(g.subject || '')}">${commit}</div></div>`
     + `<div class="acts">${acts.join('')}</div>`
-    + (menuFor === p.name ? projMenu(p) : '') + `</div>`;
+    + (menuFor === p.name ? projMenu(p) : '')
+    + (reviewFor === p.name ? projReviewBox(p) : '') + `</div>`;
 }
 function projMenu(p) {
   const mine = p.status_from === 'you' ? p.status : '';
@@ -98,6 +100,29 @@ function projMenu(p) {
     + `<span class="sep"></span>`
     + (p.hidden ? `<button class="mini" data-p="show">show again</button>` : `<button class="mini ghost" data-p="hide" title="Fold it into + hidden">hide</button>`)
     + `<span class="dim small">archived / deprecated also hide it</span></div>`;
+}
+function projReviewBox(p) {
+  const rev = p.review || {};
+  const t = rev.tasks || { total: 0, open: 0, resolved: 0, items: [] };
+  const items = t.items || [];
+  const listHtml = items.length ? items.map((it, idx) => {
+    const sev = it.severity ? `<span class="sev-badge ${esc(it.severity)}">${esc(it.severity)}</span>` : '';
+    const displayText = it.text.replace(/^\*\*\[(?:high|medium|low|critical)\]\*\*[ \t]*/i, '');
+    return `<div class="review-task-item ${it.resolved ? 'resolved' : ''}">`
+      + `<input type="checkbox" ${it.resolved ? 'checked' : ''} data-p="toggle-task" data-idx="${idx}" title="Mark ${it.resolved ? 'open' : 'resolved'}">`
+      + `${sev}<span class="task-text">${esc(displayText)}</span></div>`;
+  }).join('') : '<div class="dim small">No checklist tasks found in this review note.</div>';
+
+  return `<div class="jreview-box">`
+    + `<div class="jreview-header">`
+    + `<div class="rtitle"><span>📋 ${esc(rev.name || 'Findings')}</span>`
+    + `<span class="pill ${t.open === 0 ? 'ok' : 'warn'}">${t.resolved}/${t.total} resolved</span></div>`
+    + `<div class="ractions">`
+    + `<button class="mini ghost" data-p="review" title="Open review note in Obsidian">↗ Obsidian</button>`
+    + `<button class="mini ghost" data-p="close-review" title="Close findings panel">✕</button>`
+    + `</div></div>`
+    + `<div class="jreview-list">${listHtml}</div>`
+    + `</div>`;
 }
 async function loadProjects() {
   if (typeof cardShown === 'function' && !cardShown('c-projects')) return;   // hidden in this layout: not polled (layouts.js)
@@ -136,7 +161,42 @@ $('projList').addEventListener('click', async (e) => {
     if (!r.ok) toast(r.why || 'No review note found yet');
     return;
   }
-  if (op === 'menu') { menuFor = menuFor === name ? null : name; return loadProjects(); }
+  if (op === 'review-tasks') {
+    reviewFor = reviewFor === name ? null : name;
+    if (reviewFor) menuFor = null;
+    return loadProjects();
+  }
+  if (op === 'close-review') {
+    reviewFor = null;
+    return loadProjects();
+  }
+  if (op === 'toggle-task') {
+    const idx = parseInt(b.dataset.idx, 10);
+    const resolved = b.checked;
+    b.disabled = true;
+    const r = await post('/api/action', {
+      action: 'toggle_review_task',
+      target: name,
+      index: idx,
+      resolved: resolved,
+    });
+    if (!r.ok) {
+      toast(r.why || 'Could not update task');
+      b.checked = !resolved;
+    } else {
+      toast(resolved ? 'Marked finding resolved' : 'Reopened finding');
+      if (p.review && r.tasks) {
+        p.review.tasks = r.tasks;
+      }
+    }
+    b.disabled = false;
+    return loadProjects();
+  }
+  if (op === 'menu') {
+    menuFor = menuFor === name ? null : name;
+    if (menuFor) reviewFor = null;
+    return loadProjects();
+  }
   if (op === 'tag' || op === 'hide' || op === 'show') {
     const r = await post('/api/action', { action: 'project', target: name, op, tag: b.dataset.tag || '' });
     toast(r.why || (r.ok ? 'saved' : 'that did not work'));

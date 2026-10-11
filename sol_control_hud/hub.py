@@ -439,6 +439,18 @@ class Hub:
                 return {"ok": False, "why": f"No review note found yet for {target}"}
             from .data.collectors import notes
             return notes.open_note("OBVLT", rev["path"])
+        if action == "toggle_review_task":
+            from .chains import project_chains
+            rev = project_chains.find_latest_review(target)
+            if not rev:
+                return {"ok": False, "why": f"No review note found yet for {target}"}
+            idx = int((body or {}).get("index", 0))
+            resolved = bool((body or {}).get("resolved", True))
+            r = project_chains.toggle_review_task(Path(rev["full_path"]), idx, resolved)
+            log(f"toggle review task {target} [{idx}] -> {resolved}: {r.get('why')}")
+            if hasattr(self, "collectors") and "projects" in self.collectors:
+                self.collectors["projects"].value = None
+            return r
 
         if action in ("guard_ignore", "guard_resume"):
             # the guard turned the AI off for something that is not a game: say so once, instead of editing the

@@ -18,14 +18,96 @@ def parse_review_tasks(file_path: Path) -> dict:
     try:
         text = file_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return {"total": 0, "open": 0, "resolved": 0}
-    open_count = len(re.findall(r"^[ \t]*- \[[ \t]\]", text, re.MULTILINE))
-    resolved_count = len(re.findall(r"^[ \t]*- \[[xX]\]", text, re.MULTILINE))
+        return {"total": 0, "open": 0, "resolved": 0, "items": []}
+
+    items = []
+    cb_pattern = re.compile(r"^[ \t]*- \[([ xX])\][ \t]*(.*?)$")
+    bullet_pattern = re.compile(r"^[ \t]*- [ \t]*(\*\*\[(?:high|medium|low|critical)\]\*\*.*?)$", re.IGNORECASE)
+
+    for line in text.splitlines():
+        m = cb_pattern.match(line)
+        if m:
+            resolved = m.group(1).lower() == "x"
+            task_text = m.group(2).strip()
+            sev_match = re.search(r"\*\*\[(high|medium|low|critical)\]\*\*", task_text, re.IGNORECASE)
+            severity = sev_match.group(1).lower() if sev_match else None
+            items.append({
+                "text": task_text,
+                "resolved": resolved,
+                "severity": severity,
+            })
+            continue
+
+        bf = bullet_pattern.match(line)
+        if bf:
+            task_text = bf.group(1).strip()
+            sev_match = re.search(r"\*\*\[(high|medium|low|critical)\]\*\*", task_text, re.IGNORECASE)
+            severity = sev_match.group(1).lower() if sev_match else None
+            items.append({
+                "text": task_text,
+                "resolved": False,
+                "severity": severity,
+            })
+            continue
+
+    open_count = sum(1 for it in items if not it["resolved"])
+    resolved_count = sum(1 for it in items if it["resolved"])
     return {
-        "total": open_count + resolved_count,
+        "total": len(items),
         "open": open_count,
         "resolved": resolved_count,
+        "items": items,
     }
+
+
+def toggle_review_task(file_path: Path, item_index: int, resolved: bool) -> dict:
+    """Toggles the task checkbox at item_index in file_path."""
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return {"ok": False, "why": f"Cannot read {file_path.name}: {e}"}
+
+    lines = text.splitlines()
+    checkbox_idx = 0
+    found = False
+    new_lines = []
+
+    cb_pattern = re.compile(r"^([ \t]*- )(\[[ xX]\][ \t]*)(.*)$")
+    bullet_pattern = re.compile(r"^([ \t]*- )([ \t]*\*\*\[(?:high|medium|low|critical)\]\*\*.*)$", re.IGNORECASE)
+
+    for line in lines:
+        m = cb_pattern.match(line)
+        if m:
+            if checkbox_idx == item_index:
+                mark = "[x] " if resolved else "[ ] "
+                new_lines.append(f"{m.group(1)}{mark}{m.group(3)}")
+                found = True
+            else:
+                new_lines.append(line)
+            checkbox_idx += 1
+            continue
+
+        bf = bullet_pattern.match(line)
+        if bf:
+            if checkbox_idx == item_index:
+                mark = "[x] " if resolved else "[ ] "
+                new_lines.append(f"{bf.group(1)}{mark}{bf.group(2).lstrip()}")
+                found = True
+            else:
+                new_lines.append(line)
+            checkbox_idx += 1
+            continue
+
+        new_lines.append(line)
+
+    if not found:
+        return {"ok": False, "why": f"Task index {item_index} not found in {file_path.name}"}
+
+    try:
+        file_path.write_text("\n".join(new_lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+        return {"ok": True, "why": f"Updated task in {file_path.name}", "tasks": parse_review_tasks(file_path)}
+    except OSError as e:
+        return {"ok": False, "why": f"Cannot write {file_path.name}: {e}"}
 
 
 def find_chain_for_project(name: str, chains_dir: Path | None = None) -> Path | None:
