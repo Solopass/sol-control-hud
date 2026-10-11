@@ -1049,7 +1049,7 @@ async function loadControl() {
     const statusLabel = c.status === 'running' ? 'running ⚡' : esc(c.status);
     return `<div class="crow"><span>${esc(c.name)}</span><span class="${statusClass}">${statusLabel}</span>` +
       `<span class="meta">${metaHtml}</span><span class="acts">` +
-      `<button class="mini ghost sched-btn" data-sched="${esc(c.name)}" title="Change when it runs">⏱ Sched</button>` +
+      `<button class="mini ${c.schedule ? 'on' : 'ghost'} sched-btn" data-sched="${esc(c.name)}" title="Change when it runs (current: ${esc(c.schedule || 'manual')})">⏱ ${esc(c.schedule || 'Sched')}</button>` +
       `<button class="mini ${c.reason ? 'warn' : 'ghost'} inspect-btn" data-inspect="${esc(c.name)}" title="Inspect run events and log tail">🔍 Inspect</button>` +
       ops.map((o) => `<button class="mini${o === 'swap_run' ? ' swap-run' : ''}" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o] || o}</button>`).join('') +
       (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>' +
@@ -1125,19 +1125,41 @@ function schedParts(text) {
   if (t === 'on away') return { kind: 'away', time: '07:00', days: [] };
   let m = t.match(/^daily (\d{1,2}):(\d{2})$/);
   if (m) return { kind: 'daily', time: `${m[1].padStart(2, '0')}:${m[2]}`, days: [] };
+  m = t.match(/^weekdays (\d{1,2}):(\d{2})$/);
+  if (m) return { kind: 'weekdays', time: `${m[1].padStart(2, '0')}:${m[2]}`, days: ['mon', 'tue', 'wed', 'thu', 'fri'] };
+  m = t.match(/^weekends (\d{1,2}):(\d{2})$/);
+  if (m) return { kind: 'weekends', time: `${m[1].padStart(2, '0')}:${m[2]}`, days: ['sat', 'sun'] };
   m = t.match(/^weekly ([a-z, ]+?) (\d{1,2}):(\d{2})$/);
-  if (m) return { kind: 'weekly', time: `${m[2].padStart(2, '0')}:${m[3]}`, days: m[1].split(/[ ,]+/).map((d) => d.slice(0, 3)) };
-  return { kind: 'daily', time: '07:00', days: [] };
+  if (m) {
+    const days = m[1].split(/[ ,]+/).map((d) => d.slice(0, 3));
+    const lowerDays = days.map((d) => d.toLowerCase());
+    if (lowerDays.length === 5 && ['mon', 'tue', 'wed', 'thu', 'fri'].every((d) => lowerDays.includes(d))) {
+      return { kind: 'weekdays', time: `${m[2].padStart(2, '0')}:${m[3]}`, days: lowerDays };
+    }
+    if (lowerDays.length === 2 && ['sat', 'sun'].every((d) => lowerDays.includes(d))) {
+      return { kind: 'weekends', time: `${m[2].padStart(2, '0')}:${m[3]}`, days: lowerDays };
+    }
+    return { kind: 'weekly', time: `${m[2].padStart(2, '0')}:${m[3]}`, days: lowerDays };
+  }
+  return { kind: 'custom', time: '07:00', days: [], raw: text };
 }
 function schedEditor(c) {
   const s = schedParts(c.schedule);
   const days = DAY_NAMES.map((d) => `<label><input type="checkbox" value="${d}"${s.days.includes(d.toLowerCase()) ? ' checked' : ''}>${d}</label>`).join('');
   const isPaused = c.status === 'paused';
   return `<div class="sched-edit" data-for="${esc(c.name)}"><b>${esc(c.name)}</b> runs ` +
-    `<select class="sk"><option value=""${s.kind === '' ? ' selected' : ''}>never by itself</option><option value="daily"${s.kind === 'daily' ? ' selected' : ''}>every day</option>` +
-    `<option value="weekly"${s.kind === 'weekly' ? ' selected' : ''}>on these days</option><option value="away"${s.kind === 'away' ? ' selected' : ''}>when Away starts</option></select>` +
+    `<select class="sk">` +
+    `<option value=""${s.kind === '' ? ' selected' : ''}>never by itself (manual)</option>` +
+    `<option value="away"${s.kind === 'away' ? ' selected' : ''}>when Away starts (on away)</option>` +
+    `<option value="daily"${s.kind === 'daily' ? ' selected' : ''}>every day</option>` +
+    `<option value="weekdays"${s.kind === 'weekdays' ? ' selected' : ''}>weekdays (Mon–Fri)</option>` +
+    `<option value="weekends"${s.kind === 'weekends' ? ' selected' : ''}>weekends (Sat–Sun)</option>` +
+    `<option value="weekly"${s.kind === 'weekly' ? ' selected' : ''}>on specific days</option>` +
+    `<option value="custom"${s.kind === 'custom' ? ' selected' : ''}>custom text</option>` +
+    `</select>` +
     `<span class="sdays"${s.kind === 'weekly' ? '' : ' hidden'}>${days}</span>` +
-    `<span class="stime"${s.kind === 'daily' || s.kind === 'weekly' ? '' : ' hidden'}>at <input type="time" class="st" value="${s.time}"></span>` +
+    `<span class="stime"${s.kind === 'daily' || s.kind === 'weekly' || s.kind === 'weekdays' || s.kind === 'weekends' ? '' : ' hidden'}>at <input type="time" class="st" value="${s.time}"></span>` +
+    `<span class="scustom-wrap"${s.kind === 'custom' ? '' : ' hidden'}><input type="text" class="scustom" placeholder="e.g. daily 08:30 or on away" value="${esc(s.raw || c.schedule || '')}" style="width:160px;padding:3px 6px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--text);font-size:12px;"></span>` +
     `<button class="mini go" data-sched-save>Save</button>` +
     (isPaused ? ' <button class="mini ok" data-sched-save-active title="Save schedule and unpause this chain">Save &amp; Activate</button>' : '') +
     (c.schedule ? ' <button class="mini danger ghost" data-sched-clear title="Remove schedule completely">Remove</button>' : '') +
@@ -1271,7 +1293,13 @@ if (cChains && !cChains._schedInit) {
     const kind = box.querySelector('.sk').value, time = box.querySelector('.st').value || '07:00';
     const days = [...box.querySelectorAll('.sdays input:checked')].map((i) => i.value);
     if (kind === 'weekly' && !days.length) { toast('pick at least one day'); return; }
-    const schedule = kind === 'daily' ? `daily ${time}` : kind === 'weekly' ? `weekly ${days.join(',')} ${time}` : kind === 'away' ? 'on away' : '';
+    let schedule = '';
+    if (kind === 'daily') schedule = `daily ${time}`;
+    else if (kind === 'weekdays') schedule = `weekdays ${time}`;
+    else if (kind === 'weekends') schedule = `weekends ${time}`;
+    else if (kind === 'weekly') schedule = `weekly ${days.join(',')} ${time}`;
+    else if (kind === 'away') schedule = 'on away';
+    else if (kind === 'custom') schedule = (box.querySelector('.scustom')?.value || '').trim();
     const r = await post('/api/action', { action: 'chain', target: box.dataset.for, op: 'schedule', schedule });
     if (isSaveActive && r.ok) {
       await post('/api/action', { action: 'chain', target: box.dataset.for, op: 'resume' });
@@ -1286,7 +1314,9 @@ if (cChains && !cChains._schedInit) {
     if (!box || !e.target.classList.contains('sk')) return;
     const k = e.target.value;
     box.querySelector('.sdays').hidden = k !== 'weekly';
-    box.querySelector('.stime').hidden = !(k === 'daily' || k === 'weekly');
+    box.querySelector('.stime').hidden = !(k === 'daily' || k === 'weekly' || k === 'weekdays' || k === 'weekends');
+    const cust = box.querySelector('.scustom-wrap');
+    if (cust) cust.hidden = k !== 'custom';
   });
 }
 const pendingModels = new Map();   // model -> the state it had when you pressed its button (shown as "…" until it changes)

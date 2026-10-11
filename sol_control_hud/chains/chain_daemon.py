@@ -116,6 +116,12 @@ def parse_schedule(text: str) -> dict:
     m = re.fullmatch(r"daily (\d{1,2}):(\d{2})", t)
     if m:
         return {"kind": "at", "days": list(range(7)), "h": int(m.group(1)), "m": int(m.group(2))}
+    m = re.fullmatch(r"weekdays (\d{1,2}):(\d{2})", t)
+    if m:
+        return {"kind": "at", "days": [0, 1, 2, 3, 4], "h": int(m.group(1)), "m": int(m.group(2))}
+    m = re.fullmatch(r"weekends (\d{1,2}):(\d{2})", t)
+    if m:
+        return {"kind": "at", "days": [5, 6], "h": int(m.group(1)), "m": int(m.group(2))}
     m = re.fullmatch(r"weekly ([a-z, ]+?) (\d{1,2}):(\d{2})", t)
     if m:
         days = []
@@ -124,7 +130,7 @@ def parse_schedule(text: str) -> dict:
                 raise ScheduleError(f"unknown day '{d}'")
             days.append(DAYS[d[:3]])
         return {"kind": "at", "days": sorted(set(days)), "h": int(m.group(2)), "m": int(m.group(3))}
-    raise ScheduleError(f"I don't understand `schedule: {text}`. Use `daily 07:00`, `weekly Sun 20:00`, "
+    raise ScheduleError(f"I don't understand `schedule: {text}`. Use `daily 07:00`, `weekdays 09:00`, `weekends 10:00`, `weekly Sun 20:00`, "
                         f"`weekly Mon,Thu 09:30` or `on away`")
 
 

@@ -165,3 +165,37 @@ def test_hub_project_bughunt_action(tmp_path, monkeypatch):
     assert "- [x] **[high]** bug" in (rev_dir / "2026-10-06 bug hunt mytestproj.md").read_text(encoding="utf-8")
 
 
+def test_parse_and_toggle_numbered_real_issues(tmp_path):
+    f = tmp_path / "deep_review.md"
+    f.write_text("""---
+title: Deep Review
+---
+## Real issues
+1.  **File: `metrics.py`**
+    *   **Problem:** db.commit() sync issue
+    *   **Fix:** Use a worker thread
+2.  **File: `notify.py`**
+    *   **Problem:** memory growth
+""", encoding="utf-8")
+
+    tasks = project_chains.parse_review_tasks(f)
+    assert tasks["total"] == 2
+    assert tasks["open"] == 2
+    assert "metrics.py" in tasks["items"][0]["text"]
+    assert "db.commit() sync issue" in tasks["items"][0]["text"]
+
+    # Toggle item 0
+    r = project_chains.toggle_review_task(f, 0, True)
+    assert r["ok"] is True
+    assert r["tasks"]["resolved"] == 1
+    assert r["tasks"]["open"] == 1
+    assert "1.  [x] **File: `metrics.py`**" in f.read_text(encoding="utf-8")
+
+    # Toggle item 0 back
+    r2 = project_chains.toggle_review_task(f, 0, False)
+    assert r2["ok"] is True
+    assert r2["tasks"]["resolved"] == 0
+    assert "1.  [ ] **File: `metrics.py`**" in f.read_text(encoding="utf-8")
+
+
+

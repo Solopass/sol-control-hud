@@ -14,33 +14,55 @@ WORKSPACE_DIR = Path(os.environ.get("SOL_WORKSPACE", r"D:\Workspace"))
 
 
 def parse_review_tasks(file_path: Path) -> dict:
-    """Parses markdown task checkboxes (- [ ] vs - [x]) in a review note."""
+    """Parses actionable findings / task checkboxes in a review note."""
     try:
         text = file_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {"total": 0, "open": 0, "resolved": 0, "items": []}
 
-    items = []
-    cb_pattern = re.compile(r"^[ \t]*- \[([ xX])\][ \t]*(.*?)$")
-    bullet_pattern = re.compile(r"^[ \t]*- [ \t]*(\*\*\[(?:high|medium|low|critical)\]\*\*.*?)$", re.IGNORECASE)
+    # If the note has a dedicated '## Real issues' section, prioritize findings in it
+    scope_text = text
+    sec_match = re.search(r"(?m)^## Real issues\s*\n(.*?)(?=\n## |\Z)", text, re.S)
+    if sec_match:
+        cand = sec_match.group(1).strip()
+        if any(marker in cand for marker in ("**[", "**File:", "- [", "* [", "1.")):
+            scope_text = cand
 
-    for line in text.splitlines():
-        m = cb_pattern.match(line)
-        if m:
-            resolved = m.group(1).lower() == "x"
-            task_text = m.group(2).strip()
+    items = []
+    lines = scope_text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Checkbox line: - [ ] or - [x] or * [ ] or 1. [ ]
+        cb_m = re.match(r"^[ \t]*(?:[-*]|\d+\.)[ \t]+\[([ xX])\][ \t]*(.*?)$", line)
+        if cb_m:
+            resolved = cb_m.group(1).lower() == "x"
+            task_text = cb_m.group(2).strip()
             sev_match = re.search(r"\*\*\[(high|medium|low|critical)\]\*\*", task_text, re.IGNORECASE)
             severity = sev_match.group(1).lower() if sev_match else None
+            ctx = []
+            j = i + 1
+            while j < len(lines) and re.match(r"^[ \t]+(?:[-*]|\*)[ \t]+", lines[j]):
+                sub = re.sub(r"^[ \t]+(?:[-*]|\*)[ \t]+", "", lines[j]).strip()
+                if sub.lower().startswith("**problem:**") or sub.lower().startswith("problem:"):
+                    clean_p = re.sub(r"^\*\*Problem:\*\*[ \t]*", "", sub, flags=re.I)
+                    ctx.append(clean_p)
+                j += 1
+            if ctx:
+                task_text += " · " + " ".join(ctx)
             items.append({
                 "text": task_text,
                 "resolved": resolved,
                 "severity": severity,
             })
+            i += 1
             continue
 
-        bf = bullet_pattern.match(line)
-        if bf:
-            task_text = bf.group(1).strip()
+        # Bullet severity: - **[high]** or * **[high]** or 1. **[high]**
+        sev_m = re.match(r"^[ \t]*(?:[-*]|\d+\.)[ \t]+(\*\*\[?(high|medium|low|critical)\]?\*\*.*?)$", line, re.I)
+        if sev_m:
+            task_text = sev_m.group(1).strip()
             sev_match = re.search(r"\*\*\[(high|medium|low|critical)\]\*\*", task_text, re.IGNORECASE)
             severity = sev_match.group(1).lower() if sev_match else None
             items.append({
@@ -48,7 +70,32 @@ def parse_review_tasks(file_path: Path) -> dict:
                 "resolved": False,
                 "severity": severity,
             })
+            i += 1
             continue
+
+        # Numbered File item: 1.  **File: `...`**
+        file_m = re.match(r"^[ \t]*\d+\.[ \t]+(\*\*File:.*?\*\*)$", line)
+        if file_m:
+            task_text = file_m.group(1).strip()
+            ctx = []
+            j = i + 1
+            while j < len(lines) and re.match(r"^[ \t]+(?:[-*]|\*)[ \t]+", lines[j]):
+                sub = re.sub(r"^[ \t]+(?:[-*]|\*)[ \t]+", "", lines[j]).strip()
+                if sub.lower().startswith("**problem:**") or sub.lower().startswith("problem:"):
+                    clean_p = re.sub(r"^\*\*Problem:\*\*[ \t]*", "", sub, flags=re.I)
+                    ctx.append(clean_p)
+                j += 1
+            if ctx:
+                task_text += " · " + " ".join(ctx)
+            items.append({
+                "text": task_text,
+                "resolved": False,
+                "severity": "high",
+            })
+            i += 1
+            continue
+
+        i += 1
 
     open_count = sum(1 for it in items if not it["resolved"])
     resolved_count = sum(1 for it in items if it["resolved"])
@@ -71,15 +118,29 @@ def toggle_review_task(file_path: Path, item_index: int, resolved: bool) -> dict
     checkbox_idx = 0
     found = False
     new_lines = []
+    mark = "[x] " if resolved else "[ ] "
 
-    cb_pattern = re.compile(r"^([ \t]*- )(\[[ xX]\][ \t]*)(.*)$")
-    bullet_pattern = re.compile(r"^([ \t]*- )([ \t]*\*\*\[(?:high|medium|low|critical)\]\*\*.*)$", re.IGNORECASE)
+    sec_match = re.search(r"(?m)^## Real issues\s*\n(.*?)(?=\n## |\Z)", text, re.S)
+    has_real_issues_scope = bool(sec_match and any(marker in sec_match.group(1) for marker in ("**[", "**File:", "- [", "* [", "1.")))
+    in_real_issues = False
+
+    cb_pattern = re.compile(r"^([ \t]*(?:[-*]|\d+\.)[ \t]+)(\[[ xX]\][ \t]*)(.*)$")
+    bullet_pattern = re.compile(r"^([ \t]*(?:[-*]|\d+\.)[ \t]+)(\*\*\[?(?:high|medium|low|critical)\]?\*\*.*)$", re.IGNORECASE)
+    file_pattern = re.compile(r"^([ \t]*\d+\.[ \t]+)(\*\*File:.*?\*\*)$")
 
     for line in lines:
+        if line.startswith("## Real issues"):
+            in_real_issues = True
+        elif line.startswith("## ") and in_real_issues:
+            in_real_issues = False
+
+        if has_real_issues_scope and not in_real_issues:
+            new_lines.append(line)
+            continue
+
         m = cb_pattern.match(line)
         if m:
             if checkbox_idx == item_index:
-                mark = "[x] " if resolved else "[ ] "
                 new_lines.append(f"{m.group(1)}{mark}{m.group(3)}")
                 found = True
             else:
@@ -90,8 +151,17 @@ def toggle_review_task(file_path: Path, item_index: int, resolved: bool) -> dict
         bf = bullet_pattern.match(line)
         if bf:
             if checkbox_idx == item_index:
-                mark = "[x] " if resolved else "[ ] "
                 new_lines.append(f"{bf.group(1)}{mark}{bf.group(2).lstrip()}")
+                found = True
+            else:
+                new_lines.append(line)
+            checkbox_idx += 1
+            continue
+
+        fm = file_pattern.match(line)
+        if fm:
+            if checkbox_idx == item_index:
+                new_lines.append(f"{fm.group(1)}{mark}{fm.group(2).lstrip()}")
                 found = True
             else:
                 new_lines.append(line)
