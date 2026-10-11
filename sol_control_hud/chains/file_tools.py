@@ -395,7 +395,9 @@ def archive_note(args: dict, ctx=None, policy: Policy | None = None) -> dict:
     else:
         new_content = banner + content
 
-    target.write_text(new_content, encoding="utf-8")
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(new_content, encoding="utf-8")
+    os.replace(tmp, target)
     src.unlink()
 
     manifest = dest_dir / "_archived.md"

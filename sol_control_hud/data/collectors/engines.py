@@ -21,6 +21,17 @@ def _client() -> httpx.Client:
     return _HTTP
 
 
+def close_client() -> None:
+    """Closes and resets the cached httpx client."""
+    global _HTTP
+    if _HTTP is not None:
+        try:
+            _HTTP.close()
+        except Exception:
+            pass
+        _HTTP = None
+
+
 _COMPUTE = re.compile(r'time=(\S+) .*msg="inference compute".*?library=(\S+).*?description="([^"]*)"')
 
 

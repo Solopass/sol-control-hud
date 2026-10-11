@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -20,7 +21,8 @@ KEEP_DAYS = 90
 COLS = ("gpu", "vram", "ram", "cpu", "temp", "hotspot", "down", "up")   # the chart series (same names as the 1 h history)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS minutes (t INTEGER PRIMARY KEY, gpu REAL, gpu_max REAL, vram REAL, vram_max REAL, ram REAL,
-  ram_max REAL, cpu REAL, temp REAL, temp_max REAL, hotspot REAL, hotspot_max REAL, down REAL, up REAL, disks TEXT);
+  ram_max REAL, cpu REAL, temp REAL, temp_max REAL, hotspot REAL, hotspot_max REAL, down REAL, up REAL, disks TEXT,
+  spilled REAL, tps REAL);
 CREATE TABLE IF NOT EXISTS events (t REAL, kind TEXT, name TEXT, detail TEXT);
 CREATE INDEX IF NOT EXISTS events_t ON events (t);
 """
@@ -33,6 +35,7 @@ SPILL_RANK = {"unknown": 0, "fine": 1, "slow": 2}   # an episode's verdict is th
 class Metrics:
     def __init__(self, path: Path, away_log: Path | None = None, chains_log: Path | None = None, clock=time.time):
         self.path, self.clock = path, clock
+        self._lock = threading.Lock()
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(path))
         self.db.execute("PRAGMA journal_mode=WAL")
@@ -94,18 +97,19 @@ class Metrics:
         top = lambda xs: max((v for v in xs if v is not None), default=None)  # noqa: E731
         gpu, vram, ram, cpu, temp, hot, down, up, spilled, tps = cols
         last = lambda xs: next((v for v in reversed(xs) if v is not None), None)  # noqa: E731
-        self.db.execute("INSERT OR REPLACE INTO minutes (t, gpu, gpu_max, vram, vram_max, ram, ram_max, cpu, temp, temp_max,"
-                        " hotspot, hotspot_max, down, up, disks, spilled, tps) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (self.minute, avg(gpu), top(gpu), avg(vram), top(vram), avg(ram), top(ram), avg(cpu), avg(temp),
-                         top(temp), avg(hot), top(hot), avg(down), avg(up), json.dumps(self.disks), top(spilled), last(tps)))
-        self.db.commit()
-        self.acc = []
-        if self.clock() - self.last_prune > 86400:
-            self.last_prune = self.clock()
-            cut = self.clock() - KEEP_DAYS * 86400
-            self.db.execute("DELETE FROM minutes WHERE t < ?", (cut,))
-            self.db.execute("DELETE FROM events WHERE t < ?", (cut,))
+        with self._lock:
+            self.db.execute("INSERT OR REPLACE INTO minutes (t, gpu, gpu_max, vram, vram_max, ram, ram_max, cpu, temp, temp_max,"
+                            " hotspot, hotspot_max, down, up, disks, spilled, tps) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (self.minute, avg(gpu), top(gpu), avg(vram), top(vram), avg(ram), top(ram), avg(cpu), avg(temp),
+                             top(temp), avg(hot), top(hot), avg(down), avg(up), json.dumps(self.disks), top(spilled), last(tps)))
             self.db.commit()
+            self.acc = []
+            if self.clock() - self.last_prune > 86400:
+                self.last_prune = self.clock()
+                cut = self.clock() - KEEP_DAYS * 86400
+                self.db.execute("DELETE FROM minutes WHERE t < ?", (cut,))
+                self.db.execute("DELETE FROM events WHERE t < ?", (cut,))
+                self.db.commit()
 
     def _track_spill(self, s) -> None:
         """One `spill` event per spill, written when it ends: name = its verdict (slow / fine / unknown = nothing
@@ -123,8 +127,9 @@ class Metrics:
             self.event("spill", sp["verdict"], f"{sp['gb']:.2f} GB, {minutes:.0f} min", sp["start"])
 
     def event(self, kind: str, name: str, detail: str = "", t: float | None = None) -> None:
-        self.db.execute("INSERT INTO events VALUES (?,?,?,?)", (t or self.clock(), kind, name, detail))
-        self.db.commit()
+        with self._lock:
+            self.db.execute("INSERT INTO events VALUES (?,?,?,?)", (t or self.clock(), kind, name, detail))
+            self.db.commit()
 
     def read_logs(self) -> None:
         """New Away / chain lines -> events (the kinds the week card counts)."""

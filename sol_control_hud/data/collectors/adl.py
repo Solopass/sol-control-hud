@@ -113,6 +113,21 @@ class AdlReader:
             except Exception:
                 return GpuSensors()
 
+    def close(self) -> None:
+        """Destroy ADL2 context and release memory allocations."""
+        with self._lock:
+            if self._adl is not None and self._ctx.value:
+                try:
+                    if hasattr(self._adl, "ADL2_Main_Control_Destroy"):
+                        self._adl.ADL2_Main_Control_Destroy(self._ctx)
+                except Exception:
+                    pass
+                self._ctx = c_void_p()
+            self._allocations.clear()
+            self._initialized = False
+            self._supported = False
+            self._adl = None
+
 
 _READER = AdlReader()
 
@@ -120,3 +135,8 @@ _READER = AdlReader()
 def get_gpu_sensors(adapter_index: int = 0) -> GpuSensors:
     """Convenience helper to query GPU edge/hotspot/mem temp and fan RPM."""
     return _READER.query_sensors(adapter_index)
+
+
+def close_adl() -> None:
+    """Convenience helper to release module-level ADL reader context."""
+    _READER.close()

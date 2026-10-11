@@ -70,10 +70,17 @@ def compact_text(text: str, max_chars: int = 2000) -> str:
 
     head_part = text[:head_cut].rstrip()
     tail_part = text[tail_cut:].lstrip()
+
+    # Code fence balance: if head_part leaves a code block open, close it before marker
+    head_fences = len(re.findall(r"^```", head_part, re.M))
+    tail_fences = len(re.findall(r"^```", tail_part, re.M))
+    head_close = "\n```" if (head_fences % 2 != 0) else ""
+    tail_open = "```\n" if (tail_fences % 2 != 0) else ""
+
     omitted = len(text) - (len(head_part) + len(tail_part))
     if omitted <= 0:
         return text[:max_chars]
-    marker = f"\n\n... [Compact memory: {omitted} characters omitted] ...\n\n"
+    marker = f"{head_close}\n\n... [Compact memory: {omitted} characters omitted] ...\n\n{tail_open}"
     return head_part + marker + tail_part
 
 
@@ -392,6 +399,23 @@ class Runner:
         ok, tokens, ctx = fits(model, messages, step.max_tokens)
         if ok:
             return model
+        # Pre-flight compaction: if prompt text is large, compact user message content to preserve model slot
+        if ctx and len(messages) > 0:
+            target_chars = max(1000, int((ctx - min(step.max_tokens, 2048) - 200) * 3.5))
+            did_compact = False
+            for m in messages:
+                content = m.get("content", "")
+                if m.get("role") == "user" and len(content) > target_chars:
+                    orig_len = len(content)
+                    m["content"] = compact_text(content, target_chars)
+                    did_compact = True
+                    self.store.event(run_id, "preflight_compacted", step.id,
+                                     from_chars=orig_len, to_chars=len(m["content"]), target=target_chars)
+            if did_compact:
+                ok_after, tokens_after, _ = fits(model, messages, step.max_tokens)
+                if ok_after:
+                    return model
+                tokens = tokens_after
         if step.long_model and step.long_model != model:
             ok2, _, ctx2 = fits(step.long_model, messages, step.max_tokens)
             if ok2:

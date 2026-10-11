@@ -68,6 +68,24 @@ def acquire_instance_lock():
         return None
 
 
+def release_instance_lock(f=None) -> None:
+    """Explicitly releases and closes the instance lock file."""
+    global _instance_lock
+    target = f if f is not None else _instance_lock
+    if target is not None:
+        try:
+            target.seek(0)
+            msvcrt.locking(target.fileno(), msvcrt.LK_UNLCK, 1)
+        except Exception:
+            _swallowed("ticker.release_instance_lock")
+        try:
+            target.close()
+        except Exception:
+            _swallowed("ticker.release_instance_lock")
+        if target is _instance_lock:
+            _instance_lock = None
+
+
 def activate_existing_instance() -> None:
     """Signals the existing running instance to reveal itself and brings it to foreground."""
     try:
@@ -1231,6 +1249,7 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
                 TRIGGER_FILE.unlink()
         except Exception:
             _swallowed("ticker.TickerApp.quit")
+        release_instance_lock()
         try:
             self.root.destroy()
         except Exception:
@@ -1283,6 +1302,7 @@ def main() -> None:
         root.mainloop()
     finally:
         log_event("mainloop ended")
+        release_instance_lock()
 
 
 if __name__ == "__main__":

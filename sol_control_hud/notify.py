@@ -190,10 +190,10 @@ class Notifier:
         for n in fresh:
             self.last_sent[n.key or n.kind] = now
         if busy:
-            self.held += fresh
+            self.held = (self.held + fresh)[-100:]
             return []
         if self.held:
-            held, self.held = self.held + fresh, []
+            held, self.held = (self.held + fresh)[-100:], []
             if len(held) == 1:
                 return held
             level = "error" if any(h.level == "error" for h in held) else "warning" if any(h.level == "warning" for h in held) else "info"
