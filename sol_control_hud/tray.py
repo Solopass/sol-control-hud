@@ -106,7 +106,7 @@ class Tray:
             u32.DispatchMessageW(ctypes.byref(msg))
 
     def _load_icon(self, hinst):
-        r"""The app's own icon (assets\sol.ico at the tray size), else the given shell32 icon, else Windows' default."""
+        """The app's own icon (assets/sol.ico at the tray size), else the given shell32 icon, else Windows' default."""
         from pathlib import Path
         ico = Path(__file__).resolve().parent / "assets" / "sol.ico"
         if ico.exists():
