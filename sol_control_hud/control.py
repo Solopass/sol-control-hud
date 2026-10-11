@@ -359,3 +359,67 @@ def chain_op(name: str, op: str, chains_dir: Path | None = None) -> str:
         raise ControlError(f"unknown action {op!r}")
     chain_note.set_chain_status(paths[name], CHAIN_OPS[op])
     return CHAIN_OPS[op]
+
+
+def chain_details(name: str, chains_dir: Path | None = None) -> dict:
+    """Returns detailed execution telemetry, latest run status, step events, and log tail for a chain."""
+    paths = _chain_paths(chains_dir)
+    if name not in paths:
+        raise ControlError("no such chain")
+    p = paths[name]
+    meta = _front(p)
+    status = str(meta.get("status") or "draft").lower()
+    reason = str(meta.get("reason") or meta.get("error") or meta.get("problem") or meta.get("waiting") or "")
+
+    from .chains.store import Store
+    data_dir = Path(os.environ.get("SOL_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
+    store_file = data_dir / "runs.sqlite"
+    run_info = None
+    if store_file.is_file():
+        try:
+            st = Store(store_file)
+            r = st.latest_run(str(p)) or st.latest_run(name)
+            if r:
+                events = st.events(r["id"])
+                saved = st.saved_outputs(r["id"])
+                run_info = {
+                    "id": r["id"],
+                    "status": r["status"],
+                    "error": r["error"],
+                    "created_at": r["created_at"],
+                    "started_at": r.get("started_at"),
+                    "finished_at": r.get("finished_at"),
+                    "steps_done": list(saved.keys()),
+                    "events": events[-10:],
+                }
+        except Exception:
+            pass
+
+    log_tail: list[str] = []
+    chains_log = Path(os.environ.get("SOL_LLM_DIR", r"D:\AI\Cache\llm")) / "chains.log"
+    if chains_log.is_file():
+        try:
+            with open(chains_log, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 32768))
+                text = f.read().decode("utf-8", errors="replace")
+            for line in text.splitlines():
+                if name.lower() in line.lower():
+                    log_tail.append(line.strip())
+            log_tail = log_tail[-12:]
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "name": name,
+        "path": str(p),
+        "status": status,
+        "reason": reason,
+        "model": meta.get("model") or "",
+        "schedule": str(meta.get("schedule") or ""),
+        "run": run_info,
+        "log_tail": log_tail,
+    }
+

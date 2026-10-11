@@ -206,3 +206,36 @@ def test_ask_now_through_the_dashboard(dirs, desk, monkeypatch):
     from sol_control_hud.hub import Hub
     r = Hub.do_action(Hub.__new__(Hub), "ask", "", {"question": "q", "model": "sol-fast", "now": True})
     assert not r["ok"] and "Away mode" in r["why"]
+
+
+def test_chain_details(dirs, tmp_path, monkeypatch):
+    from sol_control_hud.chains.store import Store
+    _, _, chains = dirs
+    p = chains / "Summarizer.md"
+    p.write_text("---\nstatus: failed\nreason: missing required key\nmodel: sol-smart\n---\n\n## Step\nHi\n")
+
+    db_path = tmp_path / "runs.sqlite"
+    st = Store(db_path)
+    rid = st.create_run("Summarizer", {"file": "test.txt"}, source=str(p))
+    st.claim(rid)
+    st.set_status(rid, "failed", error="Validation error in step extract")
+    st.event(rid, "step_started", "extract")
+    st.event(rid, "step_failed", "extract", error="Validation error in step extract")
+
+    monkeypatch.setenv("SOL_DATA_DIR", str(tmp_path))
+
+    d = control.chain_details("Summarizer")
+    assert d["ok"] is True
+    assert d["name"] == "Summarizer"
+    assert d["status"] == "failed"
+    assert d["reason"] == "missing required key"
+    assert d["model"] == "sol-smart"
+    assert d["run"] is not None
+    assert d["run"]["id"] == rid
+    assert d["run"]["status"] == "failed"
+    assert "Validation error" in d["run"]["error"]
+    assert len(d["run"]["events"]) >= 2
+
+    with pytest.raises(control.ControlError, match="no such chain"):
+        control.chain_details("NonExistent")
+

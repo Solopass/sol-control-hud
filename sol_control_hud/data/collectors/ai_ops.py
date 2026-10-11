@@ -42,6 +42,7 @@ def parse_router_events(text: str) -> dict:
     """Extract inference operations, speed, and status from llama.cpp router logs."""
     slots: dict[int, dict] = {}
     last_completed: dict | None = None
+    completed_history: list[dict] = []
     last_port: int | None = None
     last_model_proxy: str | None = None
 
@@ -133,6 +134,7 @@ def parse_router_events(text: str) -> dict:
                 st["phase"] = "completed"
                 st["total_tokens"] = int(m_rel.group(4))
                 last_completed = st
+                completed_history.append(dict(st))
             else:
                 last_completed = {
                     "active": False,
@@ -141,12 +143,14 @@ def parse_router_events(text: str) -> dict:
                     "total_tokens": int(m_rel.group(4)),
                     "phase": "completed",
                 }
+                completed_history.append(dict(last_completed))
 
     active_slot = next((s for s in slots.values() if s.get("active")), None)
     return {
         "active": active_slot is not None,
         "current": active_slot,
         "last": last_completed,
+        "completed_history": completed_history[-20:],
         "proxied_model": last_model_proxy,
     }
 
@@ -201,6 +205,19 @@ def sample_ai_ops(procs: dict | None = None, router_log: Path = ROUTER_LOG, thou
     active_port = cur.get("port")
     active_model = by_port.get(active_port) if active_port else events.get("proxied_model") or thought.get("model")
 
+    history = []
+    for h in events.get("completed_history", []):
+        tps = h.get("eval_tps") or h.get("tg_tps")
+        if tps is not None:
+            history.append({
+                "tps": tps,
+                "tokens": h.get("total_tokens") or h.get("eval_tokens") or h.get("n_gen") or 0,
+                "prompt_tps": h.get("prompt_tps"),
+                "prompt_ms": h.get("prompt_ms"),
+                "draft_rate": h.get("draft_rate"),
+                "slot": h.get("slot"),
+            })
+
     is_busy = bool(events.get("active") or thought.get("active"))
     phase = thought.get("phase") if thought.get("active") else (cur.get("phase") or ("busy" if is_busy else "idle"))
 
@@ -210,6 +227,7 @@ def sample_ai_ops(procs: dict | None = None, router_log: Path = ROUTER_LOG, thou
         "phase": phase,
         "model": active_model or thought.get("model"),
         "task": thought.get("task") or (f"task #{cur.get('task')}" if cur.get("task") else None),
+        "history": history,
         "speed": {
             "tg_tps": cur.get("tg_tps") or last.get("eval_tps"),
             "tg_3s_tps": cur.get("tg_3s_tps"),

@@ -37,6 +37,9 @@ def test_parse_completed_router_log():
     assert last["draft_accepted"] == 171
     assert last["draft_generated"] == 296
     assert last["draft_mean_len"] == 3.31
+    assert len(res["completed_history"]) == 1
+    assert res["completed_history"][0]["eval_tps"] == 68.5
+    assert res["completed_history"][0]["draft_rate"] == 0.578
 
 
 def test_parse_active_router_log():

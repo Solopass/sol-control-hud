@@ -872,6 +872,14 @@ class Hub:
             except control.ControlError as e:
                 return {"ok": False, "why": str(e)}
 
+        @app.get("/api/chain-details")
+        def chain_details(name: str = "") -> dict:
+            from . import control
+            try:
+                return control.chain_details(name)
+            except control.ControlError as e:
+                return {"ok": False, "why": str(e)}
+
         @app.get("/api/vaults")
         def vaults_list() -> dict:
             from .data.collectors import notes

@@ -561,11 +561,82 @@ function renderAiThinking(p) {
     }
   }
 
+  renderThinkSparkline(ops.history || [], p.speed || {});
+
   const term = $('thinkTerminal');
   if (term && thinkAutoScroll && th.active) {
     term.scrollTop = term.scrollHeight;
   }
 }
+
+function renderThinkSparkline(history, speedObj) {
+  const wrap = $('thinkSparkWrap');
+  const statsEl = $('thinkSparkStats');
+  if (!wrap) return;
+
+  let pts = [];
+  if (Array.isArray(history) && history.length) {
+    pts = history.map((h) => ({
+      tps: h.tps,
+      tokens: h.tokens || 0,
+      draft_rate: h.draft_rate,
+      prompt_tps: h.prompt_tps,
+    }));
+  } else if (Array.isArray(speedObj?.recent) && speedObj.recent.length) {
+    pts = speedObj.recent.map((s) => ({ tps: s, tokens: speedObj.tokens || 0, draft_rate: null, prompt_tps: null }));
+  }
+
+  if (!pts.length) {
+    if (statsEl) statsEl.textContent = 'waiting for completed inference';
+    setHTML(wrap, '<div class="dim small" style="padding:6px 0;">No inference speed samples recorded yet this session.</div>');
+    return;
+  }
+
+  const tpsVals = pts.map((p) => p.tps);
+  const min = Math.min(...tpsVals);
+  const max = Math.max(...tpsVals);
+  const avg = (tpsVals.reduce((a, b) => a + b, 0) / tpsVals.length).toFixed(1);
+
+  if (statsEl) {
+    statsEl.textContent = `min: ${min} · avg: ${avg} · max: ${max} tok/s (${pts.length} run${pts.length === 1 ? '' : 's'})`;
+  }
+
+  const w = 400, h = 42;
+  const padX = 14, padY = 8;
+  const effectiveW = w - padX * 2;
+  const effectiveH = h - padY * 2;
+  const rangeY = (max - min) || (max * 0.2) || 10;
+  const minY = Math.max(0, min - rangeY * 0.1);
+  const maxY = max + rangeY * 0.1;
+  const spanY = maxY - minY || 1;
+
+  const coords = pts.map((pt, i) => {
+    const x = padX + (pts.length === 1 ? effectiveW / 2 : (i / (pts.length - 1)) * effectiveW);
+    const y = h - padY - ((pt.tps - minY) / spanY) * effectiveH;
+    return { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, pt };
+  });
+
+  const linePoints = coords.map((c) => `${c.x},${c.y}`).join(' ');
+  const polyPoints = `${coords[0].x},${h - 2} ${linePoints} ${coords[coords.length - 1].x},${h - 2}`;
+
+  const dots = coords.map((c, i) => {
+    const tip = `${c.pt.tps} tok/s${c.pt.tokens ? ' · ' + c.pt.tokens + ' tok' : ''}${c.pt.draft_rate != null ? ' · ' + (c.pt.draft_rate * 100).toFixed(1) + '% draft' : ''}`;
+    return `<circle cx="${c.x}" cy="${c.y}" r="3.5" class="think-spark-dot"><title>Sample #${i + 1}: ${tip}</title></circle>`;
+  }).join('');
+
+  const svg = `<svg class="think-sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
+    + `<defs><linearGradient id="thinkSparkGrad" x1="0" y1="0" x2="0" y2="1">`
+    + `<stop offset="0%" stop-color="var(--cyan)" stop-opacity="0.35"/>`
+    + `<stop offset="100%" stop-color="var(--cyan)" stop-opacity="0.0"/>`
+    + `</linearGradient></defs>`
+    + `<polygon points="${polyPoints}" fill="url(#thinkSparkGrad)"/>`
+    + `<polyline points="${linePoints}" fill="none" stroke="var(--cyan)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`
+    + dots
+    + `</svg>`;
+
+  setHTML(wrap, svg);
+}
+
 
 function renderAi(p) {
   const s = p.snapshot, el = $('aiModel');
@@ -979,8 +1050,10 @@ async function loadControl() {
     return `<div class="crow"><span>${esc(c.name)}</span><span class="${statusClass}">${statusLabel}</span>` +
       `<span class="meta">${metaHtml}</span><span class="acts">` +
       `<button class="mini ghost sched-btn" data-sched="${esc(c.name)}" title="Change when it runs">⏱ Sched</button>` +
+      `<button class="mini ${c.reason ? 'warn' : 'ghost'} inspect-btn" data-inspect="${esc(c.name)}" title="Inspect run events and log tail">🔍 Inspect</button>` +
       ops.map((o) => `<button class="mini${o === 'swap_run' ? ' swap-run' : ''}" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o] || o}</button>`).join('') +
-      (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>';
+      (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>' +
+      (inspectChain === c.name ? chainDetailsHtml(c) : '');
   }).join('') || '<div class="empty">no chain notes in 1Notebook\\Chains</div>');
 }
 
@@ -1072,7 +1145,60 @@ function schedEditor(c) {
     (isPaused ? '<span class="dim small" style="margin-left:6px">⚠️ paused: Click "Save &amp; Activate" or Resume it for the schedule to take effect</span>' : '') + '</div>';
 }
 
+let inspectChain = null;
+const chainDetailsCache = {};
+
+function chainDetailsHtml(c) {
+  const d = chainDetailsCache[c.name];
+  if (!d) {
+    return `<div class="chain-details-box"><div class="dim small">Loading execution logs & events for ${esc(c.name)}…</div></div>`;
+  }
+  const run = d.run;
+  const isErr = Boolean(d.reason || (run && run.status !== 'succeeded'));
+  let runSummary = '';
+  if (run) {
+    const dur = (run.started_at && run.finished_at) ? ` · ${(run.finished_at - run.started_at).toFixed(1)}s` : '';
+    runSummary = `<span class="dim small">Run #${run.id} (${run.status}${dur})</span>`;
+  }
+  let errMsg = '';
+  if (d.reason || run?.error) {
+    errMsg = `<div class="chain-err-msg">⚠️ <b>Error:</b> ${esc(run?.error || d.reason)}</div>`;
+  }
+
+  let eventsHtml = '';
+  if (run && Array.isArray(run.events) && run.events.length) {
+    eventsHtml = `<div class="chain-events-list">` + run.events.map((ev) => {
+      const cls = ev.kind || '';
+      const stepTxt = ev.step ? `<b>[${esc(ev.step)}]</b> ` : '';
+      const evData = ev.data ? Object.entries(ev.data).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ') : '';
+      return `<div class="chain-event-row ${cls}">`
+        + `<span class="dim" style="font-size:10px;">${new Date(ev.at * 1000).toLocaleTimeString()}</span>`
+        + `<span>${stepTxt}${esc(ev.kind)}</span>`
+        + `<span class="dim small">${esc(evData)}</span></div>`;
+    }).join('') + `</div>`;
+  }
+
+  let logHtml = '';
+  if (Array.isArray(d.log_tail) && d.log_tail.length) {
+    logHtml = `<pre class="chain-log-tail">${esc(d.log_tail.join('\n'))}</pre>`;
+  }
+
+  return `<div class="chain-details-box ${isErr ? '' : 'is-ok'}" data-for="${esc(c.name)}">`
+    + `<div class="chain-details-header">`
+    + `<b>🔍 ${esc(c.name)} Execution Details</b>${runSummary}`
+    + `<div style="display:flex;gap:4px;align-items:center;">`
+    + `<button class="mini go" data-chain="${esc(c.name)}" data-op="now" title="Run now">▶ Run now</button>`
+    + `<button class="mini swap-run" data-chain="${esc(c.name)}" data-op="swap_run" title="Swap & Run">⚡ Swap & Run</button>`
+    + `<button class="mini ghost" data-close-inspect="${esc(c.name)}" title="Close details">✕ Close</button>`
+    + `</div></div>`
+    + errMsg
+    + (eventsHtml ? `<div class="dim small" style="margin-top:2px;"><b>Recent Events:</b></div>${eventsHtml}` : '')
+    + (logHtml ? `<div class="dim small" style="margin-top:2px;"><b>Engine Log Tail:</b></div>${logHtml}` : '')
+    + `</div>`;
+}
+
 function openScheduleEditor(chainName) {
+  inspectChain = null;
   const c = (control?.chains || []).find((x) => x.name === chainName);
   document.querySelectorAll('.sched-edit').forEach((el) => el.remove());
   if (!c || schedEdit === c.name) { schedEdit = null; return; }
@@ -1094,6 +1220,34 @@ const cChains = $('c-chains');
 if (cChains && !cChains._schedInit) {
   cChains._schedInit = true;
   cChains.addEventListener('click', async (e) => {
+    const ins = e.target.closest('[data-inspect]');
+    if (ins) {
+      e.stopPropagation();
+      const name = ins.dataset.inspect;
+      if (inspectChain === name) {
+        inspectChain = null;
+        loadControl();
+        return;
+      }
+      inspectChain = name;
+      schedEdit = null;
+      loadControl();
+      try {
+        const d = await (await fetch(`/api/chain-details?name=${encodeURIComponent(name)}`)).json();
+        if (d.ok) {
+          chainDetailsCache[name] = d;
+          loadControl();
+        }
+      } catch (_) {}
+      return;
+    }
+    const closeIns = e.target.closest('[data-close-inspect]');
+    if (closeIns) {
+      e.stopPropagation();
+      inspectChain = null;
+      loadControl();
+      return;
+    }
     const open = e.target.closest('[data-sched]');
     if (open) {
       e.stopPropagation();
