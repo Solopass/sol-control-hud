@@ -88,6 +88,8 @@ def test_chain_controls_change_only_the_status(dirs):
     assert "status: paused" in p.read_text() and "schedule: weekly Sun 20:00" in p.read_text()
     assert control.chain_op("Weekly digest", "resume") == "done"
     assert control.chain_op("Weekly digest", "run") == "queued"
+    assert control.chain_op("Weekly digest", "swap_run") == "queued"
+    assert "skip_wait: 'true'" in p.read_text() or "skip_wait: true" in p.read_text()
     assert "ok" in control.chain_result("Weekly digest")
     with pytest.raises(control.ControlError):
         control.chain_op("Nope", "run")

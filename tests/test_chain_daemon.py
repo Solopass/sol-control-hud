@@ -309,3 +309,16 @@ def test_run_now_starts_a_waiting_chain_once(env):
     cn.set_chain_status(p, "queued")
     d.tick()
     assert d.current is None                                                # the next run waits politely again
+
+
+def test_multi_step_chain_own_model_swap(env):
+    chains, store, ctx, clock, make, _ = env
+    d = make()
+    router = FakeRouter(loaded="sol-fast")
+    # External usage: polite blocker triggered
+    assert "you're using sol-fast" in d._turn_blocker(router, "sol-smart")
+
+    # Within same active chain run: step 1 used sol-fast, step 2 needs sol-smart
+    d.current = {"path": str(chains / "Multi.md"), "last_model": "sol-fast"}
+    assert d._turn_blocker(router, "sol-smart") is None  # no 10-minute wait on its own model!
+

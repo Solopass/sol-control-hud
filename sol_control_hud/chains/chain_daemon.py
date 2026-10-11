@@ -40,7 +40,7 @@ from ..paths import DATA_DIR
 LLM_DIR = Path(os.environ.get("SOL_LLM_DIR", r"D:\AI\Cache\llm"))
 QUEUE_RUNNING = Path(os.environ.get("SOL_QUEUE_RUNNING", r"D:\AI\Queue\running"))
 STATE_FILE = DATA_DIR / "chains-state.json"
-IDLE_MINUTES = 10
+IDLE_MINUTES = int(os.environ.get("SOL_CHAIN_IDLE_MINUTES", "10"))
 TICK = 10.0
 RETRY_WAITING = 60.0
 STABLE_SECONDS = 60
@@ -217,6 +217,7 @@ class Daemon:
                 if why is None:
                     if self.current is not None:
                         self.current.pop("waiting", None)
+                        self.current["last_model"] = model
                     return
                 if why == "OFF":
                     raise ModelUnavailable("the game guard has the AI off; the chain continues after the game")
@@ -248,12 +249,15 @@ class Daemon:
         except Exception:  # noqa: BLE001 - the router is restarting; the call itself will say so
             return None
         idle = self.idle() >= IDLE_MINUTES * 60
+        in_current_chain = bool(self.current and self.current.get("last_model") == loaded)
         if loaded not in (None, main):
-            # Another model is loaded. Never poll it (/slots counts as use and would stop its idle unload: seen 09-25,
-            # a chain waited on sol-smart while keeping it loaded). Swap only when you're idle.
+            # Another model is loaded. If it was loaded by this active chain itself for an earlier step,
+            # allow the model swap so the multi-step chain can complete without halting.
+            if in_current_chain:
+                return None
             if idle:
                 return None
-            return f"you're using {loaded}; waiting until it unloads or you've been idle {IDLE_MINUTES} min"
+            return f"you're using {loaded}; click 'Swap & Run' to switch, or waits until idle {IDLE_MINUTES} min"
         try:
             if loaded and client.busy(loaded):  # our own model: is it answering you right now?
                 return f"{loaded} is answering someone else"
@@ -261,7 +265,7 @@ class Daemon:
             return None
         if loaded == main or main == "sol-fast" or idle:  # only loading a big model while you're at the PC has to wait
             return None
-        return f"you're using {loaded}; waiting until it's free or you've been idle {IDLE_MINUTES} min" if loaded \
+        return f"you're using {loaded}; click 'Swap & Run' to switch, or waits until idle {IDLE_MINUTES} min" if loaded \
             else f"{model} would be loaded while you're at the PC; waiting until you've been idle {IDLE_MINUTES} min"
 
     # ---- scanning

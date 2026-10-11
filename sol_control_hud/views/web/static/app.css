@@ -381,6 +381,8 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .dot.warn { background:var(--amber); opacity:1; }
 .dot.bad { background:var(--red); opacity:1; }
 button.go { background:color-mix(in srgb, var(--cyan) 20%, var(--card)); border-color:color-mix(in srgb, var(--cyan) 55%, transparent); }
+button.swap-run { background:color-mix(in srgb, var(--amber) 24%, var(--card)); border-color:color-mix(in srgb, var(--amber) 60%, transparent); color:var(--text); font-weight:600; }
+button.swap-run:hover { border-color:var(--amber); color:var(--amber); }
 @media (max-width:760px) {
   .jrow { grid-template-columns:10px minmax(0, 1fr); }
   .jrow .acts { grid-column:2; justify-content:flex-start; }

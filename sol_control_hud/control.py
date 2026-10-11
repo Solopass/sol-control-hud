@@ -336,9 +336,19 @@ def chain_op(name: str, op: str, chains_dir: Path | None = None) -> str:
     paths = _chain_paths(chains_dir)
     if name not in paths:
         raise ControlError("no such chain")
-    if op == "now":
-        # "Run now" on a waiting chain: one run that skips the polite waits (chain_daemon.skip_wait). A running one keeps
-        # its status; anything else is queued as well.
+    if op in ("now", "swap_run"):
+        # "Run now" or "Swap & Run" on a waiting chain: one run that skips the polite waits (chain_daemon.skip_wait).
+        if op == "swap_run":
+            try:
+                from . import models_ctl
+                from .data.collectors.engines import _client
+                r = _client().get("http://127.0.0.1:11440/models", timeout=1.0)
+                if r.status_code == 200:
+                    loaded = [m["id"] for m in (r.json().get("data") or []) if m.get("status") in ("loaded", "loading")]
+                    if loaded:
+                        models_ctl.unload_all(loaded)
+            except Exception:
+                pass
         meta = _front(paths[name])
         if str(meta.get("status") or "").lower() == "running":
             chain_note.set_note_props(paths[name], {"skip_wait": "true"})

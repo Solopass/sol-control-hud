@@ -877,7 +877,7 @@ $('modalSaveBtn').onclick = async () => {
 };
 
 const OPS = { queued: ['now', 'cancel'], running: ['cancel'], waiting: ['now', 'cancel'], paused: ['run', 'resume'], cancel: [], };
-const OP_LABEL = { run: 'Run now', now: '⏭ Run now', pause: 'Pause', resume: 'Resume', cancel: 'Cancel' };
+const OP_LABEL = { run: 'Queue Run', now: '▶ Run now', swap_run: '⚡ Swap & Run', pause: 'Pause', resume: 'Resume', cancel: 'Cancel' };
 let control = null;
 async function loadControl() {
   if (document.hidden) return;
@@ -904,13 +904,24 @@ async function loadControl() {
   initChainLauncher();
   if (schedEdit) return;                     // don't redraw under an open schedule editor
   setHTML($('chainList'), control.chains.map((c) => {
-    const ops = OPS[c.status] || ['run', 'pause'];
+    let ops = OPS[c.status] || ['run', 'pause'];
+    if (c.status === 'running' && c.active_waiting) {
+      ops = ['swap_run', 'cancel'];
+    }
     const metaParts = [];
-    if (c.active_waiting) metaParts.push(`<span style="color:var(--amber)" title="${esc(c.active_waiting)}">⏳ ${esc(c.active_waiting)}</span>`);
-    else if (c.blocked) metaParts.push(`<span style="color:var(--amber)" title="${esc(c.blocked)}">⏳ ${esc(c.blocked)}</span>`);
-    else if (c.reason) metaParts.push(`<span style="color:var(--red)" title="${esc(c.reason)}">⚠️ ${esc(c.reason)}</span>`);
-    else if (c.next_run) metaParts.push(`<span class="dim">📅 ${esc(nextLabel(c.next_run))}</span>`);
-    else if (c.schedule) metaParts.push(`⏱ ${esc(c.schedule)}`);
+    if (c.active_waiting) {
+      metaParts.push(`<span style="color:var(--amber)" title="${esc(c.active_waiting)}">⏳ ${esc(c.active_waiting)}</span> ` +
+        `<button class="mini swap-run" data-chain="${esc(c.name)}" data-op="swap_run" title="Unload conflicting model and run now">⚡ Swap & Run</button>`);
+    } else if (c.blocked) {
+      metaParts.push(`<span style="color:var(--amber)" title="${esc(c.blocked)}">⏳ ${esc(c.blocked)}</span> ` +
+        `<button class="mini go" data-chain="${esc(c.name)}" data-op="now" title="Run immediately without waiting">▶ Run now</button>`);
+    } else if (c.reason) {
+      metaParts.push(`<span style="color:var(--red)" title="${esc(c.reason)}">⚠️ ${esc(c.reason)}</span>`);
+    } else if (c.next_run) {
+      metaParts.push(`<span class="dim">📅 ${esc(nextLabel(c.next_run))}</span>`);
+    } else if (c.schedule) {
+      metaParts.push(`⏱ ${esc(c.schedule)}`);
+    }
     if (c.watch) metaParts.push('watches a folder');
     if (c.model) metaParts.push(esc(c.model));
     const metaHtml = metaParts.join(' · ');
@@ -919,7 +930,7 @@ async function loadControl() {
     return `<div class="crow"><span>${esc(c.name)}</span><span class="${statusClass}">${statusLabel}</span>` +
       `<span class="meta">${metaHtml}</span><span class="acts">` +
       `<button class="mini ghost" data-sched="${esc(c.name)}" title="Change when it runs">⏱</button>` +
-      ops.map((o) => `<button class="mini" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o]}</button>`).join('') +
+      ops.map((o) => `<button class="mini${o === 'swap_run' ? ' swap-run' : ''}" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o] || o}</button>`).join('') +
       (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>';
   }).join('') || '<div class="empty">no chain notes in 1Notebook\\Chains</div>');
 }
@@ -935,7 +946,7 @@ function initChainLauncher() {
       const name = sel ? sel.value : null;
       if (!name) return;
       btnRun.disabled = true;
-      const r = await post('/api/action', { action: 'chain', target: name, op: 'now' });
+      const r = await post('/api/action', { action: 'chain', target: name, op: 'swap_run' });
       toast(r ? r.why : `Queued ${name} (running now)`);
       btnRun.disabled = false;
       loadControl();

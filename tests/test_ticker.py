@@ -943,6 +943,11 @@ def test_switch_ai_model_dispatch(monkeypatch, tmp_path):
     monkeypatch.setattr(ticker, "SETTINGS_FILE", fake_settings)
     monkeypatch.setattr(ticker, "TRIGGER_FILE", fake_trigger)
 
+    import types
+    sync = types.SimpleNamespace(Thread=lambda target=None, daemon=None, name=None, args=(), kwargs=None:
+                                 types.SimpleNamespace(start=lambda: target(*args, **(kwargs or {}))))
+    monkeypatch.setattr(ticker, "threading", sync)
+
     root = tk.Tk()
     root.withdraw()
     try:
