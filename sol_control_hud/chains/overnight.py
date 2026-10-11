@@ -27,8 +27,8 @@ PRESETS: dict[str, dict] = {
     },
     "code_review": {
         "label": "Code Reviews",
-        "description": "Bug hunt across all workspace projects",
-        "chains": ["Bug hunt sol-control-hud", "Bug hunt speed-reading", "Bug hunt media-api", "Bug hunt kiiy2k"],
+        "description": "Deep review across all workspace projects",
+        "chains": ["Deep review sol-control-hud", "Deep review speed-reading", "Deep review media-api", "Deep review kiiy2k"],
     },
     "vault_only": {
         "label": "Vault Only",
@@ -168,21 +168,40 @@ def check_and_advance(chains_dir: Path | None = None) -> dict:
 
     # Check if current chain has completed
     is_current_done = True
+    current_status = "done"
     if current_path and current_path.is_file():
         try:
             c = chain_note.load_chain(current_path)
-            # If still queued or running, it is not done yet
-            if c.status in ("queued", "running"):
+            current_status = getattr(c, "status", "done")
+            # If still queued, running, or waiting, it is not done yet
+            if current_status in ("queued", "running", "waiting"):
                 is_current_done = False
         except Exception:
             is_current_done = True
+
+    # Also check live chains.json to ensure daemon is not actively processing or holding this chain
+    if is_current_done and current:
+        try:
+            cj_path = LLM_DIR / "chains.json"
+            if cj_path.is_file():
+                cj = json.loads(cj_path.read_text(encoding="utf-8"))
+                running_info = cj.get("running")
+                if running_info and running_info.get("chain") == current:
+                    is_current_done = False
+                pending = [p.get("chain") for p in cj.get("pending", []) if isinstance(p, dict)]
+                if current in pending:
+                    is_current_done = False
+        except Exception:
+            pass
 
     if not is_current_done:
         return state
 
     # Mark current chain as completed
-    if current and current not in state["completed"]:
-        state["completed"].append(current)
+    if current:
+        if current not in state["completed"]:
+            state["completed"].append(current)
+        state.setdefault("results", {})[current] = current_status
 
     queue = state.get("queue") or []
     if queue:
@@ -212,6 +231,7 @@ def check_and_advance(chains_dir: Path | None = None) -> dict:
             report_file = generate_night_summary(
                 completed=state.get("completed", []),
                 started_at=state.get("started_at", time.time()),
+                results=state.get("results", {}),
             )
             state["report"] = str(report_file)
         except Exception as e:
@@ -237,7 +257,7 @@ def cancel_overnight() -> dict:
     return {"ok": True, "why": "Overnight session cancelled", "state": state}
 
 
-def generate_night_summary(completed: list[str], started_at: float) -> Path:
+def generate_night_summary(completed: list[str], started_at: float, results: dict | None = None) -> Path:
     """Generates a summary markdown report of the overnight run in reports/."""
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     today = datetime.now().strftime("%Y-%m-%d")
@@ -253,12 +273,14 @@ def generate_night_summary(completed: list[str], started_at: float) -> Path:
         "",
         "## Chains Executed",
     ]
+    res_map = results or {}
     for c in completed:
-        lines.append(f"- **{c}**: Completed successfully")
+        st = res_map.get(c, "completed")
+        lines.append(f"- **{c}**: {st}")
 
     lines.append("")
     lines.append("## Results & Notes")
-    lines.append(f"- Full chain outputs saved to `1Notebook/Chains/Results/`")
+    lines.append("- Full chain outputs saved to `1Notebook/Chains/Results/`")
     lines.append("")
 
     report_file.write_text("\n".join(lines), encoding="utf-8")

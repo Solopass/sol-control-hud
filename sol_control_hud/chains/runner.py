@@ -405,7 +405,7 @@ class Runner:
             did_compact = False
             for m in messages:
                 content = m.get("content", "")
-                if m.get("role") == "user" and len(content) > target_chars:
+                if m.get("role") == "user" and isinstance(content, str) and len(content) > target_chars:
                     orig_len = len(content)
                     m["content"] = compact_text(content, target_chars)
                     did_compact = True
