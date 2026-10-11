@@ -475,6 +475,33 @@ def test_compact_text_and_step_compaction(store):
     assert any(ev["kind"] == "compacted" and ev["step"] == "step1" for ev in events)
 
 
+def test_compact_after_directive_and_line_boundary_snapping(store):
+    from sol_control_hud.chains.workflow import parse
+    # Test line-boundary snapping in structured text
+    lines = [
+        "## Summary",
+        "- Item 1: Critical architectural finding",
+        "- Item 2: Secondary diagnostic metric",
+    ] + [f"- Detail line {i} with some background text" for i in range(20)] + [
+        "## Next Steps",
+        "- Final recommendation 1",
+        "- Final recommendation 2",
+    ]
+    doc_text = "\n".join(lines)
+    compacted = compact_text(doc_text, max_chars=180)
+    assert "[Compact memory:" in compacted
+    assert "## Summary" in compacted
+    assert "- Item 1: Critical architectural finding" in compacted
+    assert "Final recommendation 2" in compacted
+
+    # Test compact_after in workflow parse
+    doc = {"name": "compact_after_workflow", "steps": [
+        {"id": "step_a", "model": "m", "prompt": "prompt", "compact_after": 120}
+    ]}
+    wf = parse(doc)
+    assert wf.steps[0].compact == 120
+
+
 def test_abort_inference_flag_stops_run(store, tmp_path, monkeypatch):
     from sol_control_hud.chains import runner
     llm_dir = tmp_path / "llm"

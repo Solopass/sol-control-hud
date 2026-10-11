@@ -44,16 +44,37 @@ MAX_RETRY_TOKENS = 16384  # ceiling when a step that ran out of tokens is retrie
 
 
 def compact_text(text: str, max_chars: int = 2000) -> str:
-    """Condenses text exceeding max_chars to preserve key headings, bullets, and findings."""
+    """Condenses text exceeding max_chars to preserve key headings, bullets, and findings cleanly."""
     if not isinstance(text, str) or len(text) <= max_chars:
         return text
-    head_len = int(max_chars * 0.6)
-    tail_len = int(max_chars * 0.35)
-    omitted = len(text) - (head_len + tail_len)
+    head_target = int(max_chars * 0.6)
+    tail_target = int(max_chars * 0.35)
+
+    head_cut = head_target
+    nl_idx = text.rfind("\n", 0, head_target)
+    if nl_idx > int(head_target * 0.7):
+        head_cut = nl_idx
+    else:
+        dot_idx = text.rfind(". ", 0, head_target)
+        if dot_idx > int(head_target * 0.7):
+            head_cut = dot_idx + 1
+
+    tail_cut = len(text) - tail_target
+    nl_tail = text.find("\n", tail_cut)
+    if nl_tail != -1 and nl_tail < len(text) - int(tail_target * 0.7):
+        tail_cut = nl_tail + 1
+    else:
+        dot_tail = text.find(". ", tail_cut)
+        if dot_tail != -1 and dot_tail < len(text) - int(tail_target * 0.7):
+            tail_cut = dot_tail + 2
+
+    head_part = text[:head_cut].rstrip()
+    tail_part = text[tail_cut:].lstrip()
+    omitted = len(text) - (len(head_part) + len(tail_part))
     if omitted <= 0:
         return text[:max_chars]
     marker = f"\n\n... [Compact memory: {omitted} characters omitted] ...\n\n"
-    return text[:head_len].rstrip() + marker + text[-tail_len:].lstrip()
+    return head_part + marker + tail_part
 
 
 @dataclass

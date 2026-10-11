@@ -399,8 +399,9 @@ def to_workflow(chain: Chain) -> dict:
                 step["temperature"] = float(st["temperature"])
             except ValueError as e:
                 raise ChainError(f"{where}: temperature must be a number") from e
-        if "compact" in st:
-            c_val = str(st["compact"]).strip().lower()
+        compact_val = st.get("compact_after", st.get("compact after", st.get("compact")))
+        if compact_val is not None:
+            c_val = str(compact_val).strip().lower()
             step["compact"] = int(c_val) if c_val.isdigit() else (c_val in ("true", "yes", "on"))
         if s.checks:
             step["checks"] = s.checks

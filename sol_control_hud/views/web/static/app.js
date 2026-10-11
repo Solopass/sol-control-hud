@@ -376,6 +376,54 @@ function renderSpeed(p) {
 let thinkEventsInit = false;
 let thinkAutoScroll = true;
 
+function highlightSyntax(code) {
+  const escCode = esc(code);
+  const kw = '\\b(def|class|import|from|return|if|else|elif|for|in|while|try|except|finally|with|as|async|await|lambda|yield|function|const|let|var|switch|case|break|continue|default|true|false|null|None|True|False|undefined|new|this|select|where|insert|update|delete|echo|set|export)\\b';
+  const pattern = new RegExp(`(#.*|\\/\\/.*)|("(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'|` + '`(?:\\\\.|[^`\\\\])*`' + `)|(${kw})|(\\b\\d+(?:\\.\\d+)?\\b)`, 'g');
+  return escCode.replace(pattern, (match, cmt, str, kwMatch, num) => {
+    if (cmt) return `<span class="syn-cmt">${cmt}</span>`;
+    if (str) return `<span class="syn-str">${str}</span>`;
+    if (kwMatch) return `<span class="syn-kw">${kwMatch}</span>`;
+    if (num) return `<span class="syn-num">${num}</span>`;
+    return match;
+  });
+}
+
+function renderInlineMarkdown(str) {
+  return esc(str)
+    .replace(/`([^`]+)`/g, '<code class="syn-inline">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(?:^|\n)(#{1,3})\s+(.*?)(?=\n|$)/g, '<div class="syn-heading">$2</div>');
+}
+
+function renderMarkdownStream(text) {
+  if (!text) return '';
+  const codeBlockRegex = /```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g;
+  let lastIdx = 0;
+  let html = '';
+  let match;
+  while ((match = codeBlockRegex.exec(text)) !== null) {
+    const pre = text.slice(lastIdx, match.index);
+    if (pre) html += renderInlineMarkdown(pre);
+    const lang = (match[1] || 'code').trim();
+    const code = match[2];
+    html += `<div class="code-block"><div class="code-block-header"><span class="code-lang">${esc(lang)}</span></div><pre class="code-body"><code>${highlightSyntax(code)}</code></pre></div>`;
+    lastIdx = codeBlockRegex.lastIndex;
+  }
+  const rest = text.slice(lastIdx);
+  if (rest) {
+    const unclosed = rest.match(/^```([a-zA-Z0-9_-]*)\n?([\s\S]*)$/);
+    if (unclosed) {
+      const lang = (unclosed[1] || 'code').trim();
+      const code = unclosed[2];
+      html += `<div class="code-block"><div class="code-block-header"><span class="code-lang">${esc(lang)} (streaming…)</span></div><pre class="code-body"><code>${highlightSyntax(code)}</code></pre></div>`;
+    } else {
+      html += renderInlineMarkdown(rest);
+    }
+  }
+  return html;
+}
+
 function formatThinkingHtml(thoughtText, previewText, isThinking, thinkingS) {
   const parts = [];
   if (thoughtText && thoughtText.trim()) {
@@ -383,10 +431,11 @@ function formatThinkingHtml(thoughtText, previewText, isThinking, thinkingS) {
       ? '💭 Thinking in progress…'
       : `💭 Thought process (${thinkingS ? `${thinkingS}s` : 'completed'})`;
     const openAttr = isThinking ? ' open' : '';
-    parts.push(`<details class="think-fold"${openAttr}><summary>${summaryLabel}</summary><div class="think-fold-body">${esc(thoughtText)}</div></details>`);
+    const hint = isThinking ? 'streaming…' : 'click to expand';
+    parts.push(`<details class="think-fold"${openAttr}><summary>${summaryLabel} <span class="think-fold-hint">(${hint})</span></summary><div class="think-fold-body">${renderMarkdownStream(thoughtText)}</div></details>`);
   }
   if (previewText && previewText.trim()) {
-    parts.push(`<div class="answer-stream">${esc(previewText)}</div>`);
+    parts.push(`<div class="answer-stream">${renderMarkdownStream(previewText)}</div>`);
   }
   return parts.join('');
 }

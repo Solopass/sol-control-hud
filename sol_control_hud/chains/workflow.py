@@ -105,6 +105,8 @@ def parse(doc: dict) -> Workflow:
     for i, s in enumerate(doc["steps"]):
         if not isinstance(s, dict) or not s.get("id"):
             raise WorkflowError(f"step {i + 1} is missing 'id'")
+        if "compact_after" in s and "compact" not in s:
+            s["compact"] = s.pop("compact_after")
         unknown = set(s) - STEP_KEYS
         if unknown:
             raise WorkflowError(f"step '{s['id']}' has unknown setting(s) {sorted(unknown)}")
