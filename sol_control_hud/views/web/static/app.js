@@ -696,7 +696,7 @@ function renderChains(p) {
   setHTML($('chPending'), held + pend.map((x) => `<div class="item"><span>${esc(x.chain)}</span><span style="color:${x.blocked ? 'var(--amber)' : 'var(--cyan)'}">${esc(x.blocked || 'next')}${x.blocked ? skip(x.chain) : ''}</span></div>`).join('')
     || '<div class="empty">nothing waiting</div>');
   const sch = c.scheduled || [];
-  setHTML($('chSched'), sch.length ? sch.map((x) => `<div class="item"><span>${esc(x.chain)}</span><span>${esc(nextLabel(x.next))}</span></div>`).join('')
+  setHTML($('chSched'), sch.length ? sch.map((x) => `<div class="item"><span>${esc(x.chain)}</span><span>${esc(nextLabel(x.next))} <button class="mini ghost sched-btn" data-sched="${esc(x.chain)}" title="Edit schedule">⏱ Edit</button></span></div>`).join('')
     : '<div class="empty">no schedules</div>');
 }
 
@@ -978,7 +978,7 @@ async function loadControl() {
     const statusLabel = c.status === 'running' ? 'running ⚡' : esc(c.status);
     return `<div class="crow"><span>${esc(c.name)}</span><span class="${statusClass}">${statusLabel}</span>` +
       `<span class="meta">${metaHtml}</span><span class="acts">` +
-      `<button class="mini ghost" data-sched="${esc(c.name)}" title="Change when it runs">⏱</button>` +
+      `<button class="mini ghost sched-btn" data-sched="${esc(c.name)}" title="Change when it runs">⏱ Sched</button>` +
       ops.map((o) => `<button class="mini${o === 'swap_run' ? ' swap-run' : ''}" data-chain="${esc(c.name)}" data-op="${o}"${o === 'cancel' ? ' data-confirm="Cancel this chain? It stops after its current step; finished steps are kept."' : ''}>${OP_LABEL[o] || o}</button>`).join('') +
       (c.result_time ? `<button class="mini ghost" data-result="${esc(c.name)}" title="result from ${esc(c.result_time)}">Result</button>` : '') + '</span></div>';
   }).join('') || '<div class="empty">no chain notes in 1Notebook\\Chains</div>');
@@ -988,6 +988,7 @@ function initChainLauncher() {
   const sel = $('chainSelect');
   const btnRun = $('btnRunChainNow');
   const btnQueue = $('btnQueueChain');
+  const btnSched = $('btnEditChainSchedule');
   const btnRes = $('btnViewChainResults');
   if (btnRun && !btnRun._init) {
     btnRun._init = true;
@@ -1011,6 +1012,14 @@ function initChainLauncher() {
       toast(r ? r.why : `Queued ${name}`);
       btnQueue.disabled = false;
       loadControl();
+    };
+  }
+  if (btnSched && !btnSched._init) {
+    btnSched._init = true;
+    btnSched.onclick = () => {
+      const name = sel ? sel.value : null;
+      if (!name) return;
+      openScheduleEditor(name);
     };
   }
   if (btnRes && !btnRes._init) {
@@ -1050,45 +1059,82 @@ function schedParts(text) {
 function schedEditor(c) {
   const s = schedParts(c.schedule);
   const days = DAY_NAMES.map((d) => `<label><input type="checkbox" value="${d}"${s.days.includes(d.toLowerCase()) ? ' checked' : ''}>${d}</label>`).join('');
+  const isPaused = c.status === 'paused';
   return `<div class="sched-edit" data-for="${esc(c.name)}"><b>${esc(c.name)}</b> runs ` +
     `<select class="sk"><option value=""${s.kind === '' ? ' selected' : ''}>never by itself</option><option value="daily"${s.kind === 'daily' ? ' selected' : ''}>every day</option>` +
     `<option value="weekly"${s.kind === 'weekly' ? ' selected' : ''}>on these days</option><option value="away"${s.kind === 'away' ? ' selected' : ''}>when Away starts</option></select>` +
     `<span class="sdays"${s.kind === 'weekly' ? '' : ' hidden'}>${days}</span>` +
     `<span class="stime"${s.kind === 'daily' || s.kind === 'weekly' ? '' : ' hidden'}>at <input type="time" class="st" value="${s.time}"></span>` +
-    `<button class="mini go" data-sched-save>Save</button><button class="mini ghost" data-sched-cancel>Cancel</button>` +
-    (c.status === 'paused' ? '<span class="dim small">paused: Resume it for the schedule to apply</span>' : '') + '</div>';
+    `<button class="mini go" data-sched-save>Save</button>` +
+    (isPaused ? ' <button class="mini ok" data-sched-save-active title="Save schedule and unpause this chain">Save &amp; Activate</button>' : '') +
+    (c.schedule ? ' <button class="mini danger ghost" data-sched-clear title="Remove schedule completely">Remove</button>' : '') +
+    ' <button class="mini ghost" data-sched-cancel>Cancel</button>' +
+    (isPaused ? '<span class="dim small" style="margin-left:6px">⚠️ paused: Click "Save &amp; Activate" or Resume it for the schedule to take effect</span>' : '') + '</div>';
 }
-$('chainList').addEventListener('click', async (e) => {
-  const open = e.target.closest('[data-sched]');
-  if (open) {
-    e.stopPropagation();
-    const c = (control?.chains || []).find((x) => x.name === open.dataset.sched);
-    document.querySelectorAll('.sched-edit').forEach((el) => el.remove());
-    if (!c || schedEdit === c.name) { schedEdit = null; return; }
-    schedEdit = c.name;
-    open.closest('.crow').insertAdjacentHTML('afterend', schedEditor(c));
-    return;
+
+function openScheduleEditor(chainName) {
+  const c = (control?.chains || []).find((x) => x.name === chainName);
+  document.querySelectorAll('.sched-edit').forEach((el) => el.remove());
+  if (!c || schedEdit === c.name) { schedEdit = null; return; }
+  schedEdit = c.name;
+  const row = document.querySelector(`.crow [data-sched="${CSS.escape(c.name)}"]`)?.closest('.crow');
+  if (row) {
+    row.insertAdjacentHTML('afterend', schedEditor(c));
+    row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } else {
+    const list = $('chainList');
+    if (list) {
+      list.insertAdjacentHTML('afterbegin', schedEditor(c));
+      list.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   }
-  const box = e.target.closest('.sched-edit');
-  if (!box) return;
-  if (e.target.closest('[data-sched-cancel]')) { e.stopPropagation(); box.remove(); schedEdit = null; return; }
-  if (!e.target.closest('[data-sched-save]')) return;
-  e.stopPropagation();
-  const kind = box.querySelector('.sk').value, time = box.querySelector('.st').value || '07:00';
-  const days = [...box.querySelectorAll('.sdays input:checked')].map((i) => i.value);
-  if (kind === 'weekly' && !days.length) { toast('pick at least one day'); return; }
-  const schedule = kind === 'daily' ? `daily ${time}` : kind === 'weekly' ? `weekly ${days.join(',')} ${time}` : kind === 'away' ? 'on away' : '';
-  const r = await post('/api/action', { action: 'chain', target: box.dataset.for, op: 'schedule', schedule });
-  toast(r.why || (r.ok ? 'saved' : 'that did not work'));
-  if (r.ok) { box.remove(); schedEdit = null; loadControl(); }
-}, true);
-$('chainList').addEventListener('change', (e) => {
-  const box = e.target.closest('.sched-edit');
-  if (!box || !e.target.classList.contains('sk')) return;
-  const k = e.target.value;
-  box.querySelector('.sdays').hidden = k !== 'weekly';
-  box.querySelector('.stime').hidden = !(k === 'daily' || k === 'weekly');
-});
+}
+
+const cChains = $('c-chains');
+if (cChains && !cChains._schedInit) {
+  cChains._schedInit = true;
+  cChains.addEventListener('click', async (e) => {
+    const open = e.target.closest('[data-sched]');
+    if (open) {
+      e.stopPropagation();
+      openScheduleEditor(open.dataset.sched);
+      return;
+    }
+    const box = e.target.closest('.sched-edit');
+    if (!box) return;
+    if (e.target.closest('[data-sched-cancel]')) { e.stopPropagation(); box.remove(); schedEdit = null; return; }
+    if (e.target.closest('[data-sched-clear]')) {
+      e.stopPropagation();
+      const r = await post('/api/action', { action: 'chain', target: box.dataset.for, op: 'schedule', schedule: '' });
+      toast(r.why || (r.ok ? 'Schedule removed' : 'that did not work'));
+      if (r.ok) { box.remove(); schedEdit = null; loadControl(); }
+      return;
+    }
+    const isSave = Boolean(e.target.closest('[data-sched-save]'));
+    const isSaveActive = Boolean(e.target.closest('[data-sched-save-active]'));
+    if (!isSave && !isSaveActive) return;
+    e.stopPropagation();
+    const kind = box.querySelector('.sk').value, time = box.querySelector('.st').value || '07:00';
+    const days = [...box.querySelectorAll('.sdays input:checked')].map((i) => i.value);
+    if (kind === 'weekly' && !days.length) { toast('pick at least one day'); return; }
+    const schedule = kind === 'daily' ? `daily ${time}` : kind === 'weekly' ? `weekly ${days.join(',')} ${time}` : kind === 'away' ? 'on away' : '';
+    const r = await post('/api/action', { action: 'chain', target: box.dataset.for, op: 'schedule', schedule });
+    if (isSaveActive && r.ok) {
+      await post('/api/action', { action: 'chain', target: box.dataset.for, op: 'resume' });
+      toast(`Saved & activated ${box.dataset.for}`);
+    } else {
+      toast(r.why || (r.ok ? 'saved' : 'that did not work'));
+    }
+    if (r.ok) { box.remove(); schedEdit = null; loadControl(); }
+  }, true);
+  cChains.addEventListener('change', (e) => {
+    const box = e.target.closest('.sched-edit');
+    if (!box || !e.target.classList.contains('sk')) return;
+    const k = e.target.value;
+    box.querySelector('.sdays').hidden = k !== 'weekly';
+    box.querySelector('.stime').hidden = !(k === 'daily' || k === 'weekly');
+  });
+}
 const pendingModels = new Map();   // model -> the state it had when you pressed its button (shown as "…" until it changes)
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-model],[data-models],[data-power]');

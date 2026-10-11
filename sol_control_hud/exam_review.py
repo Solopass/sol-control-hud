@@ -17,6 +17,7 @@ import json
 import re
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
