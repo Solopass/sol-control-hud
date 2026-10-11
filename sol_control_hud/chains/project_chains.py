@@ -343,3 +343,109 @@ def find_latest_review(name: str, reviews_dir: Path | None = None) -> dict | Non
         "mtime": latest.stat().st_mtime,
         "tasks": parse_review_tasks(latest),
     }
+
+
+HOOK_MARKER = "# SOL Control HUD git-post-commit-hook"
+
+HOOK_SCRIPT = """#!/bin/sh
+# SOL Control HUD git-post-commit-hook
+# Non-blocking HUD trigger
+COMMIT_MSG=$(git log -1 --pretty=%B 2>/dev/null)
+case "$COMMIT_MSG" in
+  *"[skip-ai]"*|*"[no-review]"*|*"[wip]"*) exit 0 ;;
+esac
+
+REPO_NAME=$(basename -s .git "$(git rev-parse --show-toplevel 2>/dev/null)")
+if [ -n "$REPO_NAME" ]; then
+  (curl -s -m 2 -X POST "http://127.0.0.1:7900/api/action" \\
+    -H "Content-Type: application/json" \\
+    -d "{\\"action\\":\\"git_post_commit\\",\\"target\\":\\"$REPO_NAME\\"}" >/dev/null 2>&1 &) &
+fi
+exit 0
+"""
+
+
+def is_project_hook_installed(repo_path: Path) -> bool:
+    """Checks whether the SOL post-commit hook is installed in the repository."""
+    hook_file = repo_path / ".git" / "hooks" / "post-commit"
+    if not hook_file.is_file():
+        return False
+    try:
+        content = hook_file.read_text(encoding="utf-8", errors="replace")
+        return HOOK_MARKER in content
+    except OSError:
+        return False
+
+
+def install_project_hook(repo_path: Path) -> dict:
+    """Installs a non-blocking post-commit hook in repo_path to trigger local AI review."""
+    git_dir = repo_path / ".git"
+    if not git_dir.exists():
+        return {"ok": False, "why": f"{repo_path.name} is not a git repository"}
+    hooks_dir = git_dir / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_file = hooks_dir / "post-commit"
+
+    if hook_file.is_file():
+        try:
+            content = hook_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            content = ""
+        if HOOK_MARKER in content:
+            return {"ok": True, "installed": True, "why": f"Auto-hunt hook already active for {repo_path.name}"}
+        new_content = content.rstrip() + "\n\n" + HOOK_SCRIPT.strip() + "\n"
+    else:
+        new_content = HOOK_SCRIPT
+
+    try:
+        hook_file.write_text(new_content, encoding="utf-8")
+        try:
+            hook_file.chmod(hook_file.stat().st_mode | 0o111)
+        except Exception:
+            pass
+        return {"ok": True, "installed": True, "why": f"Auto-hunt hook installed for {repo_path.name}"}
+    except OSError as e:
+        return {"ok": False, "why": f"Could not write hook file: {e}"}
+
+
+def uninstall_project_hook(repo_path: Path) -> dict:
+    """Removes the SOL post-commit hook from repo_path."""
+    hook_file = repo_path / ".git" / "hooks" / "post-commit"
+    if not hook_file.is_file():
+        return {"ok": True, "installed": False, "why": f"No hook installed for {repo_path.name}"}
+    try:
+        content = hook_file.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return {"ok": False, "why": f"Could not read hook file: {e}"}
+    if HOOK_MARKER not in content:
+        return {"ok": True, "installed": False, "why": f"Hook in {repo_path.name} was not managed by SOL"}
+
+    # If the file only contains our hook script, remove it completely
+    pure_lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+    if content.strip() == HOOK_SCRIPT.strip() or all(
+        ln.startswith("#") or ln in ("exit 0", "#!/bin/sh") or "git_post_commit" in ln or "COMMIT_MSG" in ln or "REPO_NAME" in ln or "curl" in ln
+        for ln in pure_lines
+    ):
+        try:
+            hook_file.unlink()
+        except OSError as e:
+            return {"ok": False, "why": f"Could not remove hook file: {e}"}
+    else:
+        # Strip out our hook lines
+        lines = []
+        skip = False
+        for line in content.splitlines():
+            if HOOK_MARKER in line:
+                skip = True
+                continue
+            if skip and line.strip() == "exit 0":
+                skip = False
+                continue
+            if not skip:
+                lines.append(line)
+        try:
+            hook_file.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+        except OSError as e:
+            return {"ok": False, "why": f"Could not update hook file: {e}"}
+
+    return {"ok": True, "installed": False, "why": f"Auto-hunt hook removed for {repo_path.name}"}

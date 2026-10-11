@@ -332,6 +332,14 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
         except Exception:
             pass
 
+        auto_hunt = False
+        if is_repo:
+            try:
+                from ...chains.project_chains import is_project_hook_installed
+                auto_hunt = is_project_hook_installed(folder)
+            except Exception:
+                pass
+
         mine = (reg.get("user") or {}).get(name) or {}
         hidden = mine["hidden"] if isinstance(mine.get("hidden"), bool) else name in reg["hidden"]
         rows.append({
@@ -347,6 +355,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "git": g,
             "github": (g or {}).get("github"),
             "review": rev,
+            "auto_hunt": auto_hunt,
             "live": spec.get("live"),
             "open_file": spec.get("open_file"),
             "port": int(port) if port else None,

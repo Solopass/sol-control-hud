@@ -198,4 +198,42 @@ title: Deep Review
     assert "1.  [ ] **File: `metrics.py`**" in f.read_text(encoding="utf-8")
 
 
+def test_git_post_commit_hook_install_and_uninstall(tmp_path: Path):
+    repo = tmp_path / "testrepo"
+    repo.mkdir()
+
+    # Not a git repo yet
+    assert project_chains.is_project_hook_installed(repo) is False
+    r_err = project_chains.install_project_hook(repo)
+    assert r_err["ok"] is False
+
+    # Init .git
+    (repo / ".git").mkdir()
+    assert project_chains.is_project_hook_installed(repo) is False
+
+    # Install hook
+    r_inst = project_chains.install_project_hook(repo)
+    assert r_inst["ok"] is True
+    assert r_inst["installed"] is True
+    assert project_chains.is_project_hook_installed(repo) is True
+
+    hook_file = repo / ".git" / "hooks" / "post-commit"
+    assert hook_file.is_file()
+    content = hook_file.read_text(encoding="utf-8")
+    assert "git_post_commit" in content
+    assert project_chains.HOOK_MARKER in content
+
+    # Repeated install is idempotent
+    r_reinst = project_chains.install_project_hook(repo)
+    assert r_reinst["ok"] is True
+    assert r_reinst["installed"] is True
+
+    # Uninstall hook
+    r_uninst = project_chains.uninstall_project_hook(repo)
+    assert r_uninst["ok"] is True
+    assert r_uninst["installed"] is False
+    assert project_chains.is_project_hook_installed(repo) is False
+    assert not hook_file.exists()
+
+
 

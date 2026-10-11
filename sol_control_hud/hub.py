@@ -452,6 +452,33 @@ class Hub:
                 self.collectors["projects"].value = None
             return r
 
+        if action == "git_post_commit" and target:
+            now = time.time()
+            if not hasattr(self, "_last_git_post_commit"):
+                self._last_git_post_commit = {}
+            last = self._last_git_post_commit.get(target, 0)
+            if now - last < 600:  # 10 min cooldown
+                return {"ok": True, "why": f"Cooldown active for {target} ({int(600 - (now - last))}s remaining)"}
+            self._last_git_post_commit[target] = now
+            from .chains import project_chains
+            r = project_chains.queue_bug_hunt(target)
+            log(f"git post-commit: {r.get('why')} for {target}")
+            return r
+
+        if action == "toggle_project_hook" and target:
+            from .chains import project_chains
+            wdir = project_chains.WORKSPACE_DIR
+            repo_path = wdir / target
+            enable = bool((body or {}).get("enable", True))
+            if enable:
+                r = project_chains.install_project_hook(repo_path)
+            else:
+                r = project_chains.uninstall_project_hook(repo_path)
+            log(f"toggle project hook {target} -> {enable}: {r.get('why')}")
+            if hasattr(self, "collectors") and "projects" in self.collectors:
+                self.collectors["projects"].value = None
+            return r
+
         if action in ("guard_ignore", "guard_resume"):
             # the guard turned the AI off for something that is not a game: say so once, instead of editing the
             # config by hand (09-25 Notepad and Edge, 09-27 claude x3, 10-07/08 steamwebhelper x5)

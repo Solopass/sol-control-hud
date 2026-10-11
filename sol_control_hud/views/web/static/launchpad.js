@@ -66,6 +66,7 @@ function projRow(p) {
       chips.push(`<span class="pill ok" style="cursor:pointer" data-p="review" title="${esc(p.review.name)} (click to open)">reviewed ${ago(p.review.mtime)}</span>`);
     }
   }
+  if (p.auto_hunt) chips.push(`<span class="pill ok" title="Auto-hunt git hook active: commits trigger background local AI review">⚡ auto-hunt</span>`);
   if (p.hidden) chips.push(`<span class="pill dim" title="${esc(p.why_hidden)}">hidden</span>`);
   const acts = [];
   if (p.running && p.url) acts.push(`<button class="mini" data-p="open" title="${esc(p.url)}">↗ Open</button>`);
@@ -96,6 +97,7 @@ function projMenu(p) {
     + (mine ? `<button class="mini ghost" data-p="tag" data-tag="" title="Use the README's status again">clear</button>` : '')
     + `<span class="sep"></span>`
     + `<button class="mini ghost" data-p="bughunt" title="Run Bug Hunt prompt chain on this project">🐞 Bug Hunt</button>`
+    + `<button class="mini ${p.auto_hunt ? 'on' : 'ghost'}" data-p="toggle-hook" title="Automatically trigger a local AI review when you git commit to this project">⚡ Auto-hunt on commit</button>`
     + `<button class="mini ghost" data-p="review" title="Open latest review note in Obsidian">📝 Review note</button>`
     + `<span class="sep"></span>`
     + (p.hidden ? `<button class="mini" data-p="show">show again</button>` : `<button class="mini ghost" data-p="hide" title="Fold it into + hidden">hide</button>`)
@@ -155,6 +157,17 @@ $('projList').addEventListener('click', async (e) => {
     toast(r.why || (r.ok ? `Queued Bug Hunt for ${p.title || name}` : 'Could not queue bug hunt'));
     b.disabled = false;
     return;
+  }
+  if (op === 'toggle-hook') {
+    b.disabled = true;
+    const r = await post('/api/action', {
+      action: 'toggle_project_hook',
+      target: name,
+      enable: !p.auto_hunt,
+    });
+    toast(r.why || (r.ok ? 'Updated hook' : 'Could not update hook'));
+    b.disabled = false;
+    return loadProjects();
   }
   if (op === 'review') {
     const r = await post('/api/action', { action: 'open_project_review', target: name });
