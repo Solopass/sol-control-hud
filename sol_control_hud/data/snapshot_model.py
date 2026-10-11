@@ -103,6 +103,7 @@ class Snapshot:
     # Chains
     chain_running: str | None = None
     chain_step: str | None = None
+    chain_waiting: str | None = None
     chain_pending_count: int = 0
     chain_last_finished: str | None = None
     chain_pending: list[dict] = field(default_factory=list)   # [{"chain", "blocked"}] from chains.json

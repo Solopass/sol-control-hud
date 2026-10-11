@@ -54,6 +54,7 @@ RUN_COLUMNS = {"owner_pid": "INTEGER", "owner_started": "REAL", "heartbeat": "RE
 ACTIVE = ("queued", "running")
 RESUMABLE = ("interrupted", "waiting", "needs_user", "failed", "cancelled")
 WHOLE = -1
+MAX_STORED_OUTPUT_CHARS = 2_000_000
 
 
 def _this_process() -> tuple[int, float]:
@@ -84,6 +85,10 @@ class Store:
             for col, kind in RUN_COLUMNS.items():
                 if col not in have:
                     self._db.execute(f"ALTER TABLE runs ADD COLUMN {col} {kind}")
+        try:
+            self.prune()
+        except Exception:
+            pass
 
     def recover_after_restart(self) -> int:
         """Mark active runs whose owner process is gone as interrupted (resumable). Live runs of other processes are left alone."""
@@ -137,9 +142,46 @@ class Store:
 
     # ---- per-step outputs (resume)
     def save_output(self, run_id: int, step: str, output, item: int = WHOLE) -> None:
+        payload = json.dumps(output)
+        if len(payload) > MAX_STORED_OUTPUT_CHARS:
+            # Prevent multi-megabyte tool payloads from bloating runs.sqlite
+            truncated_output = (
+                output[:MAX_STORED_OUTPUT_CHARS] + f"\n... [truncated {len(payload) - MAX_STORED_OUTPUT_CHARS} chars for storage]"
+                if isinstance(output, str) else {
+                    "_truncated": True,
+                    "reason": f"output exceeded {MAX_STORED_OUTPUT_CHARS} chars for SQLite persistence",
+                    "preview": payload[:10000],
+                }
+            )
+            payload = json.dumps(truncated_output)
         with self._lock, self._db:
             self._db.execute("INSERT OR REPLACE INTO step_outputs(run_id, step, item, output, at) VALUES (?, ?, ?, ?, ?)",
-                             (run_id, step, item, json.dumps(output), time.time()))
+                             (run_id, step, item, payload, time.time()))
+
+    def prune(self, max_age_days: int = 14, keep_latest: int = 50) -> int:
+        """Prune old completed/interrupted runs to keep database small and fast."""
+        cutoff = time.time() - (max_age_days * 86400)
+        with self._lock, self._db:
+            rows = self._db.execute(
+                """
+                SELECT id FROM runs 
+                WHERE status NOT IN ('queued', 'running') 
+                  AND created_at < ? 
+                  AND id NOT IN (SELECT id FROM runs ORDER BY id DESC LIMIT ?)
+                """, (cutoff, keep_latest)
+            ).fetchall()
+            ids = [r[0] for r in rows]
+            if ids:
+                qmarks = ",".join("?" for _ in ids)
+                self._db.execute(f"DELETE FROM step_outputs WHERE run_id IN ({qmarks})", ids)
+                self._db.execute(f"DELETE FROM events WHERE run_id IN ({qmarks})", ids)
+                self._db.execute(f"DELETE FROM runs WHERE id IN ({qmarks})", ids)
+            return len(ids)
+
+    def vacuum(self) -> None:
+        """Reclaim unallocated SQLite space."""
+        with self._lock:
+            self._db.execute("VACUUM")
 
     def saved_outputs(self, run_id: int) -> dict[str, dict[int, object]]:
         """{step: {item: output}}; item -1 is the whole step."""

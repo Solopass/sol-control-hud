@@ -239,6 +239,18 @@ def read_chains_extra(path: Path = CHAINS_FILE, now: datetime | None = None) -> 
     return pending, nxt
 
 
+def read_chains_waiting(path: Path = CHAINS_FILE) -> str | None:
+    """Reads waiting message from running chain in chains.json if present."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        running = data.get("running")
+        if isinstance(running, dict):
+            return running.get("waiting")
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def disk_trends_from(history: list[tuple[float, dict[str, float]]], now: float,
                      window: float = DISK_TREND_WINDOW, min_age: float = 600.0) -> dict[str, float]:
     """Free space now minus free space at the oldest sample in the window (only when that sample is >= 10 min old)."""
@@ -613,6 +625,7 @@ class TickerCollector:
 
         # 4. Chains
         chain_name, chain_step, pending_count = read_chains_state()
+        chain_waiting = read_chains_waiting() if chain_name else None
         chain_last_finished = None
         if not chain_name:
             chain_last_finished = read_last_finished_chain()
@@ -785,6 +798,7 @@ class TickerCollector:
             **away,
             chain_running=chain_name,
             chain_step=chain_step,
+            chain_waiting=chain_waiting,
             chain_pending_count=pending_count,
             chain_last_finished=chain_last_finished,
             chain_pending=chain_pending,

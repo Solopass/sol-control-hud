@@ -1196,8 +1196,17 @@ async function loadNotes() {
       return;
     }
     const notes = res.notes || [];
-    allNotesCache = notes;
     $('notesVaultCount').textContent = `${notes.length} recent in ${selectedVault}`;
+    const staleCount = res.stale_count || 0;
+    const btnCondense = $('notesCondenseBtn');
+    if (btnCondense) {
+      if (staleCount > 0) {
+        btnCondense.hidden = false;
+        btnCondense.textContent = `🧹 Condense (${staleCount})`;
+      } else {
+        btnCondense.hidden = true;
+      }
+    }
     if (!notes.length) {
       setHTML(container, `<div class="empty">no notes match in ${esc(selectedVault)}</div>`);
       return;
@@ -1261,6 +1270,15 @@ if ($('notesComposeBtn')) {
     const dailyR = document.querySelector('input[name="compDest"][value="daily"]');
     if (dailyR) dailyR.checked = true;
     $('composerText').focus();
+  };
+}
+if ($('notesCondenseBtn')) {
+  $('notesCondenseBtn').onclick = async () => {
+    $('notesCondenseBtn').disabled = true;
+    const r = await post('/api/action', { action: 'chain', target: 'Note Condenser', op: 'swap_run' });
+    toast(r ? r.why : 'Note Condenser triggered');
+    $('notesCondenseBtn').disabled = false;
+    loadControl();
   };
 }
 if ($('composerClose')) $('composerClose').onclick = () => { $('composerModal').hidden = true; };

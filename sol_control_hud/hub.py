@@ -874,7 +874,15 @@ class Hub:
         def notes_list(vault: str = "OBVLT", limit: int = 30, q: str = "") -> dict:
             from .data.collectors import notes
             items = notes.list_notes(vault_name=vault, limit=min(max(1, limit), 100), query=q)
-            return {"ok": True, "vault": vault, "count": len(items), "notes": items}
+            stale_count = 0
+            if vault == "OBVLT":
+                try:
+                    from .chains import file_tools
+                    stale = file_tools.scan_stale_notes({"older_than_days": 30, "limit": 100})
+                    stale_count = len(stale)
+                except Exception:
+                    pass
+            return {"ok": True, "vault": vault, "count": len(items), "stale_count": stale_count, "notes": items}
 
         @app.get("/api/note-content")
         def note_content(vault: str = "OBVLT", file: str = "") -> dict:

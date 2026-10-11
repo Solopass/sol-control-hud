@@ -1214,3 +1214,15 @@ def test_a_game_shuts_the_ticker_down_and_brings_it_back_once(monkeypatch, tmp_p
         assert len(scheduled) == 5
     finally:
         root.destroy()
+
+
+def test_format_slides_chain_waiting():
+    snap = Snapshot(
+        chain_running="Note Condenser",
+        chain_waiting="you're using sol-fast; click 'Swap & Run' to switch",
+    )
+    slides = format_slides(snap)
+    run_slide = next(s for s in slides if s["tag"] == "RUN")
+    assert "waiting" in run_slide["text"]
+    assert run_slide["color"] == "#fbbf24"
+    assert "Note Condenser" in run_slide["detail"]

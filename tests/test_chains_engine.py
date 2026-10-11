@@ -159,6 +159,28 @@ def test_recovery_leaves_live_runs_alone(tmp_path):
     assert s.run(live)["status"] == "running" and s.run(dead)["status"] == "interrupted"
 
 
+def test_store_prune_and_capping(tmp_path):
+    s = Store(tmp_path / "prune.sqlite")
+    # Giant output capping
+    giant = "x" * 2_500_000
+    s.save_output(1, "step1", giant)
+    saved = s.saved_outputs(1)["step1"][-1]
+    assert "[truncated" in saved and len(saved) < 2_100_000
+
+    # Prune
+    now = time.time()
+    for i in range(10):
+        rid = s.create_run(f"wf_{i}", {})
+        s.set_status(rid, "succeeded")
+        if i < 5:
+            s._db.execute("UPDATE runs SET created_at=? WHERE id=?", (now - (30 * 86400), rid))
+    s._db.commit()
+    pruned = s.prune(max_age_days=14, keep_latest=3)
+    assert pruned == 5
+    s.vacuum()
+
+
+
 # ---- workflow validation
 @pytest.mark.parametrize("step, msg", [
     ({"id": "a", "model": "m", "prompt": "p", "reasoning": "max"}, "reasoning must be"),

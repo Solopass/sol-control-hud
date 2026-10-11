@@ -188,9 +188,15 @@ def format_slides(s: Snapshot) -> list[dict]:
 
     # Slide 2: Chains
     if s.chain_running:
-        step_part = f" ({s.chain_step})" if s.chain_step else ""
-        chain_txt = f"Run: {s.chain_running}{step_part}"
-        chain_color = "#38bdf8"
+        if s.chain_waiting:
+            chain_txt = f"Run: {s.chain_running} (⏳ waiting)"
+            chain_color = "#fbbf24"
+            chain_detail = f"{s.chain_running}: {s.chain_waiting}\nClick 'Swap & Run' on dashboard"
+        else:
+            step_part = f" ({s.chain_step})" if s.chain_step else ""
+            chain_txt = f"Run: {s.chain_running}{step_part}"
+            chain_color = "#38bdf8"
+            chain_detail = f"Running: {s.chain_running}{step_part}"
     else:
         # say *why* a queued chain waits ("Code review waits for Away mode"), and when the next scheduled one runs
         blocked = next((p for p in s.chain_pending if p.get("blocked")), None)
@@ -210,7 +216,7 @@ def format_slides(s: Snapshot) -> list[dict]:
         "tag": "RUN",
         "text": chain_txt,
         "color": chain_color,
-        "detail": f"Last finished: {s.chain_last_finished}" if s.chain_last_finished else "sol-hud pipelines daemon"
+        "detail": chain_detail if s.chain_running else (f"Last finished: {s.chain_last_finished}" if s.chain_last_finished else "sol-hud pipelines daemon")
     })
 
     # Slide 3: Services
