@@ -31,7 +31,8 @@ KINDS = {  # kind -> label for the settings
 }
 DEFAULTS = {"enabled": True, "kinds": {k: True for k in KINDS}, "quiet": "23:00-08:00"}
 REPEAT_S = 600.0
-DISK_FAST_GB = 5.0
+DISK_FAST_GB = 10.0
+DISK_RUNAWAY_GB = 20.0
 
 
 @dataclass
@@ -96,8 +97,14 @@ def from_snapshots(prev, curr) -> list[Notice]:
                                                                f"{curr.vram_spilled_gb:.1f} GB of it is in system RAM until "
                                                                "VRAM frees up (close a game/browser tab).",
                           "warning", "vram"))
+    disk_info = {d.get("drive"): d for d in (getattr(curr, "disks", None) or []) if isinstance(d, dict)}
     for drive, delta in (curr.disk_trends or {}).items():
-        if delta <= -DISK_FAST_GB and (prev.disk_trends or {}).get(drive, 0) > -DISK_FAST_GB:
+        d_stat = disk_info.get(drive) or {}
+        free_gb = d_stat.get("free_gb")
+        pct_used = d_stat.get("percent")
+        has_plenty = (free_gb is not None and free_gb > 100) and (pct_used is None or pct_used < 75)
+        thresh = DISK_RUNAWAY_GB if has_plenty else DISK_FAST_GB
+        if delta <= -thresh and (prev.disk_trends or {}).get(drive, 0) > -thresh:
             out.append(Notice("disk", f"{drive}: filling up fast", f"{-delta:.0f} GB used up in the last hour.", "warning",
                               f"disk:{drive}"))
     return out
@@ -197,6 +204,14 @@ class Notifier:
             if len(held) == 1:
                 return held
             level = "error" if any(h.level == "error" for h in held) else "warning" if any(h.level == "warning" for h in held) else "info"
-            return [Notice("summary", f"While you were busy: {len(held)} things", " · ".join(h.title for h in held)[:250],
-                           level, "summary")]
+            seen_titles: dict[str, int] = {}
+            for h in held:
+                seen_titles[h.title] = seen_titles.get(h.title, 0) + 1
+            summary_parts = [f"{t} ({cnt}×)" if cnt > 1 else t for t, cnt in seen_titles.items()]
+            desc = " · ".join(summary_parts)[:250]
+            if len(seen_titles) == len(held):
+                title = f"While you were busy: {len(held)} things"
+            else:
+                title = f"While you were busy: {len(seen_titles)} thing{'s' if len(seen_titles) != 1 else ''} ({len(held)} events)"
+            return [Notice("summary", title, desc, level, "summary")]
         return fresh

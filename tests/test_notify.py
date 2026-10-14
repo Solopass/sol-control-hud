@@ -114,3 +114,40 @@ def test_media_notices_go_through_the_same_switches(tmp_path):
     assert n.check(S(), S(), busy=False, extra=extra) == []                         # that kind switched off
     s["kinds"]["media_stuck"] = True
     assert [x.kind for x in n.check(S(), S(), busy=False, extra=extra)] == ["media_stuck"]
+
+
+def test_held_notices_deduplicated(tmp_path):
+    n, clock = make(tmp_path, at(14))
+    extra = [notify.Notice("disk", "C: filling up fast", "6 GB used up", "warning", "disk:C")]
+    # First time busy
+    assert n.check(S(), S(), busy=True, extra=extra) == []
+    # Second time busy after 10 min
+    clock["t"] += 601
+    assert n.check(S(), S(), busy=True, extra=extra) == []
+    # Third time busy after another 10 min
+    clock["t"] += 601
+    assert n.check(S(), S(), busy=True, extra=extra) == []
+
+    # Returning: busy=False
+    out = n.check(S(), S(), busy=False)
+    assert len(out) == 1
+    assert out[0].kind == "summary"
+    assert out[0].title == "While you were busy: 1 thing (3 events)"
+    assert out[0].text == "C: filling up fast (3×)"
+
+
+def test_disk_plenty_headroom_not_alerting():
+    # Plenty of headroom (>100 GB and <75% full): -6.0 GB/hr does NOT trip alert
+    s_plenty = S(disks=[{"drive": "C", "free_gb": 753, "total_gb": 930, "percent": 19.1}], disk_trends={"C": -6.0})
+    assert notify.from_snapshots(S(), s_plenty) == []
+
+    # Runaway rate (>= 20 GB/hr) DOES trip alert even with plenty of headroom
+    s_runaway = S(disks=[{"drive": "C", "free_gb": 753, "total_gb": 930, "percent": 19.1}], disk_trends={"C": -22.0})
+    got = notify.from_snapshots(S(), s_runaway)
+    assert len(got) == 1 and got[0].title == "C: filling up fast"
+
+    # Low headroom (free_gb < 60): -12.0 GB/hr DOES trip alert
+    s_low = S(disks=[{"drive": "C", "free_gb": 40, "total_gb": 930, "percent": 95.0}], disk_trends={"C": -12.0})
+    got_low = notify.from_snapshots(S(), s_low)
+    assert len(got_low) == 1 and got_low[0].title == "C: filling up fast"
+

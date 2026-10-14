@@ -131,14 +131,14 @@ def start_overnight(
         "status": "running",
         "results": {},
     }
-    save_overnight_state(state)
-
     # Trigger the first chain
     first_path = cdir / f"{first_chain}.md"
     try:
         chain_note.set_chain_status(first_path, "queued", skip_wait="true")
     except Exception as e:
         return {"ok": False, "why": f"Could not start first chain '{first_chain}': {e}"}
+
+    save_overnight_state(state)
 
     # Handle display mode
     if display_mode == "dpms_off":

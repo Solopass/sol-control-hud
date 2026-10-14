@@ -39,6 +39,7 @@ WIDGETS: dict[str, tuple[str, dict[str, list[int]], str]] = {
     "c-projects": ("Projects", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-media": ("Media APIs", {"XS": [1, 1], "S": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-solang": ("Solang", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "L"),
+    "c-overnight": ("Overnight AI Run", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-ask": ("Ask it overnight", {"XS": [1, 1], "S": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-awayq": ("Away & queue", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-system": ("Memory · Network", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
@@ -73,7 +74,7 @@ def default_presets() -> list[dict]:
                                  ("c-activity", "L")], ticker=["HW", "AI", "RUN", "SVC"]),
         _preset("Dev", "‹/›", [("c-projects", "XL"), ("c-ports", "L"), ("c-work", "M"), ("c-media", "L"), ("c-notes", "M"),
                               ("c-gpu", "S")], ticker=["HW", "GIT", "APPS", "NOTE", "SVC"]),
-        _preset("Overnight", "🌙", [("c-awayq", "L"), ("c-chains", "L"), ("c-stab", "M"), ("c-health", "M"), ("c-week", "M")],
+        _preset("Overnight", "🌙", [("c-overnight", "L"), ("c-awayq", "L"), ("c-chains", "L"), ("c-stab", "M"), ("c-health", "M"), ("c-week", "M")],
                 auto_when="away", ticker=["AI", "RUN", "SYS", "DISK"]),
         _preset("Minimal", "·", [("c-gpu", "XS"), ("c-vram", "XS"), ("c-ai", "XS"), ("c-disks", "XS")], ticker=["HW", "AI"]),
     ]

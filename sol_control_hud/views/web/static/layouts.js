@@ -13,7 +13,7 @@ const LC = window.LayoutCore;    // the pure parts (layouts-core.js), tested wit
 // which loader feeds which card: a hidden card isn't polled, and is loaded at once when it comes back
 const LOADERS = { 'c-ports': 'loadPorts', 'c-notes': 'loadNotes', 'c-ai': 'loadGuard', 'c-gpu': 'loadDisplays', 'c-week': 'loadWeek',
   'c-health': 'loadHealth', 'c-projects': 'loadProjects', 'c-media': 'loadMedia', 'c-chains': 'loadControl', 'c-ask': 'loadControl',
-  'c-awayq': 'loadControl' };
+  'c-awayq': 'loadControl', 'c-overnight': 'loadOvernight' };
 
 function cardShown(id) { const el = lcard(id); return !el || !el.hidden; }      // app.js / launchpad.js ask this
 
