@@ -409,19 +409,38 @@ async function updateSolangQueueStatus() {
       const detail = $('solangQueueDetail');
       const pauseBtn = $('solangPauseResumeBtn');
 
-      if (stats) stats.textContent = s.total_found > 0 ? `${s.offset} / ${s.total_found} tracks (${s.percent}%)` : 'Ready to ingest';
+      if (stats) {
+        if (s.total_found > 0) {
+          stats.textContent = `${s.paused ? '⏸ ' : ''}${s.offset} / ${s.total_found} tracks (${s.percent}%)`;
+        } else {
+          stats.textContent = 'Ready to ingest';
+        }
+      }
       if (pbar) pbar.style.width = `${Math.min(100, Math.max(0, s.percent || 0))}%`;
       if (detail) detail.textContent = `${s.ingested_count || 0} songs · ${s.clustered_count || 0} alternate angles`;
       if (pauseBtn) pauseBtn.textContent = s.paused ? '▶ Resume' : '⏸ Pause';
+    } else if (r && !r.ok) {
+      const stats = $('solangQueueStats');
+      if (stats) stats.textContent = r.why || 'Status unavailable';
     }
   } catch (_) {}
 }
 
 $('solangRunBatchBtn')?.addEventListener('click', async () => {
+  const btn = $('solangRunBatchBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Ingesting...'; }
   toast('Running next 25 tracks from Takeout file...');
-  const r = await post('/api/action', { action: 'solang', op: 'run_queue_batch', count: 25 });
-  toast(r.why || 'Batch finished');
-  updateSolangQueueStatus();
+  const pollTimer = setInterval(updateSolangQueueStatus, 2000);
+  try {
+    const r = await post('/api/action', { action: 'solang', op: 'run_queue_batch', count: 25 });
+    toast(r.why || 'Batch finished');
+  } catch (err) {
+    toast('Batch error: ' + err.message);
+  } finally {
+    clearInterval(pollTimer);
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Ingest Next 25'; }
+    updateSolangQueueStatus();
+  }
 });
 
 $('solangPauseResumeBtn')?.addEventListener('click', async () => {
@@ -440,8 +459,10 @@ $('solangSyncLibBtn')?.addEventListener('click', async () => {
 });
 
 $('solangPrepareBtn')?.addEventListener('click', async () => {
+  const btn = $('solangPrepareBtn');
   const input = $('solangFilePathInput');
   const path = input ? input.value.trim() : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sifting...'; }
   toast('Sifting & preparing music tracks from file...');
   try {
     const r = await post('/api/action', { action: 'solang', op: 'prepare_takeout', file: path });
@@ -449,6 +470,8 @@ $('solangPrepareBtn')?.addEventListener('click', async () => {
     updateSolangQueueStatus();
   } catch (err) {
     toast('Prepare failed: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Sift & Prepare'; }
   }
 });
 
@@ -517,7 +540,7 @@ if (dropzone && fileInput) {
 }
 
 updateSolangQueueStatus();
-setInterval(updateSolangQueueStatus, 15000);
+setInterval(updateSolangQueueStatus, 5000);
 
 // ---------- polling: every 10 s while visible, every 2 s for a minute after a start or stop
 function refreshLaunchpad() { loadProjects(); loadMedia(); }

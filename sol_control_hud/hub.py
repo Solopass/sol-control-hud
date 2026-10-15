@@ -425,7 +425,7 @@ class Hub:
                 return {"ok": False, "why": str(e)}
             log(f"setting {target} = {(body or {}).get('value')!r}: {r.get('why')}")
             return r
-        if action in ("project", "media"):
+        if action in ("project", "media", "solang"):
             return self._launch(action, target, str((body or {}).get("op", "")), body or {})
         if action == "project_bughunt":
             from .chains import project_chains
