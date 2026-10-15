@@ -42,7 +42,10 @@ def get_overnight_state() -> dict:
     """Reads current overnight execution state."""
     try:
         if OVERNIGHT_STATE.is_file():
-            return json.loads(OVERNIGHT_STATE.read_text(encoding="utf-8"))
+            st = json.loads(OVERNIGHT_STATE.read_text(encoding="utf-8"))
+            st.setdefault("bedtime_autostart", False)
+            st.setdefault("selected_chains", [])
+            return st
     except Exception:
         pass
     return {
@@ -53,6 +56,8 @@ def get_overnight_state() -> dict:
         "status": "idle",
         "display_mode": "dpms_off",
         "sleep_when_done": False,
+        "bedtime_autostart": False,
+        "selected_chains": [],
         "started_at": None,
     }
 
@@ -120,6 +125,7 @@ def start_overnight(
     first_chain = valid_chains[0]
     remaining_queue = valid_chains[1:]
 
+    prev_state = get_overnight_state()
     state = {
         "active": True,
         "started_at": time.time(),
@@ -130,6 +136,8 @@ def start_overnight(
         "current": first_chain,
         "status": "running",
         "results": {},
+        "bedtime_autostart": prev_state.get("bedtime_autostart", False),
+        "selected_chains": prev_state.get("selected_chains", []),
     }
     # Trigger the first chain
     first_path = cdir / f"{first_chain}.md"
@@ -257,6 +265,100 @@ def cancel_overnight() -> dict:
     save_overnight_state(state)
     display_ctl.release_pc_awake()
     return {"ok": True, "why": "Overnight session cancelled", "state": state}
+
+
+_monitor_off_triggered: bool = False
+
+
+def is_monitor_off_active() -> bool:
+    """Checks if the MonitorOff process or single-instance mutex is currently active."""
+    try:
+        import win32api
+        import win32event
+        import pywintypes
+        h = win32event.OpenMutex(win32event.SYNCHRONIZE, False, r"Local\MonitorOff_SingleInstance")
+        if h:
+            win32api.CloseHandle(h)
+            return True
+    except Exception:
+        pass
+
+    # Process name fallback
+    try:
+        import psutil
+        for proc in psutil.process_iter(["name"]):
+            if (proc.info.get("name") or "").lower().startswith("monitoroff"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def check_monitor_off_trigger(chains_dir: Path | None = None) -> dict | None:
+    """Checks if MonitorOff is running, and if bedtime_autostart is enabled, triggers the overnight run once."""
+    global _monitor_off_triggered
+    is_active = is_monitor_off_active()
+    if not is_active:
+        _monitor_off_triggered = False
+        return None
+
+    if _monitor_off_triggered:
+        return None
+
+    state = get_overnight_state()
+    if not state.get("bedtime_autostart"):
+        return None
+
+    if state.get("active"):
+        _monitor_off_triggered = True
+        return None
+
+    return trigger_bedtime_run(chains_dir=chains_dir)
+
+
+def trigger_bedtime_run(chains_dir: Path | None = None) -> dict:
+    """Directly triggers bedtime run when MonitorOff is launched."""
+    global _monitor_off_triggered
+    _monitor_off_triggered = True
+    state = get_overnight_state()
+    if state.get("active"):
+        return {"ok": False, "why": "Overnight run is already active."}
+
+    if not state.get("bedtime_autostart"):
+        return {"ok": False, "why": "Bedtime auto-start is toggled off."}
+
+    chains_to_run = state.get("selected_chains") or PRESETS.get("full_tidy", {}).get("chains", ["Note Condenser"])
+    res = start_overnight(
+        chains=chains_to_run,
+        display_mode="none",  # MonitorOff is already powering down monitors and holding wake-lock
+        sleep_when_done=bool(state.get("sleep_when_done", False)),
+        chains_dir=chains_dir,
+    )
+    res["triggered_by"] = "monitor_off"
+    return res
+
+
+def set_bedtime_config(
+    enabled: bool,
+    chains: list[str] | None = None,
+    display_mode: str | None = None,
+    sleep_when_done: bool | None = None,
+) -> dict:
+    """Updates bedtime auto-start preferences."""
+    state = get_overnight_state()
+    state["bedtime_autostart"] = bool(enabled)
+    if chains is not None:
+        state["selected_chains"] = list(chains)
+    if display_mode is not None:
+        state["display_mode"] = display_mode
+    if sleep_when_done is not None:
+        state["sleep_when_done"] = bool(sleep_when_done)
+    save_overnight_state(state)
+    return {
+        "ok": True,
+        "why": f"Bedtime auto-start {'armed' if enabled else 'disabled'}",
+        "state": state,
+    }
 
 
 def generate_night_summary(completed: list[str], started_at: float, results: dict | None = None) -> Path:

@@ -2000,6 +2000,48 @@ function initOvernightEvents() {
         cb.checked = targetChains.has(cb.value);
       });
       toast(`Selected preset: ${p.label}`);
+      const bedtimeCb = $('overnightBedtimeTrigger');
+      if (bedtimeCb?.checked) {
+        post('/api/action', {
+          action: 'set_overnight_bedtime',
+          enabled: true,
+          chains: Array.from(targetChains),
+        });
+      }
+    });
+  }
+
+  const bedtimeCb = $('overnightBedtimeTrigger');
+  if (bedtimeCb) {
+    bedtimeCb.addEventListener('change', async (e) => {
+      const checkedBoxes = Array.from(document.querySelectorAll('#overnightChainList input[type="checkbox"]:checked'));
+      const chains = checkedBoxes.map((cb) => cb.value);
+      const dispRadio = document.querySelector('input[name="overnightDisplayMode"]:checked');
+      const sleepDone = Boolean($('overnightSleepDone')?.checked);
+      const res = await post('/api/action', {
+        action: 'set_overnight_bedtime',
+        enabled: e.target.checked,
+        chains,
+        display_mode: dispRadio ? dispRadio.value : 'dpms_off',
+        sleep_when_done: sleepDone,
+      });
+      toast(res?.why || (e.target.checked ? 'Bedtime auto-start armed' : 'Bedtime auto-start disabled'));
+      loadOvernight();
+    });
+  }
+
+  const chainListEl = $('overnightChainList');
+  if (chainListEl) {
+    chainListEl.addEventListener('change', () => {
+      const bCb = $('overnightBedtimeTrigger');
+      if (bCb?.checked) {
+        const checkedBoxes = Array.from(document.querySelectorAll('#overnightChainList input[type="checkbox"]:checked'));
+        post('/api/action', {
+          action: 'set_overnight_bedtime',
+          enabled: true,
+          chains: checkedBoxes.map((cb) => cb.value),
+        });
+      }
     });
   }
 }
@@ -2023,6 +2065,10 @@ async function loadOvernight() {
   const banner = $('overnightActiveBanner');
   const btnStart = $('btnStartOvernight');
   const btnCancel = $('btnCancelOvernight');
+  const bedtimeCb = $('overnightBedtimeTrigger');
+  if (bedtimeCb && document.activeElement !== bedtimeCb) {
+    bedtimeCb.checked = Boolean(state.bedtime_autostart);
+  }
 
   if (state.active) {
     if (statusPill) {
@@ -2058,8 +2104,13 @@ async function loadOvernight() {
     }
   } else {
     if (statusPill) {
-      statusPill.textContent = state.status || 'idle';
-      statusPill.className = state.status === 'completed' ? 'pill ok' : 'pill';
+      if (state.bedtime_autostart) {
+        statusPill.textContent = 'bedtime armed';
+        statusPill.className = 'pill cyan';
+      } else {
+        statusPill.textContent = state.status || 'idle';
+        statusPill.className = state.status === 'completed' ? 'pill ok' : 'pill';
+      }
     }
     if (banner) banner.hidden = true;
     if (btnStart) btnStart.hidden = false;
@@ -2078,9 +2129,10 @@ async function loadOvernight() {
   const chainListEl = $('overnightChainList');
   if (chainListEl && (chainListEl.querySelector('.empty') || !chainListEl.children.length)) {
     if (chains.length) {
+      const selSet = new Set(state.selected_chains || []);
       setHTML(chainListEl, chains.map((c) =>
         `<label class="overnight-item">` +
-        `<input type="checkbox" value="${esc(c.name)}">` +
+        `<input type="checkbox" value="${esc(c.name)}"${selSet.has(c.name) ? ' checked' : ''}>` +
         `<span><b>${esc(c.name)}</b> <small class="dim">(${c.steps} steps · ${esc(c.model)})</small></span>` +
         `</label>`
       ).join(''));

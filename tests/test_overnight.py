@@ -104,3 +104,79 @@ def test_cancel_overnight(tmp_path: Path):
         assert st["status"] == "cancelled"
         assert st["queue"] == []
         assert st["current"] is None
+
+
+def test_set_bedtime_config(tmp_path: Path):
+    state_file = tmp_path / "overnight.json"
+    with patch.object(overnight, "OVERNIGHT_STATE", state_file):
+        res = overnight.set_bedtime_config(enabled=True, chains=["Chain X", "Chain Y"])
+        assert res["ok"] is True
+        assert "armed" in res["why"]
+
+        st = overnight.get_overnight_state()
+        assert st["bedtime_autostart"] is True
+        assert st["selected_chains"] == ["Chain X", "Chain Y"]
+
+        res2 = overnight.set_bedtime_config(enabled=False)
+        assert res2["ok"] is True
+        assert "disabled" in res2["why"]
+        assert overnight.get_overnight_state()["bedtime_autostart"] is False
+
+
+def test_trigger_bedtime_run(tmp_path: Path):
+    state_file = tmp_path / "overnight.json"
+    chains_dir = tmp_path / "Chains"
+    chains_dir.mkdir()
+    (chains_dir / "Chain X.md").write_text("---\ntype: chain\n---\n", encoding="utf-8")
+
+    with patch.object(overnight, "OVERNIGHT_STATE", state_file), \
+         patch.object(display_ctl, "keep_pc_awake", return_value=True):
+
+        # When disabled, trigger fails
+        overnight.save_overnight_state({"bedtime_autostart": False, "selected_chains": ["Chain X"]})
+        res = overnight.trigger_bedtime_run(chains_dir=chains_dir)
+        assert res["ok"] is False
+        assert "toggled off" in res["why"]
+
+        # When enabled, trigger starts batch with display_mode="none"
+        overnight.save_overnight_state({"bedtime_autostart": True, "selected_chains": ["Chain X"]})
+        res2 = overnight.trigger_bedtime_run(chains_dir=chains_dir)
+        assert res2["ok"] is True
+        assert res2["triggered_by"] == "monitor_off"
+
+        st = overnight.get_overnight_state()
+        assert st["active"] is True
+        assert st["current"] == "Chain X"
+        assert st["display_mode"] == "none"
+
+        # Already active: subsequent trigger reports already active
+        res3 = overnight.trigger_bedtime_run(chains_dir=chains_dir)
+        assert res3["ok"] is False
+        assert "already active" in res3["why"]
+
+
+def test_check_monitor_off_trigger_latching(tmp_path: Path):
+    state_file = tmp_path / "overnight.json"
+    chains_dir = tmp_path / "Chains"
+    chains_dir.mkdir()
+    (chains_dir / "Chain X.md").write_text("---\ntype: chain\n---\n", encoding="utf-8")
+
+    with patch.object(overnight, "OVERNIGHT_STATE", state_file), \
+         patch.object(display_ctl, "keep_pc_awake", return_value=True):
+
+        overnight.save_overnight_state({"bedtime_autostart": True, "selected_chains": ["Chain X"]})
+
+        # When monitor off is inactive, returns None and unlatches
+        with patch.object(overnight, "is_monitor_off_active", return_value=False):
+            assert overnight.check_monitor_off_trigger(chains_dir=chains_dir) is None
+
+        # When monitor off becomes active, fires once
+        with patch.object(overnight, "is_monitor_off_active", return_value=True):
+            res = overnight.check_monitor_off_trigger(chains_dir=chains_dir)
+            assert res is not None
+            assert res["ok"] is True
+
+            # Subsequent check while still active latches and returns None
+            res2 = overnight.check_monitor_off_trigger(chains_dir=chains_dir)
+            assert res2 is None
+

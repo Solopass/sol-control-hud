@@ -494,6 +494,24 @@ class Hub:
             log(f"overnight cancel: {r.get('why')}")
             return r
 
+        if action == "set_overnight_bedtime":
+            from .chains import overnight
+            b = body or {}
+            r = overnight.set_bedtime_config(
+                enabled=b.get("enabled", False),
+                chains=b.get("chains"),
+                display_mode=b.get("display_mode"),
+                sleep_when_done=b.get("sleep_when_done"),
+            )
+            log(f"overnight bedtime config: {r.get('why')}")
+            return r
+
+        if action in ("monitor_off", "monitor_off_event"):
+            from .chains import overnight
+            r = overnight.trigger_bedtime_run()
+            log(f"overnight monitor_off trigger: {r.get('why')}")
+            return r
+
         if action in ("guard_ignore", "guard_resume"):
             # the guard turned the AI off for something that is not a game: say so once, instead of editing the
             # config by hand (09-25 Notepad and Edge, 09-27 claude x3, 10-07/08 steamwebhelper x5)
@@ -1228,11 +1246,12 @@ class Hub:
             pass
 
         now = time.time()
-        if now - getattr(self, "_last_overnight_check", 0) >= 3.0:
+        if now - getattr(self, "_last_overnight_check", 0) >= 2.5:
             self._last_overnight_check = now
             try:
                 from .chains import overnight
                 overnight.check_and_advance()
+                overnight.check_monitor_off_trigger()
             except Exception:
                 pass
 
