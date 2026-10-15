@@ -519,7 +519,8 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
             ctx.note(f"ingesting tracks {i + 1}-{min(i + len(chunk), len(video_ids))} of {len(video_ids)} to Solang")
 
         chunk_urls = [f"https://www.youtube.com/watch?v={v}" for v in chunk]
-        payload = json.dumps({"urls": chunk_urls, "autoSave": auto_save}).encode("utf-8")
+        chunk_items = [{"videoId": v, "title": titles_map.get(v, "")} for v in chunk]
+        payload = json.dumps({"urls": chunk_urls, "items": chunk_items, "autoSave": auto_save}).encode("utf-8")
         req = urllib.request.Request(
             f"{solang_url}/api/youtube/bulk-ingest",
             data=payload,
@@ -872,6 +873,7 @@ def run_takeout_queue(args: dict, ctx: ToolContext | None = None) -> dict:
 
         cur_batch_size = min(batch_size, max_total - total_processed)
         extract_args = dict(args)
+        extract_args["file"] = str(args.get("file") or state.get("source_file") or r"D:\Output\Takeout\prepared_music_history.json")
         extract_args["max_items"] = cur_batch_size
         extract_args["state_file"] = str(state_p)
 
