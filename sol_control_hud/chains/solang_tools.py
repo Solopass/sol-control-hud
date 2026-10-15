@@ -620,6 +620,25 @@ KARAOKE_LIBRARY_NOTE = Path(os.environ.get("SOL_KARAOKE_LIBRARY", r"D:\OBVLT\1No
 PROJECTS_DIR = SOLANG_DIR / "data" / "projects"
 
 
+def save_takeout_upload(content: str, filename: str = "watch-history.html") -> dict:
+    r"""Saves uploaded Takeout file into D:\Output\Takeout and resets queue state offset."""
+    target_dir = Path(r"D:\Output\Takeout")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_p = target_dir / filename
+    target_p.write_text(content, encoding="utf-8")
+
+    items = TakeoutParser.parse_file(target_p, filter_music=True)
+
+    state = StateManager.load(DEFAULT_STATE_FILE)
+    state["source_file"] = str(target_p)
+    state["offset"] = 0
+    state["total_found"] = len(items)
+    StateManager.save(DEFAULT_STATE_FILE, state)
+
+    status = get_queue_status(state_file=DEFAULT_STATE_FILE)
+    return {"ok": True, "file": str(target_p), "status": status}
+
+
 def generate_karaoke_library_note(output_path: Path | str | None = None, projects_dir: Path | str | None = None) -> str:
     """Scans all .kstudio projects and compiles a clean, sorted Obsidian MOC note."""
     out_p = Path(output_path or KARAOKE_LIBRARY_NOTE)
@@ -631,6 +650,9 @@ def generate_karaoke_library_note(output_path: Path | str | None = None, project
     files = sorted(proj_dir.glob("*.kstudio"), key=lambda f: f.stat().st_mtime, reverse=True)
     projects = []
     total_angles = 0
+    gold_count = 0
+    silver_count = 0
+    review_count = 0
 
     for f in files:
         try:
@@ -642,6 +664,27 @@ def generate_karaoke_library_note(output_path: Path | str | None = None, project
             angle_names = [s.get("name", "Angle") for s in media_sources if s.get("name")]
             angles_desc = f"{angles_count} ({', '.join(angle_names[:3])}{'...' if len(angle_names) > 3 else ''})" if angle_names else str(angles_count)
 
+            # Determine confidence badge
+            conf_tier = (d.get("confidenceTier") or "").lower()
+            if not conf_tier:
+                src = (d.get("source") or "").lower()
+                if "dual" in src:
+                    conf_tier = "gold"
+                elif "lrc" in src or "public lyrics" in src:
+                    conf_tier = "silver"
+                else:
+                    conf_tier = "silver" if len(d.get("lyrics") or []) >= 6 else "review"
+
+            if conf_tier == "gold":
+                badge = "🏅 Gold"
+                gold_count += 1
+            elif conf_tier == "silver":
+                badge = "🥈 Silver"
+                silver_count += 1
+            else:
+                badge = "⚠️ Review"
+                review_count += 1
+
             projects.append({
                 "id": d.get("id", f.stem),
                 "title": d.get("title", f.stem),
@@ -650,6 +693,7 @@ def generate_karaoke_library_note(output_path: Path | str | None = None, project
                 "lyrics_count": len(d.get("lyrics") or []),
                 "angles": angles_desc,
                 "angles_count": angles_count,
+                "badge": badge,
                 "url": f"http://127.0.0.1:3000/?project={d.get('id', f.stem)}"
             })
         except Exception:
@@ -666,10 +710,10 @@ def generate_karaoke_library_note(output_path: Path | str | None = None, project
         "---",
         "",
         "# Solang Karaoke Library",
-        f"**Total Songs:** {len(projects)} • **Total Video Angles:** {total_angles} • **Studio:** [Open Solang](http://127.0.0.1:3000)",
+        f"**Total Songs:** {len(projects)} • **Video Angles:** {total_angles} • **Quality:** 🏅 {gold_count} Gold | 🥈 {silver_count} Silver | ⚠️ {review_count} Review • **Studio:** [Open Solang](http://127.0.0.1:3000)",
         "",
-        "| Artist | Song Title | Video Angles | Lyrics | Studio Link |",
-        "|:---|:---|:---|:---:|:---:|"
+        "| Artist | Song Title | Quality | Video Angles | Lyrics | Studio Link |",
+        "|:---|:---|:---:|:---|:---:|:---:|",
     ]
 
     for p in projects:
@@ -677,7 +721,7 @@ def generate_karaoke_library_note(output_path: Path | str | None = None, project
         dur_sec = int(p["duration"] % 60)
         dur_str = f"{dur_min}:{dur_sec:02d}"
         lines.append(
-            f"| **{p['artist']}** | {p['title']} | {p['angles']} | {p['lyrics_count']} lines ({dur_str}) | [Sing Now]({p['url']}) |"
+            f"| **{p['artist']}** | {p['title']} | {p['badge']} | {p['angles']} | {p['lyrics_count']} lines ({dur_str}) | [Sing Now]({p['url']}) |"
         )
 
     lines.append("")

@@ -439,6 +439,63 @@ $('solangSyncLibBtn')?.addEventListener('click', async () => {
   toast(r.why || 'Library synced');
 });
 
+// Dropzone event handlers
+const dropzone = $('solangDropzone');
+const fileInput = $('solangFileInput');
+const dropPrompt = $('solangDropPrompt');
+
+if (dropzone && fileInput) {
+  dropzone.addEventListener('click', () => fileInput.click());
+  
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.style.borderColor = '#38bdf8';
+    dropzone.style.background = 'rgba(56, 189, 248, 0.1)';
+  });
+
+  const resetDropzoneStyle = () => {
+    dropzone.style.borderColor = '#475569';
+    dropzone.style.background = 'rgba(0,0,0,0.25)';
+  };
+
+  dropzone.addEventListener('dragleave', resetDropzoneStyle);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    if (dropPrompt) dropPrompt.textContent = `⏳ Uploading and parsing ${file.name}...`;
+    try {
+      const text = await file.text();
+      const r = await post('/api/action', {
+        action: 'solang',
+        op: 'upload_takeout',
+        filename: file.name,
+        content: text
+      });
+      toast(r.why || 'File loaded into Takeout queue');
+      if (dropPrompt) dropPrompt.innerHTML = `✅ <b>${file.name}</b> loaded! Ready to ingest.`;
+      updateSolangQueueStatus();
+    } catch (err) {
+      toast('Upload failed: ' + err.message);
+      if (dropPrompt) dropPrompt.textContent = `❌ Upload failed. Try again.`;
+    } finally {
+      resetDropzoneStyle();
+    }
+  };
+
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleFile(e.dataTransfer.files[0]);
+    }
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files[0]) {
+      handleFile(fileInput.files[0]);
+    }
+  });
+}
+
 updateSolangQueueStatus();
 setInterval(updateSolangQueueStatus, 15000);
 

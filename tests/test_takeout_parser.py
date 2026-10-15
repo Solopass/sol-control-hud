@@ -269,7 +269,9 @@ def test_generate_karaoke_library_note(tmp_path):
         "mediaSources": [
             {"id": "src_1", "name": "Official MV", "videoId": "v1"},
             {"id": "src_2", "name": "Dance Practice", "videoId": "v2"}
-        ]
+        ],
+        "confidenceTier": "gold",
+        "confidenceScore": 98
     }
     (projects_dir / "proj_1.kstudio").write_text(json.dumps(p1), encoding="utf-8")
 
@@ -279,6 +281,8 @@ def test_generate_karaoke_library_note(tmp_path):
     assert "Supernova" in content
     assert "aespa" in content
     assert "Dance Practice" in content
+    assert "🏅 Gold" in content
+    assert "Quality:" in content
     assert "http://127.0.0.1:3000/?project=proj_1" in content
     assert out_note.exists()
 
@@ -308,4 +312,30 @@ def test_queue_status_and_pause(tmp_path):
     st.set_queue_paused(True, state_file)
     status2 = st.get_queue_status(state_file)
     assert status2["paused"] is True
+
+
+def test_save_takeout_upload(tmp_path, monkeypatch):
+    test_target_dir = tmp_path / "Takeout"
+    test_state_file = tmp_path / "state.json"
+    
+    # Monkeypatch paths
+    monkeypatch.setattr(st, "DEFAULT_STATE_FILE", test_state_file)
+    
+    html_sample = '<a href="https://www.youtube.com/watch?v=11cta61Wi0g">NewJeans - Hype Boy</a>'
+    
+    # Mock target dir
+    import pathlib
+    orig_path = pathlib.Path
+    def mock_path(*args, **kwargs):
+        p = orig_path(*args, **kwargs)
+        if str(p) == r"D:\Output\Takeout":
+            return test_target_dir
+        return p
+    monkeypatch.setattr(st, "Path", mock_path)
+
+    res = st.save_takeout_upload(html_sample, "test-history.html")
+    assert res["ok"] is True
+    assert (test_target_dir / "test-history.html").exists()
+    state = st.StateManager.load(test_state_file)
+    assert state["offset"] == 0
 

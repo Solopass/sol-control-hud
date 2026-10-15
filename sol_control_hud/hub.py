@@ -669,6 +669,12 @@ class Hub:
             count = int(b.get("count") or 25)
             r = solang_tools.run_takeout_queue({"file": file_path, "target_count": count})
             return {"ok": True, "why": r.get("summary", "Ran queue batch"), "result": r}
+        if kind == "solang" and op == "upload_takeout":
+            from .chains import solang_tools
+            content = str(b.get("content") or "")
+            filename = str(b.get("filename") or "watch-history.html")
+            r = solang_tools.save_takeout_upload(content, filename)
+            return {"ok": True, "why": f"Loaded Takeout file: {filename}", "status": r.get("status")}
         self._refresh_launchpad()                     # act on the current state, not a cached one
         try:
             rows = self.projects_payload()["projects"]
