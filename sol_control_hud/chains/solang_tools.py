@@ -44,22 +44,26 @@ HTML_LINK_RE = re.compile(
 # Music heuristic filters
 MUSIC_POSITIVE_KEYWORDS = {
     "mv", "m/v", "official music video", "official video", "official audio", "official visualizer",
-    "audio", "lyric", "lyrics", "color coded", "ost", "soundtrack", "live", "performance",
-    "stage", "fancam", "dance practice", "remix", "album", "teaser", "k-pop", "kpop", "track",
-    "visualizer", "choreography", "karaoke", "comeback", "special clip", "relay dance",
-    "showcase", "acoustic", "instrumental", "cover", "feat", "ft.", "prod."
+    "audio", "lyric", "lyrics", "color coded", "ost", "soundtrack", "live stage", "live performance",
+    "special stage", "live concert", "live clip", "stage", "fancam", "dance practice", "remix", "album",
+    "teaser", "k-pop", "kpop", "track", "visualizer", "choreography", "karaoke", "comeback", "special clip",
+    "relay dance", "showcase", "acoustic", "instrumental", "cover", "feat", "ft.", "prod."
 }
 
 MUSIC_NEGATIVE_KEYWORDS = {
     "tutorial", "walkthrough", "gameplay", "guide", "review", "reaction", "unboxing",
     "podcast", "vlog", "interview", "documentary", "news", "episode", "highlights",
-    "speedrun", "tier list", "analysis", "explaining", "how to", "breakdown"
+    "speedrun", "tier list", "analysis", "explaining", "how to", "breakdown",
+    "rogan", "biden", "trump", "politics", "weapon", "gun", "court", "trial",
+    "police", "history", "cop", "nfl", "nba", "ufc", "boxing", "full documentary",
+    "full episode", "live pd", "traffic stop", "arrest", "cops"
 }
 
 MUSIC_CHANNELS = {
     "smtown", "jyp entertainment", "hybe labels", "starship", "yg entertainment", "1thek",
     "stone music entertainment", "cube entertainment", "mnet k-pop", "kbs kpop", "mbk",
-    "woollim", "rbw", "fnc", "pledis", "vevo", "topic", "records", "music"
+    "woollim", "rbw", "fnc", "pledis", "vevo", "topic", "records", "music", "entertainment",
+    "mbckpop", "sbs kpop", "arirang k-pop", "m2", "studio choom"
 }
 
 
@@ -68,18 +72,21 @@ def is_likely_music(title: str, channel: str = "") -> bool:
     t = title.lower()
     c = channel.lower()
 
-    # If channel is a known music label/distributor
+    # Rule out strong negative keywords in title or channel
+    if any(re.search(rf"\b{re.escape(neg)}\b", t) for neg in MUSIC_NEGATIVE_KEYWORDS):
+        return False
+    if any(re.search(rf"\b{re.escape(neg)}\b", c) for neg in ("news", "podcast", "documentary", "history", "politics", "sports")):
+        return False
+
+    # Channel match (e.g. Dreamcatcher - Topic, 1theK, SMTOWN)
     if any(mch in c for mch in MUSIC_CHANNELS):
         return True
 
-    # Quick check for strong negative keywords
-    # Only discard if negative word is present and no strong MV/lyrics sign
-    has_negative = any(re.search(rf"\b{re.escape(neg)}\b", t) for neg in MUSIC_NEGATIVE_KEYWORDS)
-    has_strong_positive = ("mv" in t or "m/v" in t or "official video" in t or "lyrics" in t or "audio" in t)
-    if has_negative and not has_strong_positive:
-        return False
+    # Korean Hangul in title (very high confidence for K-Pop tracks)
+    if any(0xAC00 <= ord(char) <= 0xD7A3 for char in title):
+        return True
 
-    # Check for strong positive indicators
+    # Strong positive keywords in title
     for kw in MUSIC_POSITIVE_KEYWORDS:
         if kw in ("mv", "m/v"):
             if re.search(r"\b(m/?v)\b|\[m/?v\]|\(m/?v\)", t):
@@ -87,9 +94,13 @@ def is_likely_music(title: str, channel: str = "") -> bool:
         elif kw in t:
             return True
 
-    # Check for standard "Artist - Title" or "Artist – Title" pattern
+    # Check for standard "Artist - Title" pattern (e.g. Radiohead - Creep)
+    # Reject if it has episode/season/number markers or show/clip channel names
     if re.search(r".+?\s+[-–—]\s+.+", title):
-        return True
+        has_ep_marker = bool(re.search(r"(#\d+|\b(s\d+|ep\d+|season\s*\d+|episode\s*\d+)\b)", t))
+        has_show_channel = any(sc in c for sc in ("jre", "podcast", "news", "clips", "network", "tv", "talk", "daily", "media"))
+        if not has_ep_marker and not has_show_channel:
+            return True
 
     return False
 
@@ -124,13 +135,17 @@ class TakeoutParser:
 
     @staticmethod
     def _parse_html(path: Path, filter_music: bool) -> list[dict[str, str]]:
-        """Parses watch-history.html."""
+        """Parses watch-history.html extracting both video and channel metadata."""
         text = path.read_text(encoding="utf-8", errors="replace")
         seen_ids: set[str] = set()
         items: list[dict[str, str]] = []
 
-        # Find all watch links and their anchor text
-        for m in HTML_LINK_RE.finditer(text):
+        cell_re = re.compile(
+            r'<div class="content-cell mdl-cell mdl-cell--6-col mdl-typography--body-1">\s*Watched\s*<a\s+[^>]*href="[^"]*?(?:watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})[^"]*"[^>]*>(.*?)</a>(?:<br\s*/?>\s*<a\s+[^>]*href="[^"]*?(?:/channel/|/user/|/@)[^"]*"[^>]*>(.*?)</a>)?',
+            re.IGNORECASE | re.DOTALL
+        )
+
+        for m in cell_re.finditer(text):
             vid = m.group(1)
             if vid in seen_ids or len(vid) != 11:
                 continue
@@ -138,15 +153,38 @@ class TakeoutParser:
 
             raw_title = m.group(2)
             title = clean_takeout_title(raw_title) or f"YouTube Video ({vid})"
+            raw_channel = m.group(3) or ""
+            channel = clean_takeout_title(raw_channel)
 
-            if filter_music and not is_likely_music(title):
+            if filter_music and not is_likely_music(title, channel):
                 continue
 
             items.append({
                 "videoId": vid,
                 "title": title,
+                "channel": channel,
                 "url": f"https://www.youtube.com/watch?v={vid}"
             })
+
+        # Fallback to simple anchor regex if no standard cells matched
+        if not items:
+            for m in HTML_LINK_RE.finditer(text):
+                vid = m.group(1)
+                if vid in seen_ids or len(vid) != 11:
+                    continue
+                seen_ids.add(vid)
+
+                raw_title = m.group(2)
+                title = clean_takeout_title(raw_title) or f"YouTube Video ({vid})"
+
+                if filter_music and not is_likely_music(title):
+                    continue
+
+                items.append({
+                    "videoId": vid,
+                    "title": title,
+                    "url": f"https://www.youtube.com/watch?v={vid}"
+                })
 
         return items
 
@@ -639,6 +677,71 @@ def save_takeout_upload(content: str, filename: str = "watch-history.html") -> d
     return {"ok": True, "file": str(target_p), "status": status}
 
 
+def prepare_takeout_file(source_path: str | Path | None = None, output_dir: str | Path | None = None) -> dict:
+    """Pre-processes and filters large Takeout files (10MB+) on disk into a clean music dataset."""
+    default_candidates = [
+        Path(source_path) if source_path else None,
+        Path(r"C:\Users\cohen\Downloads\Takeout\YouTube and YouTube Music\history\watch-history.html"),
+        Path(r"D:\Output\Takeout\watch-history.html")
+    ]
+    src = None
+    for cand in default_candidates:
+        if cand and cand.exists():
+            src = cand
+            break
+
+    if not src:
+        raise ToolError("No Takeout file found. Please provide path to watch-history.html or watch-history.json.")
+
+    out_d = Path(output_dir or r"D:\Output\Takeout")
+    out_d.mkdir(parents=True, exist_ok=True)
+
+    items = TakeoutParser.parse_file(src, filter_music=True)
+
+    json_path = out_d / "prepared_music_history.json"
+    txt_path = out_d / "prepared_music_history.txt"
+
+    json_path.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+    txt_path.write_text("\n".join(it["url"] for it in items), encoding="utf-8")
+
+    state = StateManager.load(DEFAULT_STATE_FILE)
+    state["source_file"] = str(json_path)
+    state["offset"] = 0
+    state["total_found"] = len(items)
+    state["paused"] = False
+    StateManager.save(DEFAULT_STATE_FILE, state)
+
+    status = get_queue_status(state_file=DEFAULT_STATE_FILE)
+
+    summary = f"Prepared {len(items):,} music tracks from {src.name} ({round(src.stat().st_size / 1024 / 1024, 1)} MB). Saved to {json_path.name}."
+    return {
+        "ok": True,
+        "source": str(src),
+        "source_size_mb": round(src.stat().st_size / 1024 / 1024, 2),
+        "total_music_tracks": len(items),
+        "json_path": str(json_path),
+        "txt_path": str(txt_path),
+        "status": status,
+        "summary": summary,
+        "why": summary
+    }
+
+
+def reset_takeout_queue(state_file: Path | str | None = None) -> dict:
+    """Clears queue state and resets offset to 0."""
+    state_p = Path(state_file or DEFAULT_STATE_FILE)
+    state = {
+        "source_file": "",
+        "total_found": 0,
+        "offset": 0,
+        "paused": False,
+        "processed": {},
+        "updated_at": datetime.now().isoformat()
+    }
+    StateManager.save(state_p, state)
+    return {"ok": True, "why": "Queue state reset to 0."}
+
+
 def generate_karaoke_library_note(output_path: Path | str | None = None, projects_dir: Path | str | None = None) -> str:
     """Scans all .kstudio projects and compiles a clean, sorted Obsidian MOC note."""
     out_p = Path(output_path or KARAOKE_LIBRARY_NOTE)
@@ -866,4 +969,6 @@ TOOLS = {
     "solang_bulk_pipeline": solang_bulk_pipeline,
     "run_takeout_queue": run_takeout_queue,
     "sync_karaoke_library": sync_karaoke_library,
+    "prepare_takeout_file": prepare_takeout_file,
+    "reset_takeout_queue": reset_takeout_queue,
 }

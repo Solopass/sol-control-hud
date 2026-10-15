@@ -665,10 +665,19 @@ class Hub:
             return {"ok": True, "why": "Synced Karaoke Library in 1Notebook"}
         if kind == "solang" and op == "run_queue_batch":
             from .chains import solang_tools
-            file_path = str(b.get("file") or r"D:\Output\Takeout\watch-history.html")
+            file_path = str(b.get("file") or r"D:\Output\Takeout\prepared_music_history.json")
             count = int(b.get("count") or 25)
             r = solang_tools.run_takeout_queue({"file": file_path, "target_count": count})
             return {"ok": True, "why": r.get("summary", "Ran queue batch"), "result": r}
+        if kind == "solang" and op == "prepare_takeout":
+            from .chains import solang_tools
+            source_p = str(b.get("source") or b.get("file") or r"C:\Users\cohen\Downloads\Takeout\YouTube and YouTube Music\history\watch-history.html")
+            r = solang_tools.prepare_takeout_file(source_p)
+            return {"ok": True, "why": r["summary"], "result": r, "status": r["status"]}
+        if kind == "solang" and op == "reset_queue":
+            from .chains import solang_tools
+            r = solang_tools.reset_takeout_queue()
+            return {"ok": True, "why": r["why"], "status": solang_tools.get_queue_status()}
         if kind == "solang" and op == "upload_takeout":
             from .chains import solang_tools
             content = str(b.get("content") or "")

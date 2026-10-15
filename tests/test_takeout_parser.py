@@ -339,3 +339,40 @@ def test_save_takeout_upload(tmp_path, monkeypatch):
     state = st.StateManager.load(test_state_file)
     assert state["offset"] == 0
 
+
+def test_prepare_takeout_file(tmp_path, monkeypatch):
+    test_state_file = tmp_path / "state.json"
+    test_out_dir = tmp_path / "Prepared"
+    test_html = tmp_path / "watch-history.html"
+
+    monkeypatch.setattr(st, "DEFAULT_STATE_FILE", test_state_file)
+
+    sample_html = """
+    <div class="content-cell mdl-cell mdl-cell--6-col mdl-typography--body-1">
+      Watched <a href="https://www.youtube.com/watch?v=11cta61Wi0g">NewJeans - Hype Boy</a><br>
+      <a href="https://www.youtube.com/channel/UC-Topic">NewJeans - Topic</a>
+    </div>
+    <div class="content-cell mdl-cell mdl-cell--6-col mdl-typography--body-1">
+      Watched <a href="https://www.youtube.com/watch?v=eDzGRT06er0">Joe Rogan Experience #1438 - Andrew Santino</a><br>
+      <a href="https://www.youtube.com/channel/UCPowerfulJRE">PowerfulJRE</a>
+    </div>
+    """
+    test_html.write_text(sample_html, encoding="utf-8")
+
+    res = st.prepare_takeout_file(source_path=test_html, output_dir=test_out_dir)
+    assert res["ok"] is True
+    assert res["total_music_tracks"] == 1
+    assert (test_out_dir / "prepared_music_history.json").exists()
+    assert (test_out_dir / "prepared_music_history.txt").exists()
+
+    state = st.StateManager.load(test_state_file)
+    assert state["total_found"] == 1
+    assert state["offset"] == 0
+
+    # Test reset
+    reset_res = st.reset_takeout_queue(state_file=test_state_file)
+    assert reset_res["ok"] is True
+    reloaded = st.StateManager.load(test_state_file)
+    assert reloaded["total_found"] == 0
+    assert reloaded["offset"] == 0
+

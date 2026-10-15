@@ -306,6 +306,11 @@
         <button type="button" class="mini" id="solangSyncLibBtn" title="Sync Obsidian Karaoke Library MOC in 1Notebook">📚 Sync Obsidian Index</button>
         <span class="dim small" id="solangQueueDetail" style="margin-left:auto;"></span>
       </div>
+      <div style="display:flex; gap:6px; align-items:center; margin-top:8px;">
+        <input type="text" id="solangFilePathInput" placeholder="Path to watch-history.html / .json..." value="C:\Users\cohen\Downloads\Takeout\YouTube and YouTube Music\history\watch-history.html" style="flex:1; background:var(--bg-input, #0b1120); border:1px solid var(--border, #1e293b); border-radius:6px; padding:6px 10px; color:#f1f5f9; font-family:monospace; font-size:11px;" />
+        <button type="button" class="mini go" id="solangPrepareBtn" title="Scan and filter high-confidence music tracks into a clean dataset">⚡ Sift &amp; Prepare</button>
+        <button type="button" class="mini danger" id="solangResetBtn" title="Reset queue progress and clear state">🔄 Reset</button>
+      </div>
       <div id="solangDropzone" style="margin-top:8px; border:1px dashed #475569; border-radius:6px; padding:10px; text-align:center; cursor:pointer; background:rgba(0,0,0,0.25); transition:all 0.2s ease;">
         <span style="font-size:11px; color:#94a3b8;" id="solangDropPrompt">📁 Drag &amp; Drop <code>watch-history.html</code>, Takeout JSON, or URLs <code>.txt</code> here to load queue</span>
         <input type="file" id="solangFileInput" accept=".html,.json,.csv,.txt" style="display:none;" />

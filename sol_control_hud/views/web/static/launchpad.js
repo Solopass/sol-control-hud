@@ -439,6 +439,26 @@ $('solangSyncLibBtn')?.addEventListener('click', async () => {
   toast(r.why || 'Library synced');
 });
 
+$('solangPrepareBtn')?.addEventListener('click', async () => {
+  const input = $('solangFilePathInput');
+  const path = input ? input.value.trim() : '';
+  toast('Sifting & preparing music tracks from file...');
+  try {
+    const r = await post('/api/action', { action: 'solang', op: 'prepare_takeout', file: path });
+    toast(r.why || 'Takeout file prepared');
+    updateSolangQueueStatus();
+  } catch (err) {
+    toast('Prepare failed: ' + err.message);
+  }
+});
+
+$('solangResetBtn')?.addEventListener('click', async () => {
+  if (!confirm('Reset Takeout queue progress to 0?')) return;
+  const r = await post('/api/action', { action: 'solang', op: 'reset_queue' });
+  toast(r.why || 'Queue reset');
+  updateSolangQueueStatus();
+});
+
 // Dropzone event handlers
 const dropzone = $('solangDropzone');
 const fileInput = $('solangFileInput');
