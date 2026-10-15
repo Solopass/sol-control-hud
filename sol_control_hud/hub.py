@@ -567,9 +567,13 @@ class Hub:
                 self.cmds.put(("review_snip_added", r.get("parts", 2)))
                 self.notify_now("Exam Auto-Scroll", "Captured, stitched, and solved scrolled question")
             return r
-        if target in ("hud", "popup"):
-            self.cmds.put(("review_toggle_hud", None))
-            return {"ok": True, "why": "toggled floating exam HUD"}
+        if target in ("hud", "popup", "toggle_hud"):
+            b = body or {}
+            enabled = b.get("enabled") if "enabled" in b else not w.state().get("hud_enabled", False)
+            w.set_hud_enabled(enabled)
+            self.cmds.put(("review_set_hud", enabled))
+            log(f"exam review: set hud_enabled={enabled}")
+            return {"ok": True, "why": f"floating exam HUD {'enabled' if enabled else 'disabled'}", "hud_enabled": enabled}
         ops = {"start": w.start, "stop": w.stop, "look": w.look_now, "clear": w.clear}
         if target not in ops:
             return {"ok": False, "why": f"unknown review action {target!r}"}
@@ -1191,19 +1195,32 @@ class Hub:
                     if self.exam_hud and getattr(self.exam_hud, "snip_btn", None):
                         count = arg or 2
                         self.exam_hud.snip_btn.config(text=f"✓ Stitched ({count} parts)")
+                elif name == "review_set_hud":
+                    if arg:
+                        self._ensure_exam_hud()
+                        if self.exam_hud:
+                            self.exam_hud.show()
+                    else:
+                        if self.exam_hud:
+                            self.exam_hud.hide()
                 elif name == "review_toggle_hud":
-                    self._ensure_exam_hud()
-                    if self.exam_hud:
-                        self.exam_hud.toggle()
+                    from . import exam_review
+                    w = exam_review.watcher()
+                    new_val = not w.state().get("hud_enabled", False)
+                    w.set_hud_enabled(new_val)
+                    if new_val:
+                        self._ensure_exam_hud()
+                        if self.exam_hud:
+                            self.exam_hud.show()
+                    else:
+                        if self.exam_hud:
+                            self.exam_hud.hide()
                 elif name == "review_update_hud":
-                    self._ensure_exam_hud()
-                    if self.exam_hud:
-                        self.exam_hud.update_item(arg)
-                    ans = arg.get("answer") or ""
-                    if ans:
-                        is_gem = bool(arg.get("gemini_retried") or arg.get("model") == "gemini-3.8-flash")
-                        title = "✨ Gemini Solution" if is_gem else "Exam Solution"
-                        self.notify_now(title, f"Ans: {ans[:80]}")
+                    from . import exam_review
+                    if exam_review.watcher().state().get("hud_enabled", False):
+                        self._ensure_exam_hud()
+                        if self.exam_hud:
+                            self.exam_hud.update_item(arg, show=True)
                 elif name == "exit":
                     self._shutdown(arg)
                     return
@@ -1436,6 +1453,7 @@ class Hub:
                     on_add_snip=lambda: self.review_action("snip"),
                     on_pick_snip=lambda: self.review_action("pick_snip"),
                     on_auto_scroll=lambda: self.review_action("auto_scroll"),
+                    on_close=lambda: self.review_action("toggle_hud", {"enabled": False}),
                 )
             except Exception as e:
                 log(f"exam hud init failed: {e}")

@@ -337,3 +337,122 @@ def test_gemini_retry_non_multiple_choice(monkeypatch, tmp_path):
     assert "> | **Transport** | Segment |" in content
     assert "Why previous answer was wrong" in content
 
+
+# ---- 7. CompTIA Dual-Column Matching Extraction & Dummy Label Suppression
+def test_extract_matching_columns_comptia_format():
+    text = (
+        "Question 3\nMatch the memory type to the feature.\n\n"
+        "Categories:\n"
+        "DDR SDRAM\n"
+        "DDR3 SDRAM\n"
+        "DDR4 SDRAM\n"
+        "DDR2 SDRAM\n\n"
+        "Options:\n"
+        "It's connector has 288 pins and has advanced error correction features available.\n"
+        "It's connector has 184 pins and is able to support two writes and two reads per CPU clock cycle.\n"
+        "It's connector has 240 pins and consumes 1.8 Volts of power.\n"
+        "It's connector has 240 pins and consumes 1.5 Volts of power."
+    )
+    cols = er._extract_matching_columns(text)
+    assert cols is not None
+    assert cols["sources"] == ["DDR SDRAM", "DDR3 SDRAM", "DDR4 SDRAM", "DDR2 SDRAM"]
+    assert len(cols["targets"]) == 4
+    assert cols["targets"][0].startswith("It's connector has 288 pins")
+
+
+def test_tidy_read_matching_fallback_and_extraction():
+    # Model mistakenly returns question_type = multiple_choice with Categories/Options in question
+    raw = {
+        "status": "ok",
+        "question": "Match the memory type to the feature.\n\nCategories:\nDDR SDRAM\nDDR3 SDRAM\nOptions:\n184 pins\n240 pins",
+        "choices": [{"label": "A", "text": "DDR SDRAM"}],
+        "your_labels": [],
+        "correct_labels": [],
+    }
+    tidied = er.tidy_read(raw)
+    assert tidied["question_type"] == "matching"
+    assert tidied["question"] == "Match the memory type to the feature."
+    assert tidied["matching_items"]["sources"] == ["DDR SDRAM", "DDR3 SDRAM"]
+    assert tidied["matching_items"]["targets"] == ["184 pins", "240 pins"]
+    assert tidied["choices"] == []
+
+
+def test_matching_solve_overrides_dummy_labels(tmp_path):
+    # Solver LLM emits dummy answer_labels: ["D"] alongside matching_pairs
+    read_resp = {
+        "status": "ok",
+        "question_type": "matching",
+        "question": "Match the memory type to the feature.",
+        "choices": [],
+        "matching_items": {
+            "sources": ["DDR SDRAM", "DDR3 SDRAM", "DDR4 SDRAM", "DDR2 SDRAM"],
+            "targets": ["288 pins", "184 pins", "240 pins 1.8V", "240 pins 1.5V"],
+        },
+    }
+    solve_resp = {
+        "topic": "Computer Memory Types",
+        "explanation": "DDR has 184 pins, DDR2 has 240 pins 1.8V, DDR3 has 240 pins 1.5V, DDR4 has 288 pins.",
+        "answer_labels": ["D"],  # Hallucinated multiple choice label
+        "matching_pairs": [
+            {"source": "DDR SDRAM", "target": "184 pins"},
+            {"source": "DDR2 SDRAM", "target": "240 pins 1.8V"},
+            {"source": "DDR3 SDRAM", "target": "240 pins 1.5V"},
+            {"source": "DDR4 SDRAM", "target": "288 pins"},
+        ],
+    }
+
+    w, client = make_watcher(tmp_path, read_resp, solve_resp)
+    assert w._process(b"png", force=True) is True
+
+    s = w.state()
+    cur = s["current"]
+    assert cur["question_type"] == "matching"
+    assert cur["answer_labels"] == []  # Dummy label "D" MUST be stripped
+    assert cur["correct_labels"] == []
+    assert len(cur["matching_pairs"]) == 4
+    assert "DDR SDRAM ➔ 184 pins" in cur["answer"]
+    assert "DDR4 SDRAM ➔ 288 pins" in cur["answer"]
+
+
+# ---- 8. Desktop HUD Window Setting and Notification Suppression
+def test_review_watcher_hud_window_toggle(tmp_path):
+    s_path = tmp_path / "settings.json"
+    w = er.ReviewWatcher(settings_path=s_path)
+    assert w.state()["hud_enabled"] is False  # Default MUST be False
+
+    w.set_hud_enabled(True)
+    assert w.state()["hud_enabled"] is True
+    # Verify persisted to file
+    loaded = er.load_settings(s_path)
+    assert loaded["hud_enabled"] is True
+
+    w.set_hud_enabled(False)
+    assert w.state()["hud_enabled"] is False
+    assert er.load_settings(s_path)["hud_enabled"] is False
+
+
+def test_exam_hud_update_item_respects_visibility():
+    parent_mock = MagicMock()
+    parent_mock.winfo_screenwidth.return_value = 1920
+
+    hud = exam_hud.ExamHudWindow(parent=parent_mock)
+    win_mock = MagicMock()
+    hud.win = win_mock
+    hud.topic_lbl = MagicMock()
+    hud.ans_lbl = MagicMock()
+    hud.badge_lbl = MagicMock()
+    hud.bad_btn = MagicMock()
+    hud.copy_btn = MagicMock()
+    hud.txt = MagicMock()
+    hud.show = MagicMock()
+
+    # When show=False and _visible=False, show() should NOT be called
+    hud._visible = False
+    hud.update_item({"question_type": "multiple_choice", "question": "Q", "answer": "A"}, show=False)
+    hud.show.assert_not_called()
+
+    # When show=True, show() should be called
+    hud.update_item({"question_type": "multiple_choice", "question": "Q", "answer": "A"}, show=True)
+    hud.show.assert_called_once()
+
+

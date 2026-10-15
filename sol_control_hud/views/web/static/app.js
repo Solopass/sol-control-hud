@@ -810,6 +810,7 @@ function renderReview(p) {
   const c = r.current, cur = $('revCurrent');
   const retryTop = $('revRetryBtn'); if (retryTop) retryTop.disabled = !c;
   const snipBtn = $('revSnipBtn'); if (snipBtn) { snipBtn.textContent = r.parts_count > 1 ? `➕ Add Snip (${r.parts_count} parts)` : '➕ Add Snip (Scroll)'; }
+  const hudCb = $('revToggleHud'); if (hudCb && document.activeElement !== hudCb) { hudCb.checked = !!r.hud_enabled; }
   cur.hidden = !c;
   if (c) {
     const isGemini = !!(c.gemini_retried || c.model === 'gemini-3.8-flash');
@@ -845,7 +846,15 @@ function renderReview(p) {
     const typeLabel = qType === 'matching' ? 'Matching' : qType === 'fill_in_the_blank' ? 'Fill-in-Blank' : qType === 'ordering' ? 'Ordering' : '';
     const typeBadge = typeLabel ? ` <span class="pill" style="font-size:0.75rem;padding:2px 6px">${typeLabel}</span>` : '';
     const modelBadge = isGemini ? ' <span class="pill" style="background:#0284c7;color:#fff;font-size:0.75rem;padding:2px 6px">✨ Gemini 3.8 Flash</span>' : '';
-    const head = `<span style="color:${isGemini ? 'var(--cyan)' : 'var(--green)'}">💡 Answer: ${esc(c.answer || (c.answer_labels || []).join(', '))} · ${esc(c.topic || 'Solved')}</span>${typeBadge}${modelBadge}`;
+    let ansTitle = c.answer || (c.answer_labels || []).join(', ');
+    if (qType === 'matching' && c.matching_pairs && c.matching_pairs.length) {
+      ansTitle = `${c.matching_pairs.length} Pairs Matched`;
+    } else if (qType === 'ordering' && c.ordered_sequence && c.ordered_sequence.length) {
+      ansTitle = `${c.ordered_sequence.length} Steps Sequenced`;
+    } else if (qType === 'fill_in_the_blank' && c.blank_answers && c.blank_answers.length) {
+      ansTitle = c.blank_answers[0];
+    }
+    const head = `<span style="color:${isGemini ? 'var(--cyan)' : 'var(--green)'}">💡 Answer: ${esc(ansTitle)} · ${esc(c.topic || 'Solved')}</span>${typeBadge}${modelBadge}`;
     const whyWrong = c.why_previous_wrong ? `<p class="rev-explain" style="color:var(--amber);margin-bottom:6px"><b>Previous attempt issue:</b> ${esc(c.why_previous_wrong)}</p>` : '';
     const body = `${whyWrong}<p class="rev-explain">${esc(c.explanation || '')}</p>`;
     const autoScrollBtn = `<button class="mini primary" style="margin-top:8px" data-act="review" data-target="auto_scroll" title="Simulate scroll down, stitch, and solve">⚡ Auto-Scroll & Solve</button>`;
@@ -901,9 +910,9 @@ $('stopAi').onclick = async () => {
   if (!confirm('Stop the Away work now? The running job goes back in the queue (finished work is kept).')) return;
   const r = await post('/api/action', { action: 'stop_ai' }); toast(r.why || 'stopping');
 };
-// Notifications and "start at login" were checkboxes down here as well as in ⚙ Settings. Two controls for one
-// setting drift apart (each kept its own _busy flag against the stream), and one place is the panel's whole point.
 $('theme').onchange = (e) => { applyTheme(e.target.value); post('/api/action', { action: 'theme', target: e.target.value }); };
+const revHudCb = $('revToggleHud');
+if (revHudCb) revHudCb.onchange = (e) => { post('/api/action', { action: 'review', target: 'toggle_hud', enabled: e.target.checked }); };
 
 // ---------- phase C: ask it overnight, chain controls, the reader
 function md(text) {

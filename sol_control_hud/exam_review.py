@@ -36,29 +36,41 @@ IDLE_STOP_S = 600.0      # stop after this long without a new question
 HISTORY = 60
 
 READ_SYSTEM = "You transcribe quiz and practice exam questions exactly as shown on the screen."
-READ_PROMPT = """This screenshot shows a multiple-choice, drag-and-drop matching, fill-in-the-blank, or step ordering quiz or practice exam question.
+READ_PROMPT = """This screenshot shows a multiple-choice, drag-and-drop matching, fill-in-the-blank, or step ordering practice exam or quiz question. It may be:
+1. "matching" (drag-and-drop, category-to-feature matching, column matching, term-definition pairing).
+2. "multiple_choice" (standard single or multi-select with radio buttons or checkboxes).
+3. "fill_in_the_blank" (typing a command, code, IP, or numeric/text value into a blank).
+4. "ordering" (arranging steps or events in sequence).
 
-Transcribe the question:
-- question_type: "multiple_choice", "matching" (drag-and-drop), "fill_in_the_blank" (CLI command or text/numeric value), or "ordering" (sequencing steps).
-- question: the question prompt or instructions, verbatim.
-- exhibit_text: transcript of any network diagram labels, routing table, CLI output, or exhibit table visible in the question. Empty string if none.
+CRITICAL INSTRUCTIONS:
+- First identify the question_type.
+  * If the question asks to "Match...", has two columns/boxes (e.g. "Categories" and "Options", terms and definitions, or draggable cards and drop slots), question_type MUST be "matching".
+  * If the question asks to arrange or place in order, question_type MUST be "ordering".
+  * If there is an input prompt/blank to type text/CLI syntax, question_type MUST be "fill_in_the_blank".
+  * Otherwise, question_type is "multiple_choice".
 
-For multiple_choice:
-- choices: every answer choice as [{"label": "A", "text": "..."}]. Use the letter or number shown (A, B, C... or 1, 2, 3...); if none, label A, B, C... from top to bottom.
-- select_count: number of options to select (e.g. 1, 2, 3).
-- your_labels: labels of choice(s) selected by the student if any.
-- correct_labels: labels of choice(s) marked correct on the screen if any.
+- question: the main question or instruction prompt verbatim (e.g. "Match the memory type to the feature.").
+- exhibit_text: transcript of any network diagram, topology, routing table, CLI output, or exhibit table visible. Empty string if none.
 
 For matching:
-- matching_items: {"sources": ["Draggable item 1", ...], "targets": ["Drop target description 1", ...]}. Leave choices empty.
-
-For fill_in_the_blank:
-- blank_answers: any answers already typed into the blank(s). Leave choices empty.
+- matching_items: transcribe the two columns or sets to match:
+  * sources: array of all items in the first column or group (e.g. under "Categories:", draggable cards, terms, or left side).
+  * targets: array of all items in the second column or group (e.g. under "Options:", features, descriptions, definitions, or drop slots).
+- Leave choices empty: []
 
 For ordering:
-- ordered_items: list of items/steps to be arranged in order. Leave choices empty.
+- ordered_items: list of all items/steps to be arranged. Leave choices empty: []
 
-Use status "ok" if complete. Use status "no_question" if no question is visible, and "cut_off" if text or choices are cut off at the edge. Leave out navigation, buttons, timers and other page text."""
+For fill_in_the_blank:
+- blank_answers: any answers already typed into the blank(s). Leave choices empty: []
+
+For multiple_choice:
+- choices: array of [{"label": "A", "text": "..."}] for each choice.
+- select_count: number of options to select (e.g. 1, 2).
+- your_labels: labels of choice(s) currently selected by the student if any.
+- correct_labels: labels of choice(s) marked correct on the screen if any.
+
+Use status "ok" if complete. Use status "no_question" if no question is visible, and "cut_off" if text, items, or choices are cut off at the edge. Leave out page navigation, timers, and button text."""
 
 SOLVE_SYSTEM = (
     "You are an expert tutor. You solve practice exam questions across multiple formats: "
@@ -79,22 +91,28 @@ Reply with:
 - topic: the concept this tests, in 2-5 words (for example "Subnetting /26 hosts", "OSI layer 2 devices").
 - explanation: 2-4 short sentences explaining why this answer is correct and showing the key calculation, rule, or concept. Plain text only: no LaTeX, no $ signs, no Markdown (write 2^6 - 2 = 62)."""
 
-SOLVE_PROMPT_MATCHING = """Solve this drag-and-drop matching practice exam question.
+SOLVE_PROMPT_MATCHING = """Solve this matching practice exam question.
 
 Question: {question}
 {exhibit}
-Draggable items:
+Sources (items to match):
 {sources}
 
-Drop targets:
+Targets (features, descriptions, or drop slots):
 {targets}
+
+Instructions:
+1. Match EVERY source item above to its single correct target item above.
+2. Pair ONLY the sources and targets provided above using their exact names/descriptions.
+3. Do NOT invent new or unrelated items (e.g. do not invent RAM, ROM, Cache if not in the list).
+4. Do NOT output multiple-choice answer labels (leave answer_labels empty).
 
 Reply with:
 - question_type: "matching"
-- matching_pairs: array of objects with "source" (draggable item) and "target" (matching slot/description).
-- answer_text: concise summary of the matches (e.g. "5 pairs matched").
+- matching_pairs: array of objects with "source" (from Sources) and "target" (from Targets).
+- answer_text: concise summary of the pairings (e.g. "DDR SDRAM ➔ 184 pins; DDR2 ➔ 240 pins 1.8V...").
 - topic: the concept this tests, in 2-5 words.
-- explanation: 2-4 short sentences explaining the pairings and underlying rules."""
+- explanation: 2-4 short sentences explaining the pairings and technical facts."""
 
 SOLVE_PROMPT_BLANK = """Solve this fill-in-the-blank / CLI command practice exam question.
 
@@ -128,7 +146,7 @@ SOLVE_PROMPT = SOLVE_PROMPT_MC
 READ_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["status", "question", "choices", "your_labels", "correct_labels"],
+    "required": ["status", "question", "question_type"],
     "properties": {
         "status": {"type": "string", "enum": ["ok", "no_question", "cut_off"]},
         "question_type": {
@@ -165,7 +183,7 @@ READ_SCHEMA = {
 SOLVE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["topic", "explanation"],
+    "required": ["question_type", "topic", "explanation"],
     "properties": {
         "question_type": {
             "type": "string",
@@ -249,14 +267,79 @@ def pick_indexes(labels, choices) -> list[int]:
     return sorted(out)
 
 
+def _extract_matching_columns(text: str) -> dict | None:
+    """Extract sources and targets if text contains 'Categories:' and 'Options:' or similar column headers."""
+    if not text:
+        return None
+    m1 = re.search(
+        r"(?:categories|column\s*a|sources?)\s*:\s*\n?(.*?)(?=(?:options|column\s*b|targets?|features?)\s*:|\Z)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m1:
+        return None
+    sources_raw = m1.group(1).strip()
+
+    m2 = re.search(
+        r"(?:options|column\s*b|targets?|features?)\s*:\s*\n?(.*?)(?=(?:categories|column\s*a|sources?)\s*:|\Z)",
+        text[m1.end():] if m1 else text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m2:
+        m2 = re.search(
+            r"(?:options|column\s*b|targets?|features?)\s*:\s*\n?(.*?)(?=(?:categories|column\s*a|sources?)\s*:|\Z)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+    if not m2:
+        return None
+    targets_raw = m2.group(1).strip()
+
+    sources = [line.strip().lstrip("-•* ").strip() for line in sources_raw.splitlines() if line.strip()]
+    targets = [line.strip().lstrip("-•* ").strip() for line in targets_raw.splitlines() if line.strip()]
+    if sources and targets:
+        return {"sources": sources, "targets": targets}
+    return None
+
+
 def tidy_read(read: dict) -> dict:
     """Fix the labels: odd or repeated ones (radio circles, bullets) become A, B, C... in order; yours/correct become
     those labels. Also normalizes question_type and non-multiple-choice fields."""
     read = dict(read)
     q_type = read.get("question_type") or "multiple_choice"
+    q_text = str(read.get("question", "")).strip()
+    exhibit = str(read.get("exhibit_text", "")).strip()
+    full_text = f"{q_text}\n{exhibit}"
+    full_lower = full_text.lower()
+
+    m_items = read.get("matching_items") or {}
+    has_sources = bool(m_items.get("sources"))
+    has_targets = bool(m_items.get("targets"))
+
+    if not (has_sources and has_targets):
+        extracted = _extract_matching_columns(full_text)
+        if extracted:
+            read["matching_items"] = extracted
+            m_items = extracted
+            has_sources = True
+            has_targets = True
+            cat_match = re.search(r"(?:categories|column\s*a|sources?)\s*:", q_text, re.IGNORECASE)
+            if cat_match and cat_match.start() > 0:
+                read["question"] = q_text[:cat_match.start()].strip()
+
+    # Disambiguate question type
+    if has_sources and has_targets:
+        q_type = "matching"
+    elif any(kw in full_lower for kw in ["match the ", "match each ", "drag and drop", "drag each "]):
+        q_type = "matching"
+    elif read.get("ordered_items") or any(kw in full_lower for kw in ["arrange the ", "place in order", "put the following in order", "chronological order"]):
+        q_type = "ordering"
+    elif read.get("blank_answers"):
+        q_type = "fill_in_the_blank"
+
     read["question_type"] = q_type
     choices = [dict(c) for c in read.get("choices") or [] if str(c.get("text", "")).strip()]
-    if choices:
+    if q_type == "multiple_choice" and choices:
         yours, correct = pick_indexes(read.get("your_labels"), choices), pick_indexes(read.get("correct_labels"), choices)
         labels = [str(c.get("label", "")).strip().rstrip(".)") for c in choices]
         if len(set(labels)) != len(labels) or not all(re.fullmatch(r"[A-Za-z]|\d{1,2}", lb) for lb in labels):
@@ -268,8 +351,8 @@ def tidy_read(read: dict) -> dict:
         read["correct_labels"] = [choices[i]["label"] for i in correct]
     else:
         read["choices"] = []
-        read["your_labels"] = [str(x) for x in read.get("your_labels") or []]
-        read["correct_labels"] = [str(x) for x in read.get("correct_labels") or []]
+        read["your_labels"] = [str(x) for x in read.get("your_labels") or []] if q_type == "multiple_choice" else []
+        read["correct_labels"] = [str(x) for x in read.get("correct_labels") or []] if q_type == "multiple_choice" else []
     return read
 
 
@@ -303,8 +386,10 @@ def solve_messages(read: dict) -> list[dict]:
 
     if q_type == "matching":
         m_items = read.get("matching_items") or {}
-        sources = "\n".join(f"- {s}" for s in m_items.get("sources", [])) or "(see question)"
-        targets = "\n".join(f"- {t}" for t in m_items.get("targets", [])) or "(see question)"
+        sources_list = m_items.get("sources") or []
+        targets_list = m_items.get("targets") or []
+        sources = "\n".join(f"- {s}" for s in sources_list) if sources_list else "(see question / exhibit text above)"
+        targets = "\n".join(f"- {t}" for t in targets_list) if targets_list else "(see question / exhibit text above)"
         prompt = SOLVE_PROMPT_MATCHING.format(
             question=read["question"],
             exhibit=exhibit_str,
@@ -482,7 +567,9 @@ class ReviewWatcher:
         self._stitched_png_bytes: bytes | None = None
         self._pending_scroll: bool = False
         self._last_cut_off_png: bytes | None = None
-        rect = load_settings(settings_path).get("rect")
+        settings = load_settings(settings_path)
+        rect = settings.get("rect")
+        self._hud_enabled = bool(settings.get("hud_enabled", False))
         self._s = {"status": "stopped", "text": "Set a box around the question area, then start.",
                    "rect": rect if isinstance(rect, list) and len(rect) == 4 else None,
                    "current": None, "history": [], "correct": 0, "wrong": 0, "answered": 0, "topics": {},
@@ -497,12 +584,20 @@ class ReviewWatcher:
             s = json.loads(json.dumps(self._s))
         s["running"] = bool(self._thread and self._thread.is_alive())
         s["parts_count"] = len(self._additional_snips) + (1 if self._last_png_bytes else 0)
+        s["hud_enabled"] = bool(self._hud_enabled)
         try:
             from . import gemini_solver
             s["has_gemini_key"] = bool(gemini_solver.get_api_key(self._settings_path))
         except Exception:
             s["has_gemini_key"] = False
         return s
+
+    def set_hud_enabled(self, enabled: bool) -> None:
+        with self._mu:
+            self._hud_enabled = bool(enabled)
+        s = load_settings(self._settings_path)
+        s["hud_enabled"] = bool(enabled)
+        save_settings(s, self._settings_path)
 
     def _set(self, **kw) -> None:
         with self._mu:
@@ -646,15 +741,27 @@ class ReviewWatcher:
                 question_text=(cur or {}).get("question"),
                 model=model,
             )
-            q_type = sol.get("question_type") or (cur or {}).get("question_type") or "multiple_choice"
-            raw_labels = sol.get("answer_labels") or []
-            choices = sol.get("choices") or (cur or {}).get("choices") or []
-            ans_idxs = pick_indexes(raw_labels, choices) if choices else []
-            ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_labels]
-
             matching_pairs = sol.get("matching_pairs") or (cur or {}).get("matching_pairs") or []
             blank_answers = sol.get("blank_answers") or (cur or {}).get("blank_answers") or []
             ordered_sequence = sol.get("ordered_sequence") or (cur or {}).get("ordered_sequence") or []
+
+            if matching_pairs or (cur or {}).get("question_type") == "matching":
+                q_type = "matching"
+            elif ordered_sequence or (cur or {}).get("question_type") == "ordering":
+                q_type = "ordering"
+            elif blank_answers or (cur or {}).get("question_type") == "fill_in_the_blank":
+                q_type = "fill_in_the_blank"
+            else:
+                q_type = sol.get("question_type") or (cur or {}).get("question_type") or "multiple_choice"
+
+            if q_type == "matching":
+                ans_labels = []
+                choices = []
+            else:
+                raw_labels = sol.get("answer_labels") or []
+                choices = sol.get("choices") or (cur or {}).get("choices") or []
+                ans_idxs = pick_indexes(raw_labels, choices) if choices else []
+                ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_labels]
 
             if q_type == "matching" and matching_pairs:
                 answer_text = "; ".join(f"{p.get('source')} ➔ {p.get('target')}" for p in matching_pairs)
@@ -827,15 +934,27 @@ class ReviewWatcher:
                 self._set(status="answering", text="Solving question in real time…")
                 s = client.chat(MODEL, solve_messages(read), schema=SOLVE_SCHEMA, max_tokens=1024, reasoning="off")
                 sol = parse_json(s.content)
-                q_type = sol.get("question_type") or read.get("question_type") or "multiple_choice"
-
-                raw_ans = sol.get("answer_labels") or []
-                ans_idxs = pick_indexes(raw_ans, choices) if choices else []
-                ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_ans]
-
                 matching_pairs = sol.get("matching_pairs") or []
                 blank_answers = sol.get("blank_answers") or []
                 ordered_sequence = sol.get("ordered_sequence") or []
+
+                if matching_pairs or read.get("question_type") == "matching":
+                    q_type = "matching"
+                elif ordered_sequence or read.get("question_type") == "ordering":
+                    q_type = "ordering"
+                elif blank_answers or read.get("question_type") == "fill_in_the_blank":
+                    q_type = "fill_in_the_blank"
+                else:
+                    q_type = sol.get("question_type") or read.get("question_type") or "multiple_choice"
+
+                if q_type == "matching":
+                    raw_ans = []
+                    ans_labels = []
+                    choices = []
+                else:
+                    raw_ans = sol.get("answer_labels") or []
+                    ans_idxs = pick_indexes(raw_ans, choices) if choices else []
+                    ans_labels = [choices[i]["label"] for i in ans_idxs] if ans_idxs else [str(x).strip().upper() for x in raw_ans]
 
                 if q_type == "matching" and matching_pairs:
                     answer_text = "; ".join(f"{p.get('source')} ➔ {p.get('target')}" for p in matching_pairs)
@@ -854,12 +973,12 @@ class ReviewWatcher:
                     "question_type": q_type,
                     "question": read["question"],
                     "exhibit_text": read.get("exhibit_text") or "",
-                    "choices": choices,
+                    "choices": choices if q_type == "multiple_choice" else [],
                     "matching_pairs": matching_pairs,
                     "blank_answers": blank_answers,
                     "ordered_sequence": ordered_sequence,
                     "result": "live",
-                    "your_labels": read.get("your_labels") or [],
+                    "your_labels": read.get("your_labels") or [] if q_type == "multiple_choice" else [],
                     "correct_labels": ans_labels,
                     "answer_labels": ans_labels,
                     "yours": choice_line(read.get("your_labels") or [], choices) if choices else "",

@@ -24,12 +24,14 @@ class ExamHudWindow:
         on_add_snip: Callable[[], None] | None = None,
         on_pick_snip: Callable[[], None] | None = None,
         on_auto_scroll: Callable[[], None] | None = None,
+        on_close: Callable[[], None] | None = None,
     ):
         self.parent = parent
         self.on_retry_gemini = on_retry_gemini
         self.on_add_snip = on_add_snip
         self.on_pick_snip = on_pick_snip
         self.on_auto_scroll = on_auto_scroll
+        self.on_close = on_close
         self.win: tk.Toplevel | None = None
         self.title_lbl: tk.Label | None = None
         self.badge_lbl: tk.Label | None = None
@@ -248,6 +250,11 @@ class ExamHudWindow:
         if self.win and self.win.winfo_exists():
             self.win.withdraw()
         self._visible = False
+        if self.on_close:
+            try:
+                self.on_close()
+            except Exception:
+                pass
 
     def toggle(self) -> None:
         if self._visible:
@@ -255,7 +262,7 @@ class ExamHudWindow:
         else:
             self.show()
 
-    def update_item(self, item: dict) -> None:
+    def update_item(self, item: dict, show: bool = True) -> None:
         import re
         self._last_item = item
         w = self._ensure_window()
@@ -371,8 +378,9 @@ class ExamHudWindow:
 
         self.txt.config(state=tk.DISABLED)
 
-        # Show if not already visible
-        self.show()
+        # Show if instructed or already visible
+        if show or self._visible:
+            self.show()
 
     def _on_click_copy(self) -> None:
         if not self._last_item or not self.win:
