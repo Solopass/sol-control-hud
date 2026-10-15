@@ -501,7 +501,7 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
     if not ensure_solang_running(solang_url):
         raise ToolError(f"Solang server is not reachable at {solang_url} and could not be started.")
 
-    batch_size = max(1, min(10, int(args.get("batch_size") or 10)))
+    batch_size = max(1, min(5, int(args.get("sub_batch_size") or 3)))
     auto_save = str(args.get("auto_save", "true")).lower() in ("true", "1", "yes")
     state_p = Path(args.get("state_file") or DEFAULT_STATE_FILE)
     state = StateManager.load(state_p)
@@ -512,7 +512,7 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
     failed: list[dict] = []
     all_results: list[dict] = []
 
-    # Process in chunks of up to batch_size (max 10)
+    # Process in chunks of up to batch_size (default 3)
     for i in range(0, len(video_ids), batch_size):
         chunk = video_ids[i:i + batch_size]
         if ctx:
@@ -529,7 +529,7 @@ def ingest_solang_tracks(args: dict, ctx: ToolContext | None = None) -> dict:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=90.0) as resp:
+            with urllib.request.urlopen(req, timeout=120.0) as resp:
                 res_data = json.loads(resp.read().decode("utf-8"))
                 items = res_data.get("items", [])
                 for item in items:
