@@ -251,6 +251,8 @@ def cancel_overnight() -> dict:
     """Cancels the active overnight session."""
     state = get_overnight_state()
     state["active"] = False
+    state["queue"] = []
+    state["current"] = None
     state["status"] = "cancelled"
     save_overnight_state(state)
     display_ctl.release_pc_awake()

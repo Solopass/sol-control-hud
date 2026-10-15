@@ -96,9 +96,11 @@ def test_cancel_overnight(tmp_path: Path):
     state_file = tmp_path / "overnight.json"
     with patch.object(overnight, "OVERNIGHT_STATE", state_file), \
          patch.object(display_ctl, "release_pc_awake", return_value=True):
-        overnight.save_overnight_state({"active": True, "current": "Chain A"})
+        overnight.save_overnight_state({"active": True, "current": "Chain A", "queue": ["Chain B"]})
         res = overnight.cancel_overnight()
         assert res["ok"] is True
         st = overnight.get_overnight_state()
         assert st["active"] is False
         assert st["status"] == "cancelled"
+        assert st["queue"] == []
+        assert st["current"] is None
