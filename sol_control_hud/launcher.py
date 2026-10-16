@@ -89,12 +89,10 @@ def _open_path(path: Path) -> None:
 # ---------------------------------------------------------------- lookups
 def _folder(reg: dict, name: str) -> Path:
     ws = Path(reg["workspace"])
+    if not name or "/" in name or "\\" in name or name.startswith("."):
+        raise LaunchError("not a project folder")
     folder = (ws / name)
-    try:
-        folder.resolve().relative_to(ws.resolve())
-    except ValueError as e:
-        raise LaunchError("not a project folder") from e
-    if not name or not folder.is_dir() or name.startswith("."):
+    if not folder.is_dir():
         raise LaunchError(f"no project called {name!r}")
     return folder
 
