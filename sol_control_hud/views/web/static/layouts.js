@@ -38,10 +38,11 @@ function applyPreset(p) {
     el.dataset.size = w.size.toLowerCase();
     const sp = LC.spanFor(r.sizes, w.size, cols);
     el.style.gridColumn = `span ${sp.cols}`;                 // inline: overrides the old .wide / .tall classes
-    el.style.gridRow = `span ${sp.rows}`;
     ensureChip(el, r);
+    cardSizes.observe(el);
   }
-  LGRID.classList.toggle('dense', p.name !== 'Everyday');
+  LGRID.classList.add('masonry', 'dense');
+  packCards();
   document.body.classList.remove('layout-pending');
   const loaders = new Set(comeBack.map((id) => LOADERS[id]).filter(Boolean));
   for (const fn of loaders) { try { window[fn]?.(); } catch (e) { console.error(e); } }
@@ -49,6 +50,29 @@ function applyPreset(p) {
   if (typeof payload !== 'undefined' && payload) updateChips(payload);
   renderLayoutButton();
 }
+
+// ---------- masonry packing (10-19): a grid row was as tall as its tallest card, so short cards left empty space
+// below them (a 5,800 px page). The grid's rows are MASONRY_ROW px; each card spans as many as its own height needs,
+// and `dense` lets the next card move up into the gap. Re-packed whenever a card's content changes its height.
+const MASONRY_ROW = 8, MASONRY_GAP = 16;
+let packQueued = false;
+function packCards() {
+  if (packQueued) return;
+  packQueued = true;
+  setTimeout(() => {                 // not requestAnimationFrame: browsers pause that in hidden tabs, and a hidden
+    packQueued = false;              // dashboard must still be packed when you switch back to it
+    for (const el of LGRID.querySelectorAll(':scope > .card')) {
+      if (el.hidden) continue;
+      const span = LC.rowSpan(el.getBoundingClientRect().height, MASONRY_ROW, MASONRY_GAP);
+      if (el.style.gridRow !== `span ${span}`) el.style.gridRow = `span ${span}`;
+    }
+  }, 0);
+}
+const cardSizes = new ResizeObserver(packCards);
+// ResizeObserver only reports when the page is drawn (not in a hidden tab), so also re-pack after every live update
+// and after each card's own loader; packCards() is cheap and only writes spans that changed.
+addEventListener('hud:render', packCards);
+setInterval(packCards, 2000);
 
 // ---------- XS chips: one line per card, from the live data
 function ensureChip(el, r) {

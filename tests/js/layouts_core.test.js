@@ -59,3 +59,10 @@ test('the Disks chip picks the fullest drive', () => {
   assert.equal(d.drive, 'E');
   assert.equal(LC.fullestDisk([]), null);
 });
+
+test('masonry: a card spans the rows its height needs, gap included', () => {
+  assert.equal(LC.rowSpan(154, 8, 16), 22);        // (154 + 16) / 8 = 21.25 -> 22
+  assert.equal(LC.rowSpan(0, 8, 16), 2);
+  assert.equal(LC.rowSpan(-5, 8, 16), 2);
+  assert.equal(LC.rowSpan(10, 0, 0), 10);          // a zero unit can't divide by zero
+});

@@ -1030,3 +1030,12 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   cursor: pointer;
 }
 
+
+/* ---------- B1 (10-19): cards keep their own height (no stretching to the tallest card in the row: the exam card was
+   1,545 px for 154 px of content), and long lists scroll inside their card. XL = show everything. */
+main.grid { align-items:start; }
+main.grid.masonry { grid-auto-rows:8px; row-gap:0; }             /* layouts.js packCards(): rows sized per card */
+main.grid.masonry > .card { margin-bottom:16px; }
+.card:not([data-size="xl"]) :is(#chainList, #projList, #notesList, #feed, #portsList, #portsClosed) {
+  max-height:440px; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.card[data-size="xl"] :is(#chainList, #projList, #notesList, #feed, #portsList, #portsClosed) { max-height:none; }

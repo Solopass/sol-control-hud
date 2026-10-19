@@ -53,7 +53,12 @@
     return (disks || []).filter((d) => d && d.free_gb != null).sort((a, b) => (b.percent || 0) - (a.percent || 0))[0] || null;
   }
 
-  const api = { SIZE_ORDER, spanFor, sizesOf, moveTo, neighbourIndex, dropReorder, showAtEnd, fullestDisk };
+  /** Masonry packing: how many `unit`-px grid rows a card `height` px tall needs, with `gap` px below it. */
+  function rowSpan(height, unit, gap) {
+    return Math.max(1, Math.ceil((Math.max(0, height) + gap) / Math.max(1, unit)));
+  }
+
+  const api = { SIZE_ORDER, spanFor, sizesOf, moveTo, neighbourIndex, dropReorder, showAtEnd, fullestDisk, rowSpan };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LayoutCore = api;
 }(typeof window !== 'undefined' ? window : globalThis));
