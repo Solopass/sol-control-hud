@@ -17,6 +17,16 @@ RUNNER = re.compile(r"^(llama-server|ollama)$", re.IGNORECASE)
 EVICTED_SHARED_GB = 1.0      # runner memory in system RAM above this = evicted (0.3 until 10-02: with the new Vulkan
                              # settings in sol-llm.ps1 sol-fast keeps ~0.66 GB in RAM by design, at full speed)
 HEADROOM_GB = 0.8            # spare VRAM below this = TIGHT
+# What the AI engine can have of the card: the model gets about this minus what other apps hold when it starts
+# (sol-llm.ps1's fit-target + Windows' cap, reports/vram-cap-2026-09-27.md). Measured 10-19: 5.93 GB on the card
+# with others at 6.44 GB -> 12.37.
+CEILING_GB = 12.37
+# Models meant to sit wholly on the card. With less of them there (sol-llm.ps1's fit put the rest on the CPU because
+# other apps held a lot of VRAM at load time) they answer ~3x slower: 10-19, sol-fast 5.9 of 7.1 GB -> 21 tok/s
+# instead of ~70. sol-smart / sol-long / the Away models split with the CPU by design and are never "split" here.
+FULL_GPU_MODELS = ("sol-fast", "sol-vision")
+SPLIT_MARGIN_GB = 0.5        # this much less on the card than the model's full size = split
+REFIT_GAIN_GB = 0.5          # a reload is worth it when it would move at least this much from the CPU to the card
 DEFAULT_MODEL = "sol-fast"
 LABELS = {"dwm": "Windows desktop + shared", "RadeonSoftware": "AMD Adrenalin", "explorer": "Explorer"}
 NOT_MOVABLE = {"dwm", "explorer", "csrss", "RadeonSoftware", "AMDRSServ", "AMDRSSrcExt"}
@@ -56,12 +66,19 @@ class NeedStore:
         ctx = ctx or seed_ctx
         key = f"{alias}@{ctx}"
         if key in self.learned:
-            return self.learned[key], ctx, "learned"
+            gb = self.learned[key]
+            # a model meant to sit wholly on the card can't need less than it does: a smaller learned size came
+            # from a load that left part of it on the CPU (10-19: sol-fast "6.01" taught by a squeezed load)
+            if alias in FULL_GPU_MODELS and seed_gb and seed_ctx == ctx and gb < seed_gb - SPLIT_MARGIN_GB:
+                return seed_gb, ctx, "estimate"
+            return gb, ctx, "learned"
         return seed_gb, ctx, "estimate"
 
     def learn(self, alias: str, ctx: int, gb: float) -> None:
+        """Remember the most a model has taken on the card. Never lower it: a smaller load is a squeezed one (part of
+        the model on the CPU), not the model getting smaller."""
         key = f"{alias}@{ctx}"
-        if abs(self.learned.get(key, -99) - gb) < 0.1:
+        if gb <= self.learned.get(key, -99) + 0.1:
             return
         self.learned[key] = round(gb, 2)
         if self.path:
@@ -172,9 +189,11 @@ class VramGuard:
 
         room = card - others_gb
         need_gb, need_ctx, need_src = self.needs.get(self.default_model)
+        model = _alias(loaded[0]["name"]) if len(loaded) == 1 else (self.default_model if ai_ded > 0.5 else None)
+        split = split_state(model, ai_ded, others_gb, self.needs)
         if ai_ded > 0.5:
             spare = card - others_gb - ai_ded
-            verdict = "EVICTED" if evicted else ("OK" if spare >= HEADROOM_GB else "TIGHT")
+            verdict = "EVICTED" if evicted else "SPLIT" if split["split"] else ("OK" if spare >= HEADROOM_GB else "TIGHT")
         else:
             spare = None if need_gb is None else room - need_gb
             verdict = "UNKNOWN" if spare is None else "FITS" if spare >= HEADROOM_GB else "TIGHT" if spare >= 0 else "WONT_FIT"
@@ -193,4 +212,27 @@ class VramGuard:
             "used_gb": used,
             "top_consumers": top[:8],       # apportioned from per-process counters, approximate
             "suggest_free": [t for t in top if t["movable"] and t["gb"] >= 0.2][:4],
+            "split": split,
         }
+
+
+def split_state(model: str | None, on_card_gb: float, others_gb: float, needs: NeedStore) -> dict:
+    """Is a model that should sit wholly on the card partly on the CPU, and would a reload help now?
+    {split, model, on_card_gb, full_gb, cpu_gb, room_gb, refit_gain_gb, can_refit}. room = what the engine could
+    give the model next to the other apps right now; refit_gain = how much a reload would move from the CPU to the
+    card (all of it, or part: every GB on the card helps)."""
+    out = {"split": False, "model": model, "on_card_gb": round(on_card_gb, 2), "full_gb": None, "cpu_gb": 0.0,
+           "room_gb": round(CEILING_GB - others_gb, 2), "refit_gain_gb": 0.0, "can_refit": False}
+    if not model or model not in FULL_GPU_MODELS or on_card_gb <= 0.5:
+        return out
+    full, _, _ = needs.get(model)
+    if not full:
+        return out
+    out["full_gb"] = round(full, 2)
+    if on_card_gb < full - SPLIT_MARGIN_GB:
+        out["split"] = True
+        out["cpu_gb"] = round(full - on_card_gb, 2)
+        gain = min(full, CEILING_GB - others_gb) - on_card_gb
+        out["refit_gain_gb"] = round(max(0.0, gain), 2)
+        out["can_refit"] = gain >= REFIT_GAIN_GB
+    return out

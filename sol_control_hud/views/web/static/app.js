@@ -286,13 +286,14 @@ function renderVram(p) {
   // EVICTED is the memory counter only; whether it hurts is judged by the next answer (snapshot.spill_impact)
   const impact = s.vram_spill_impact || 'unknown', slowSpill = verdict === 'EVICTED' && impact === 'slow';
   const spillText = { slow: 'SPILLED', fine: 'SPILL · SPEED OK', unknown: 'SPILL?' }[impact] || 'SPILL?';
-  pill.textContent = { WONT_FIT: "WON'T FIT", EVICTED: spillText }[verdict] || verdict || '…';
+  pill.textContent = { WONT_FIT: "WON'T FIT", EVICTED: spillText, SPLIT: 'PART ON CPU' }[verdict] || verdict || '…';
   pill.title = { WONT_FIT: 'the default model would not fit next to what is on the card now',
                  EVICTED: { slow: `part of the model is in system RAM and the last answer was slow (${s.ai_tps ?? '?'} tok/s)`,
                             fine: `part of the model is in system RAM, but the last answer ran at its usual speed (${s.ai_tps ?? '?'} tok/s)` }[impact]
                           || 'part of the model is in system RAM; nothing has answered since, so its speed is not known yet',
+                 SPLIT: `the engine put ${v.split?.cpu_gb ?? '?'} GB of ${v.split?.model || 'the model'} on the CPU when it started (too little room then): answers are ~3x slower until it reloads`,
                  TIGHT: 'little room left', OK: 'room for the model' }[verdict] || '';
-  pill.className = `pill ${slowSpill ? 'bad' : verdict === 'OK' ? 'ok' : 'warn'}`;
+  pill.className = `pill ${slowSpill || verdict === 'SPLIT' ? 'bad' : verdict === 'OK' ? 'ok' : 'warn'}`;
   const card = v.card_gb || s.vram_total_gb || 16, parts = [];
   if (v.available) {
     if (v.ai?.dedicated_gb >= 0.05) parts.push([`AI ${(v.ai.models || []).join(', ') || 'model'}`, v.ai.dedicated_gb, 'var(--green)']);
@@ -362,7 +363,15 @@ function renderSpeed(p) {
   const row = (p.models || []).find((m) => m.id === sp.model) || {}, v = p.vram_guard || {};
   const hogs = (v.top_consumers || []).filter((t) => t.movable && t.gb >= 0.2 && !/llama-server|ollama/i.test(t.name)).slice(0, 4).map((t) => `${t.label} ${t.gb} GB`).join(', ');
   let why;
-  if (v.used_gb != null && v.used_gb >= CARD_LIMIT_GB - 0.7) {
+  const s = p.snapshot || {};
+  if (s.ai_split_gb) {                       // placed partly on the CPU at load (vram.split_state): the real cause
+    const onCard = s.ai_full_gb != null ? (s.ai_full_gb - s.ai_split_gb).toFixed(1) : '?';
+    why = `${esc(s.ai_model || 'the model')} is partly on the CPU: ${onCard} of ${s.ai_full_gb ?? '?'} GB on the card. `
+      + `The engine put the rest on the CPU when it started, because other apps held ${v.others_gb != null ? v.others_gb.toFixed(1) : '?'} GB of the card then`
+      + (hogs ? ` (${hogs})` : '') + '. '
+      + (s.ai_refit_gain_gb >= 0.5 ? 'There is room now: it reloads itself at full speed the next time it is idle.'
+        : 'Freeing VRAM makes room; it then reloads itself at full speed when idle.');
+  } else if (v.used_gb != null && v.used_gb >= CARD_LIMIT_GB - 0.7) {
     why = `the card is nearly full (${v.used_gb.toFixed(1)} GB in use; Windows lets programs use about ${CARD_LIMIT_GB} GB)`
       + (v.others_gb != null ? `, and other apps hold ${v.others_gb.toFixed(1)} GB of it${hogs ? ` (${hogs})` : ''}` : '')
       + '. Closing some, or moving them to the Intel chip in Settings, makes room.';

@@ -197,3 +197,13 @@ def test_card_nearly_full_warning_names_the_biggest_app():
     for quiet in (Snapshot(ai_mode="desk", ai_state="loaded", vram_used_gb=9.5),           # room on the card
                   Snapshot(ai_mode="off", ai_state="unloaded", vram_card_full=True, vram_used_gb=12.0)):   # a game
         assert not [a for a in attention(quiet) if "card" in a[1]]
+
+
+def test_a_model_partly_on_the_cpu_is_named_not_just_a_full_card():
+    s = Snapshot(**{**OK, "ai_model": "sol-fast", "ai_split_gb": 1.2, "ai_full_gb": 7.1, "ai_refit_gain_gb": 0.0,
+                    "ai_tps": 21.0, "ai_tps_slow": True, "vram_card_full": True, "vram_used_gb": 12.3, "vram_hog": "brave 1.1 GB"})
+    lines = [t for _, t, _ in td.attention(s)]
+    assert any(t.startswith("sol-fast partly on the CPU (1.2 GB)") and "brave" in t for t in lines)
+    assert not any(t.startswith("AI slowed") for t in lines)                        # the vague line gives way
+    s2 = Snapshot(**{**OK, "ai_model": "sol-fast", "ai_split_gb": 1.2, "ai_refit_gain_gb": 1.1})
+    assert any("reloads at full speed when idle" in t for _, t, _ in td.attention(s2))

@@ -322,3 +322,35 @@ def test_the_top_vram_app_comes_from_the_guard_not_the_raw_counters(tmp_path):
     assert sum(h["dedicated_gb"] for h in holders) <= 4.3 + 0.05          # never more than the card really holds
     assert vram_holders({"ai": {"dedicated_gb": 7.2, "shared_gb": 0.6}, "top_consumers": [
         {"label": "brave", "gb": 1.3}]})[0] == {"name": "llama-server", "dedicated_gb": 7.2, "shared_gb": 0.6}
+
+
+def test_learning_never_lowers_a_size_and_ignores_a_squeezed_one(tmp_path):
+    """10-19: one load that left part of sol-fast on the CPU taught the guard "sol-fast needs 6.01 GB", so the VRAM
+    card said OK while answers ran 3x slower."""
+    n = vram.NeedStore(tmp_path / "needs.json")
+    n.learn("sol-fast", 8192, 7.2)
+    n.learn("sol-fast", 8192, 5.9)                                   # a squeezed load: not a smaller model
+    assert n.get("sol-fast") == (7.2, 8192, "learned")
+    old = vram.NeedStore(None)
+    old.learned = {"sol-fast@8192": 6.01, "sol-smart@32768": 7.16}   # a file from before this fix
+    assert old.get("sol-fast")[0] == 7.1                             # the poisoned value is ignored
+    assert old.get("sol-smart")[0] == 7.16                           # sol-smart splits with the CPU by design
+
+
+def test_split_and_when_a_reload_would_help():
+    n = vram.NeedStore(None)
+    today = vram.split_state("sol-fast", 5.93, 6.44, n)              # the 10-19 measurement
+    assert today["split"] and today["cpu_gb"] == 1.17 and not today["can_refit"]
+    later = vram.split_state("sol-fast", 5.93, 5.0, n)               # other apps shrank (Adrenalin recording off)
+    assert later["can_refit"] and later["refit_gain_gb"] == 1.17
+    partly = vram.split_state("sol-fast", 5.0, 6.0, n)               # not all of it fits, but 1.37 GB more would
+    assert partly["can_refit"] and partly["refit_gain_gb"] == 1.37
+    assert not vram.split_state("sol-fast", 7.05, 6.0, n)["split"]   # wholly on the card
+    assert not vram.split_state("sol-smart", 4.0, 6.0, n)["split"]   # by design
+    assert not vram.split_state(None, 5.0, 6.0, n)["split"]
+
+
+def test_the_guard_says_split(tmp_path):
+    reading = dict(dedicated={pm(100): 5.93, pm(300): 1.1}, shared={ps(100): 0.62})
+    v = guard(tmp_path, confirm=1).update(gpu_block(**reading, used=12.35), OLLAMA_LOADED)
+    assert v["verdict"] == "SPLIT" and v["split"]["split"]

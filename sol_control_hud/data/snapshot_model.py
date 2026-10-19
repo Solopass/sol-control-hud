@@ -70,6 +70,11 @@ class Snapshot:
     vram_spill_impact: str = ""                # while evicted: "slow" / "fine" = an answer since the spill was slow / ran
                                                # at its usual speed; "unknown" = nothing answered since (spill_impact)
     vram_spilled_gb: float = 0.0
+    # a model meant to sit wholly on the card that the engine partly put on the CPU at load (vram.split_state):
+    # how much is on the CPU, its full size, and how much a reload would move back now (0 = no room yet)
+    ai_split_gb: float = 0.0
+    ai_full_gb: float | None = None
+    ai_refit_gain_gb: float = 0.0
     hud_alert: str | None = None               # the HUD's own trouble (health.py): a sampler stopped, crashing               # the AI runner's memory in system RAM (sol-fast keeps ~0.62 by design)
     vram_tight: bool = False
     vram_top_process: str | None = None

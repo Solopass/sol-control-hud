@@ -615,6 +615,10 @@ class TickerCollector:
 
         # 3. Local AI
         ai_model, ai_state, _, ai_ctx_size = read_ai_models(timeout=0.4)
+        split = {}
+        if guard_res.get("available") and ai_model and ai_state in ("loaded", "sleeping"):
+            split = vram.split_state(str(ai_model).removesuffix(":latest"), (guard_res.get("ai") or {}).get("dedicated_gb", 0.0),
+                                     guard_res.get("others_gb", 0.0), self._guard.needs)
         ai_generating = ai_busy(ai_state, gpu_load, gpu_latest.get("processes", []) if gpu_avail else [])
         ai_mode, ai_reason, ai_until = read_llm_state()
         gpu_locked = gpu_lock_held()
@@ -776,6 +780,9 @@ class TickerCollector:
             vram_spill_impact=vram_spill_impact,
             hud_alert=self.health_alert,
             vram_spilled_gb=round((guard_res.get("ai") or {}).get("shared_gb", 0.0), 2),
+            ai_split_gb=split.get("cpu_gb", 0.0) if split.get("split") else 0.0,
+            ai_full_gb=split.get("full_gb"),
+            ai_refit_gain_gb=split.get("refit_gain_gb", 0.0) if split.get("split") else 0.0,
             vram_tight=vram_tight,
             vram_top_process=vram_top_process,
             vram_card_full=vram_card_full,

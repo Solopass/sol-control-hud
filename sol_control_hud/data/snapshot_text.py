@@ -60,7 +60,10 @@ def attention(s: "Snapshot") -> list[tuple[str, str, str]]:
         out.append((AMBER, f"chain failed: {s.chain_last_finished.removesuffix(' (failed)')}", "RUN"))
     if s.backup_stale:
         out.append((AMBER, "WSL backup is stale", "SYS"))
-    if s.ai_tps_slow and s.vram_card_full:
+    if s.ai_split_gb:                       # the engine put part of the model on the CPU when it started (vram.split_state)
+        out.append((AMBER, f"{s.ai_model or 'the model'} partly on the CPU ({s.ai_split_gb:.1f} GB): ~3x slower"
+                    + (" · reloads at full speed when idle" if s.ai_refit_gain_gb >= 0.5 else (f" · {s.vram_hog}" if s.vram_hog else "")), "AI"))
+    elif s.ai_tps_slow and s.vram_card_full:
         out.append((AMBER, f"AI slowed ({s.ai_tps:.0f} tok/s): card {s.vram_used_gb:.1f} GB" + (f" · {s.vram_hog}" if s.vram_hog else ""), "AI"))
     elif s.vram_card_full and s.ai_mode == "desk" and s.ai_state in ("loaded", "sleeping"):
         out.append((AMBER, f"card nearly full ({s.vram_used_gb:.1f} GB): the AI may slow" + (f" · {s.vram_hog}" if s.vram_hog else ""), "AI"))
