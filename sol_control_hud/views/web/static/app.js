@@ -130,7 +130,8 @@ function render(p) {
   m.textContent = mode === 'off' && s.ai_reason ? `OFF · ${s.ai_reason.replace('game: ', '')}` : mode.toUpperCase();
   m.className = `mode ${mode}`;
   setHTML($('headline'), segHtml((slide(p, 'AWAY') || slide(p, 'AI') || {}).segments));
-  const tb = $('tickerBtn'); tb.hidden = false; tb.textContent = p.views.ticker ? 'Hide ticker' : 'Show ticker';
+  const tb = $('tickerBtn'); tb.hidden = false; tb.title = p.views.ticker ? 'Hide the ticker' : 'Show the ticker';
+  setHTML(tb, `▭<span class="lbl"> ${p.views.ticker ? 'Hide' : 'Show'} ticker</span>`);
   tb.onclick = async () => { tb.textContent = '…'; await post('/api/views', { ticker: !p.views.ticker }); };
   $('foot').textContent = `pace ${p.views.pace_s}s · ${s.gpu_name || ''}`;
 

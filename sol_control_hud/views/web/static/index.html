@@ -16,10 +16,12 @@
   <div class="headline" id="headline"></div>
   <div class="range" id="range" title="Chart range"><button data-range="1h" class="on">1 h</button><button data-range="24h">24 h</button><button data-range="7d">7 d</button></div>
   <span class="age" id="age">connecting…</span>
-  <button id="cmdPaletteBtn" class="mini" title="Command Palette (Ctrl+K)">⌘ Ctrl+K</button>
-  <button id="settingsBtn" class="mini" title="Settings: the app, the ticker, the local AI (Ctrl+click to restart)">⚙ Settings</button>
-  <select id="theme" title="Theme (the ticker uses the same one)"></select>
-  <button id="tickerBtn" hidden>…</button>
+  <nav class="toolbar" aria-label="Dashboard controls">
+    <button id="cmdPaletteBtn" class="mini" title="Command palette (Ctrl+K)">⌘<span class="lbl"> Ctrl+K</span></button>
+    <button id="settingsBtn" class="mini" title="Settings: the app, the ticker, the local AI (Ctrl+click to restart)">⚙<span class="lbl"> Settings</span></button>
+    <label class="tb-theme" title="Theme (the ticker uses the same one)">🎨<select id="theme" aria-label="Theme"></select></label>
+    <button id="tickerBtn" class="mini" hidden>…</button>
+  </nav>
 </header>
 
 <div class="alerts" id="alerts"></div>

@@ -198,7 +198,10 @@ document.body.appendChild(layoutMenu);
 
 function renderLayoutButton() {
   const p = activePreset();
-  layoutsBtn.textContent = `▦ ${p ? `${p.icon ? `${p.icon} ` : ''}${p.name}` : 'Layouts'}`;
+  const label = document.createElement('span');                  // hidden on narrower screens: the icon stays
+  label.className = 'lbl'; label.textContent = ` ${p ? p.name : 'Layouts'}`;
+  layoutsBtn.replaceChildren(p?.icon || '▦', label);
+  layoutsBtn.title = `Layout: ${p ? p.name : 'none'}. Switch and arrange the cards (Alt+1…9)`;
 }
 function renderLayoutMenu() {
   const items = (LAYOUT?.presets || []).map((p, i) => `<button class="litem${p.name === LAYOUT.active ? ' on' : ''}" data-lname="${esc(p.name)}">`
