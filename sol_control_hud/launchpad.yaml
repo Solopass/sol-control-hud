@@ -36,6 +36,12 @@ projects:
     start: {cmd: [bun, run, dev]}
     port: 5195
     url: 'http://127.0.0.1:5195/'
+  youtube-alchemy:
+    title: YouTube Alchemy
+    description: 1-Click Userscript installer & Fancam / Local AI Vault Server.
+    start: {cmd: [bun, serve-install.mjs]}
+    port: 8788
+    url: 'http://127.0.0.1:8788/'
   solopass-v1:
     live: 'https://solopass.github.io/solopass-v1/'
   Polymatica:
