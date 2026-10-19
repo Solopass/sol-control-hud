@@ -165,10 +165,20 @@ def voice_jobs(db: Path | str, now: float | None = None) -> dict:
 
 
 def newest_files(folder: Path | str, exts=AUDIO_EXTS, n: int = RECENT, suffix: str | None = None) -> list[dict]:
-    """The newest outputs in a folder (one level, no recursion: these folders can be big)."""
+    """The newest outputs in a folder (one level, or 1-level subdirectories if root has none)."""
     try:
-        files = [e for e in Path(folder).iterdir() if e.is_file() and (suffix is None and e.suffix.lower() in exts
+        p = Path(folder)
+        files = [e for e in p.iterdir() if e.is_file() and (suffix is None and e.suffix.lower() in exts
                                                                        or suffix and e.name.lower().endswith(suffix))]
+        if not files:
+            for sub in p.iterdir():
+                if sub.is_dir() and not sub.name.startswith("."):
+                    try:
+                        files.extend([e for e in sub.iterdir() if e.is_file() and (
+                            suffix is None and e.suffix.lower() in exts or suffix and e.name.lower().endswith(suffix)
+                        )])
+                    except OSError:
+                        pass
     except OSError:
         return []
     out = []
