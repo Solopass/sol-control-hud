@@ -1075,3 +1075,22 @@ main.grid.masonry > .card { margin-bottom:16px; }
 .crow.more-open .cmore-items { display:inline-flex; flex-wrap:wrap; justify-content:flex-end; }
 .crow.more-open .cmore-btn { color:var(--cyan); border-color:var(--cyan); }
 .crow .warnc { color:var(--amber); } .crow .badc { color:var(--red); }
+
+/* phone width (B6, 10-19): one column. A layout's inline "span 2" would otherwise make a second, 34 px column and a
+   page twice the screen wide; !important beats those inline sizes (the layout itself is unchanged for wider screens).
+   Kept last in the file so it wins over the card rules above at equal specificity. */
+@media (max-width:760px) {
+  main.grid { grid-template-columns:minmax(0, 1fr); gap:12px; padding:12px 12px 10px; }
+  main.grid > .card { grid-column:1 / -1 !important; }
+  header { padding:10px 12px; gap:10px; }
+  .alerts { padding:0 12px; }
+  .card { padding:12px 13px; }
+  .card h2 { flex-wrap:wrap; row-gap:6px; }                    /* header controls drop under the title */
+  .card h2 > :last-child:not(:first-child) { flex:1 1 auto; justify-content:flex-end; }
+  .card h2 .dim { white-space:normal; }
+  .notes-controls { flex-wrap:wrap; }
+  .think-ops-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .crow { grid-template-columns:minmax(0, 1fr) auto; row-gap:4px; } /* chain row: name · state, then meta, then buttons */
+  .crow .meta, .crow .acts { grid-column:1 / -1; }
+  .crow .acts { justify-content:flex-start; }
+}
