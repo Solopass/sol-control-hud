@@ -1463,6 +1463,8 @@ async function loadWeek() {
   $('weekCover').textContent = w.covered_hours < 24 * w.days ? `from ${w.covered_hours} h of history so far` : `last ${w.days} days`;
 }
 setInterval(loadWeek, 300000);
+// a tab opened in the background skipped its first load: fill the card as soon as it's looked at, not 5 min later
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !$('weekStats')?.children.length) loadWeek(); });
 
 // ---------- E1: the HUD's own health (health.py via /api/health)
 async function loadHealth() {

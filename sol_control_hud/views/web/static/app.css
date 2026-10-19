@@ -113,6 +113,17 @@ body:not(.opt-no-hover-lift):not(.layout-editing) .card:not(.ldragging):hover {
 .card h2 { margin:0 0 10px; font-size:11px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; color:var(--dim);
   display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .card h2 .dim { letter-spacing:.04em; text-transform:none; font-weight:400; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* card consistency (B5, 10-19): title + subtitle shrink with an ellipsis, the actions on the right keep their size;
+   numbers don't jitter; data boxes shimmer until their first data instead of sitting there blank */
+.card { font-variant-numeric:tabular-nums; }
+.card h2 > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.card h2 > :last-child:not(:first-child) { flex:none; }
+.card :is(#vramStack, #aiModels, #diskList, #svcList, #gitRepos, #weekStats, #feed, #sysSeg, #gitSeg, #queueList, #cpuCores):empty {
+  min-height:28px; border-radius:8px;
+  background:linear-gradient(90deg, var(--badge) 0%, color-mix(in srgb, var(--text) 9%, var(--badge)) 50%, var(--badge) 100%) 0 0 / 200% 100%;
+  animation:skel 1.4s ease-in-out infinite; }
+@keyframes skel { to { background-position:-200% 0; } }
+@media (prefers-reduced-motion:reduce) { .card :empty { animation:none !important; } }
 .card h3 { margin:10px 0 4px; font-size:11px; letter-spacing:.12em; color:var(--dim); font-weight:600; text-transform:uppercase; }
 
 .hero { display:flex; align-items:baseline; gap:6px; }
