@@ -3,6 +3,9 @@
 :root {
   --bg:#090d16; --line:#252b3b; --card:#131824; --badge:#1e293b; --text:#ffffff; --muted:#cbd5e1; --dim:#94a3b8;
   --cyan:#38bdf8; --green:#4ade80; --amber:#fbbf24; --red:#f87171;
+  --purple:color-mix(in oklab, #c084fc 65%, var(--cyan)); /* "thinking" colour, leans to each theme's accent */
+  --well:color-mix(in srgb, var(--bg) 82%, #000);      /* sunken boxes: inputs, code, terminal */
+  --hair:color-mix(in srgb, var(--text) 7%, transparent); /* faint separators on a card */
   --radius:14px; --ease:cubic-bezier(.2,.8,.2,1);
 }
 * { box-sizing:border-box; }
@@ -355,7 +358,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .composer-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
 .git-status-pre { margin:0; padding:14px 18px; font-family:"Cascadia Code",Consolas,monospace; font-size:12px; line-height:1.45; overflow:auto; max-height:60vh; color:var(--muted); background:var(--bg); }
 .model-switcher { display:flex; gap:6px; align-items:center; margin:6px 0 8px; flex-wrap:wrap; }
-.model-switcher button.active { background:var(--cyan); color:#000; font-weight:700; }
+.model-switcher button.active { background:var(--cyan); color:var(--bg); font-weight:700; }
 .chain-progress-box { background:var(--badge); border-radius:8px; padding:6px 10px; margin-bottom:8px; }
 .vram-procs-box { margin-top:8px; font-size:11px; display:flex; flex-direction:column; gap:2px; }
 .note-tag { display:inline-block; font-size:10px; padding:1px 6px; border-radius:6px; background:color-mix(in srgb, var(--cyan) 14%, var(--badge)); color:var(--cyan); margin-left:4px; }
@@ -504,13 +507,13 @@ button.mini.on { border-color:var(--cyan); color:var(--cyan); background:color-m
 .chain-log-tail {
   margin: 0;
   padding: 6px 10px;
-  background: #090c10;
+  background: var(--well);
   border: 1px solid var(--line);
   border-radius: 6px;
   font-family: ui-monospace, monospace;
   font-size: 10.5px;
   line-height: 1.4;
-  color: #94a3b8;
+  color: var(--dim);
   max-height: 110px;
   overflow-y: auto;
   white-space: pre-wrap;
@@ -567,20 +570,20 @@ body:not(.opt-no-card-accents) :is(#c-gpu, #c-vram, #c-system, #c-disks)::before
   background:linear-gradient(90deg, var(--green), var(--cyan));
 }
 body:not(.opt-no-card-accents) :is(#c-ai, #c-ai-thinking, #c-chains, #c-awayq, #c-ask)::before {
-  background:linear-gradient(90deg, var(--cyan), #a855f7);
+  background:linear-gradient(90deg, var(--cyan), var(--purple));
 }
 body:not(.opt-no-card-accents) :is(#c-projects, #c-ports, #c-notes, #c-work, #c-media, #c-solang, #c-week)::before {
   background:linear-gradient(90deg, var(--amber), var(--cyan));
 }
 body:not(.opt-no-card-accents) :is(#c-stab, #c-svc, #c-health, #c-activity, #c-review)::before {
-  background:linear-gradient(90deg, #10b981, var(--cyan));
+  background:linear-gradient(90deg, var(--green), var(--cyan));
 }
 
 /* XS status strips */
 body:not(.opt-no-xs-styled) .card[data-size="xs"] { padding:8px 14px; border-left:3px solid var(--cyan); }
 body:not(.opt-no-xs-styled) :is(#c-gpu, #c-vram, #c-system, #c-disks)[data-size="xs"] { border-left-color:var(--green); }
 body:not(.opt-no-xs-styled) :is(#c-projects, #c-ports, #c-notes, #c-work, #c-media, #c-solang, #c-week)[data-size="xs"] { border-left-color:var(--amber); }
-body:not(.opt-no-xs-styled) :is(#c-stab, #c-svc, #c-health, #c-activity, #c-review)[data-size="xs"] { border-left-color:#10b981; }
+body:not(.opt-no-xs-styled) :is(#c-stab, #c-svc, #c-health, #c-activity, #c-review)[data-size="xs"] { border-left-color:var(--green); }
 
 
 /* CPU · GPU: S = numbers + temps, M = + engines and cores, L = today, XL = the two halves side by side */
@@ -756,14 +759,14 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
 }
 .think-spark-dot:hover {
   r: 5;
-  fill: #fff;
+  fill: var(--text);
 }
 .think-stream-wrap {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #090c10;
+  background: var(--well);
   overflow: hidden;
 }
 .think-stream-header {
@@ -780,7 +783,7 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.45;
-  color: #94a3b8;
+  color: var(--dim);
   overflow-y: auto;
   overflow-x: hidden;
   white-space: pre-wrap;
@@ -793,10 +796,10 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   color: inherit;
 }
 .think-terminal code.is-thinking {
-  color: #c084fc;
+  color: var(--purple);
 }
 .think-terminal code.is-answering {
-  color: #38bdf8;
+  color: var(--cyan);
 }
 .think-pulse {
   animation: thinkPulse 1.8s infinite ease-in-out;
@@ -811,7 +814,7 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   margin: 10px 0 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #090c10;
+  background: var(--well);
   overflow: hidden;
 }
 .chain-thinking-header {
@@ -839,7 +842,7 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 11.5px;
   line-height: 1.45;
-  color: #94a3b8;
+  color: var(--dim);
   max-height: 180px;
   min-height: 80px;
   overflow-y: auto;
@@ -852,24 +855,24 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   color: inherit;
 }
 .chain-thinking-terminal code.is-thinking {
-  color: #c084fc;
+  color: var(--purple);
 }
 .chain-thinking-terminal code.is-answering {
-  color: #38bdf8;
+  color: var(--cyan);
 }
 
 /* Collapsible reasoning block */
 .think-fold {
   margin-bottom: 8px;
-  border: 1px solid color-mix(in srgb, #c084fc 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--purple) 35%, transparent);
   border-radius: 6px;
-  background: color-mix(in srgb, #c084fc 8%, transparent);
+  background: color-mix(in srgb, var(--purple) 8%, transparent);
   overflow: hidden;
 }
 .think-fold summary {
   padding: 4px 8px;
   font-size: 11px;
-  color: #c084fc;
+  color: var(--purple);
   cursor: pointer;
   user-select: none;
   font-weight: 500;
@@ -878,12 +881,12 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   gap: 6px;
 }
 .think-fold summary:hover {
-  background: color-mix(in srgb, #c084fc 15%, transparent);
+  background: color-mix(in srgb, var(--purple) 15%, transparent);
 }
 .think-fold .think-fold-body {
   padding: 8px;
-  border-top: 1px solid color-mix(in srgb, #c084fc 20%, transparent);
-  color: #e2e8f0;
+  border-top: 1px solid color-mix(in srgb, var(--purple) 20%, transparent);
+  color: var(--text);
   font-size: 11.5px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -895,7 +898,7 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   font-weight: normal;
 }
 .answer-stream {
-  color: #38bdf8;
+  color: var(--cyan);
   white-space: pre-wrap;
   word-break: break-word;
   margin-top: 6px;
@@ -904,7 +907,7 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
 /* Syntax-highlighted code blocks in reasoning & answers */
 .code-block {
   margin: 6px 0;
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   border-radius: 6px;
   background: rgba(15, 23, 42, 0.7);
   overflow: hidden;
@@ -915,7 +918,7 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   align-items: center;
   padding: 3px 8px;
   background: rgba(0, 0, 0, 0.25);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--hair);
 }
 .code-lang {
   font-size: 10px;
@@ -932,25 +935,25 @@ body.layout-editing main.grid .card { outline:1px dashed color-mix(in srgb, var(
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #f1f5f9;
+  color: var(--text);
 }
-.syn-kw { color: #c084fc; font-weight: 500; }
-.syn-str { color: #4ade80; }
-.syn-num { color: #fb923c; }
-.syn-cmt { color: #94a3b8; font-style: italic; }
+.syn-kw { color: var(--purple); font-weight: 500; }
+.syn-str { color: var(--green); }
+.syn-num { color: var(--amber); }
+.syn-cmt { color: var(--dim); font-style: italic; }
 .syn-inline {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   padding: 1px 4px;
   border-radius: 4px;
   font-family: var(--mono);
   font-size: 11px;
-  color: #38bdf8;
+  color: var(--cyan);
 }
 .syn-heading {
   font-weight: 600;
   color: var(--text);
   margin: 6px 0 2px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
   padding-bottom: 2px;
 }
 

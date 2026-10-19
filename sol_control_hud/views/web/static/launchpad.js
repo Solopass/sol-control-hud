@@ -492,13 +492,13 @@ if (dropzone && fileInput) {
   
   dropzone.addEventListener('dragover', (e) => {
     e.preventDefault();
-    dropzone.style.borderColor = '#38bdf8';
-    dropzone.style.background = 'rgba(56, 189, 248, 0.1)';
+    dropzone.style.borderColor = 'var(--cyan)';
+    dropzone.style.background = 'color-mix(in srgb, var(--cyan) 10%, transparent)';
   });
 
   const resetDropzoneStyle = () => {
-    dropzone.style.borderColor = '#475569';
-    dropzone.style.background = 'rgba(0,0,0,0.25)';
+    dropzone.style.borderColor = 'var(--line)';
+    dropzone.style.background = 'var(--well)';
   };
 
   dropzone.addEventListener('dragleave', resetDropzoneStyle);

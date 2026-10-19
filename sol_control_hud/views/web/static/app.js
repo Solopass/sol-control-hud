@@ -536,7 +536,7 @@ function renderAiThinking(p) {
       const elapsed = th.started_at ? (Date.now() / 1000 - th.started_at).toFixed(1) : null;
       if (th.phase === 'thinking') {
         statusEl.textContent = `Thinking (inner reasoning)${elapsed ? ` · ${elapsed}s` : ''}…`;
-        statusEl.style.color = '#c084fc';
+        statusEl.style.color = 'var(--purple)';
       } else {
         const thoughtInfo = th.thinking_s ? `Thought ${th.thinking_s}s · ` : '';
         statusEl.textContent = `${thoughtInfo}Answering${elapsed ? ` · ${elapsed}s` : ''}…`;

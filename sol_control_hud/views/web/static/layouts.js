@@ -93,7 +93,7 @@ const CHIPS = {
     const ops = window.payload?.ai_ops || {};
     const th = ops.thinking || {};
     const sp = ops.speed || {};
-    if (th.active) return `<b style="color:#c084fc">Thinking</b> · ${sp.tg_tps || '–'} tok/s`;
+    if (th.active) return `<b style="color:var(--purple)">Thinking</b> · ${sp.tg_tps || '–'} tok/s`;
     if (ops.active) return `<b style="color:var(--cyan)">Generating</b> · ${sp.tg_tps || '–'} tok/s`;
     return `Idle${ops.model ? ` · ${esc(ops.model)}` : ''}`;
   },

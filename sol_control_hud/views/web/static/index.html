@@ -284,7 +284,7 @@
     <form class="notebox" id="solangForm" autocomplete="off">
       <h3>Bulk Song & Playlist Ingest <span class="dim">paste YouTube links, playlists, or artist queries to automatically fetch dual lyrics and sync</span></h3>
       <div class="solang-input-row" style="display:flex; flex-direction:column; gap:8px;">
-        <textarea id="solangLinks" rows="2" placeholder="Paste YouTube links (one per line) or playlist URL... e.g. https://www.youtube.com/watch?v=11cta61wi0g" style="width:100%; background:var(--bg-input, #0b1120); border:1px solid var(--border, #1e293b); border-radius:8px; padding:10px; color:#f1f5f9; font-family:monospace; font-size:12px; resize:vertical;"></textarea>
+        <textarea id="solangLinks" rows="2" placeholder="Paste YouTube links (one per line) or playlist URL... e.g. https://www.youtube.com/watch?v=11cta61wi0g" style="width:100%; background:var(--well); border:1px solid var(--line); border-radius:8px; padding:10px; color:var(--text); font-family:monospace; font-size:12px; resize:vertical;"></textarea>
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span class="dim small" id="solangStatusText">Ready for links. Auto-starts Solang if offline.</span>
           <button type="submit" class="go" id="solangSubmitBtn" style="padding:8px 16px;">Bulk Ingest Songs</button>
@@ -292,13 +292,13 @@
       </div>
       <div id="solangResults" style="margin-top:10px;"></div>
     </form>
-    <div class="solang-queue-box" style="margin-top:10px; padding:10px; background:rgba(255,255,255,0.03); border-radius:8px; border:1px solid var(--border, #1e293b);">
+    <div class="solang-queue-box" style="margin-top:10px; padding:10px; background:color-mix(in srgb, var(--text) 3%, transparent); border-radius:8px; border:1px solid var(--line);">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
         <span style="font-weight:600; font-size:12px;">📊 Takeout Queue (15k Scale)</span>
         <span class="dim small" id="solangQueueStats">Scanning state...</span>
       </div>
-      <div style="width:100%; height:6px; background:#1e293b; border-radius:3px; overflow:hidden; margin-bottom:8px;">
-        <div id="solangProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, #38bdf8, #818cf8); transition:width 0.3s ease;"></div>
+      <div style="width:100%; height:6px; background:var(--badge); border-radius:3px; overflow:hidden; margin-bottom:8px;">
+        <div id="solangProgressBar" style="width:0%; height:100%; background:linear-gradient(90deg, var(--cyan), var(--purple)); transition:width 0.3s ease;"></div>
       </div>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <button type="button" class="mini" id="solangRunBatchBtn" title="Run next batch of 25 tracks">⚡ Ingest Next 25</button>
@@ -307,12 +307,12 @@
         <span class="dim small" id="solangQueueDetail" style="margin-left:auto;"></span>
       </div>
       <div style="display:flex; gap:6px; align-items:center; margin-top:8px;">
-        <input type="text" id="solangFilePathInput" placeholder="Path to watch-history.html / .json..." value="C:\Users\cohen\Downloads\Takeout\YouTube and YouTube Music\history\watch-history.html" style="flex:1; background:var(--bg-input, #0b1120); border:1px solid var(--border, #1e293b); border-radius:6px; padding:6px 10px; color:#f1f5f9; font-family:monospace; font-size:11px;" />
+        <input type="text" id="solangFilePathInput" placeholder="Path to watch-history.html / .json..." value="C:\Users\cohen\Downloads\Takeout\YouTube and YouTube Music\history\watch-history.html" style="flex:1; background:var(--well); border:1px solid var(--line); border-radius:6px; padding:6px 10px; color:var(--text); font-family:monospace; font-size:11px;" />
         <button type="button" class="mini go" id="solangPrepareBtn" title="Scan and filter high-confidence music tracks into a clean dataset">⚡ Sift &amp; Prepare</button>
         <button type="button" class="mini danger" id="solangResetBtn" title="Reset queue progress and clear state">🔄 Reset</button>
       </div>
-      <div id="solangDropzone" style="margin-top:8px; border:1px dashed #475569; border-radius:6px; padding:10px; text-align:center; cursor:pointer; background:rgba(0,0,0,0.25); transition:all 0.2s ease;">
-        <span style="font-size:11px; color:#94a3b8;" id="solangDropPrompt">📁 Drag &amp; Drop <code>watch-history.html</code>, Takeout JSON, or URLs <code>.txt</code> here to load queue</span>
+      <div id="solangDropzone" style="margin-top:8px; border:1px dashed var(--line); border-radius:6px; padding:10px; text-align:center; cursor:pointer; background:var(--well); transition:all 0.2s ease;">
+        <span style="font-size:11px; color:var(--dim);" id="solangDropPrompt">📁 Drag &amp; Drop <code>watch-history.html</code>, Takeout JSON, or URLs <code>.txt</code> here to load queue</span>
         <input type="file" id="solangFileInput" accept=".html,.json,.csv,.txt" style="display:none;" />
       </div>
     </div>
