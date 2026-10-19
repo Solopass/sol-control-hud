@@ -19,6 +19,11 @@ The pre-commit hook (`.githooks/pre-commit`) runs, in order: `scripts/check_name
 staged Python), `node --check` on staged `.js` files (via WSL), then the whole test suite. Don't skip it
 (`--no-verify`); fix what it reports. Tests never touch the live `data/` folder (`tests/conftest.py`).
 
+**Commit only your own files**: `git add <the paths you changed>`, never `git add -A`, `git add .` or `git commit -a`.
+More than one agent works in this repo at the same time; on 2026-10-19 a launchpad fix committed with `-A` swept
+another agent's half-finished dashboard work into it under the wrong message. Check `git status` before committing
+and leave changes you didn't make alone.
+
 ## Things that look harmless but aren't
 - **Never send HTTP to media-api (:8080) or speedman (:8081) just to look.** They are systemd socket-activated in
   WSL: any request starts them. Read their state from systemd / their files (see `data/collectors/media_apis.py`).
