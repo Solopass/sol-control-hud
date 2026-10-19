@@ -1039,3 +1039,13 @@ main.grid.masonry > .card { margin-bottom:16px; }
 .card:not([data-size="xl"]) :is(#chainList, #projList, #notesList, #feed, #portsList, #portsClosed) {
   max-height:440px; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
 .card[data-size="xl"] :is(#chainList, #projList, #notesList, #feed, #portsList, #portsClosed) { max-height:none; }
+
+/* ---------- B2 (10-19): compact chain rows - one action that fits the state, the rest behind "⋯" */
+.chainhead { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.chainhead .mini-search { max-width:200px; }
+.crow { grid-template-columns:minmax(120px, 1.3fr) auto minmax(80px, 1fr) auto; }
+.crow .cname { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.crow .cmore-items { display:none; gap:4px; }
+.crow.more-open .cmore-items { display:inline-flex; flex-wrap:wrap; justify-content:flex-end; }
+.crow.more-open .cmore-btn { color:var(--cyan); border-color:var(--cyan); }
+.crow .warnc { color:var(--amber); } .crow .badc { color:var(--red); }
