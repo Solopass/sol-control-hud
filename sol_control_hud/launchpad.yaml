@@ -54,6 +54,8 @@ projects:
   media-api: {media: media-api}
   speedman: {media: speedman}
   voice-savior: {media: voice-savior}
+  lossless-cut: {media: lossless-cut}
+
 
 # Media services. `runs_in: wsl` ones sit behind systemd socket activation: a request *starts* them, so the card never
 # sends one unless the service is already running (checked inside WSL in the same call, see media_apis.py).
@@ -105,3 +107,11 @@ media:
     project: omni-tools            # started and stopped as the project
     port: 8082
     runs_in: wsl
+  lossless-cut:
+    title: LosslessCut
+    what: lossless video and audio trimming and stream cutting
+    project: lossless-cut
+    runs_in: windows
+    start: {shortcut: 'D:\Workspace\lossless-cut\LosslessCut.lnk'}
+    folder: 'D:\Output'
+
