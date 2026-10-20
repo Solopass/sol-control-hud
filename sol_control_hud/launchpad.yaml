@@ -33,6 +33,13 @@ projects:
   solang:
     start: {cmd: [bun, server.ts]}
     port: 3000
+  edit-api:
+    title: Edit Maker
+    description: Clips + a song into a beat-synced vertical kpop edit (beat cuts, speed ramps, glitch, lyric captions).
+    # the project's own venv Python, so no `uv` is needed on the HUD's PATH; it serves the page and API on 127.0.0.1 only
+    start: {cmd: ['D:\Workspace\edit-api\.venv\Scripts\python.exe', -m, edit_api, serve]}
+    port: 8090
+    url: 'http://127.0.0.1:8090/'
   pokepalace:
     title: PokéPalace
     description: 3D voxel Pokémon memory palace and habit sim.
@@ -131,6 +138,14 @@ media:
     runs_in: windows
     url: 'http://127.0.0.1:5174/'
     folder: 'D:\Output\Videos'
+  edit-api:
+    title: Edit Maker
+    what: clips + a song into a beat-synced vertical edit
+    project: edit-api              # started and stopped as the project
+    port: 8090
+    runs_in: windows
+    url: 'http://127.0.0.1:8090/'
+    folder: 'D:\Workspace\edit-api\projects'
   youtube-alchemy:
     title: YouTube Alchemy
     what: 1-click userscripts, fancam slice & vault server

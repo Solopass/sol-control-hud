@@ -541,6 +541,17 @@ def test_real_registry_serves_omni_tools_from_a_build():
     assert b"exec npx vite preview" in raw and b"npm run build" in raw
 
 
+def test_real_registry_lists_edit_maker_on_the_projects_and_media_cards():
+    """Edit Maker starts with its own venv Python (no `uv` on the HUD's PATH) and the two cards agree on port and link."""
+    reg = projects.load_registry(user_file=Path("does-not-exist.json"))
+    proj, tile = reg["projects"]["edit-api"], reg["media"]["edit-api"]
+    assert tile["project"] == "edit-api" and tile["runs_in"] == "windows"
+    assert tile["port"] == proj["port"] == 8090
+    assert tile["url"] == proj["url"] == "http://127.0.0.1:8090/"
+    cmd = proj["start"]["cmd"]
+    assert cmd[0].lower().endswith("edit-api\\.venv\\scripts\\python.exe") and cmd[1:] == ["-m", "edit_api", "serve"]
+
+
 # ---------------------------------------------------------------- answer speed and the watcher's heal (logs only)
 ROUTER_LOG = """[49170] 1.08.306.174 I slot print_timing: id  0 | task 0 | prompt eval time =     353.76 ms /    60 tokens (    5.90 ms per token,   169.61 tokens per second)
 [49170] 1.08.306.180 I slot print_timing: id  0 | task 0 |        eval time =   64149.81 ms /  1463 tokens (   43.88 ms per token,    22.79 tokens per second)
