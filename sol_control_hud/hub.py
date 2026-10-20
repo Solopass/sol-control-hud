@@ -302,6 +302,14 @@ class Hub:
             subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), action],
                              creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return {"ok": True, "why": f"starting {action}"}
+        if action == "wake-alchemy":
+            script = Path(r"D:\Workspace\youtube-alchemy\serve-install.mjs")
+            if script.exists():
+                subprocess.Popen(["bun", str(script)], cwd=str(script.parent),
+                                 creationflags=0x08000000, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                log("wake-alchemy: started serve-install.mjs on :8788")
+                return {"ok": True, "why": "started YouTube Alchemy service"}
+            return {"ok": False, "why": "serve-install.mjs not found"}
         if action == "open" and target in self.OPEN_TARGETS:
             self.cmds.put(("open", target))       # the ticker's own targets (folders, the daily note, reports)
             return {"ok": True}
