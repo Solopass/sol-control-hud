@@ -867,18 +867,37 @@ class Hub:
         def ai_ops_state() -> dict:
             return self.collectors["ai_ops"].get() if "ai_ops" in self.collectors else {}
 
+        ALLOWED_ORIGINS = {
+            self.url,
+            f"http://localhost:{self.port}",
+            "https://www.youtube.com",
+            "https://m.youtube.com",
+        }
+
         @app.middleware("http")
         async def guard_and_seen(request: Request, call_next):
+            origin = request.headers.get("origin")
+            if request.method == "OPTIONS":
+                if origin in ALLOWED_ORIGINS:
+                    from fastapi import Response
+                    return Response(
+                        status_code=204,
+                        headers={
+                            "Access-Control-Allow-Origin": origin,
+                            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                            "Access-Control-Allow-Headers": "Content-Type, x-sol-control",
+                            "Access-Control-Max-Age": "86400",
+                        },
+                    )
             if request.method == "POST":
-                # only this page may change things: a custom header forces a CORS preflight (which nothing here
-                # answers), and a browser's Origin must be this server. Other web pages can't press these buttons.
-                origin = request.headers.get("origin")
-                if request.headers.get("x-sol-control") != "1" or (origin and origin not in (
-                        self.url, f"http://localhost:{self.port}")):
+                # only this page and allowed workstation origins may change things: a custom header forces a CORS preflight
+                if request.headers.get("x-sol-control") != "1" or (origin and origin not in ALLOWED_ORIGINS):
                     return JSONResponse({"error": "not allowed"}, status_code=403)
             if request.url.path.startswith("/api/"):
                 self.last_web = time.monotonic()      # someone has the dashboard open: keep the 2 s pace
             response = await call_next(request)
+            if origin and origin in ALLOWED_ORIGINS:
+                response.headers["Access-Control-Allow-Origin"] = origin
             if request.url.path.startswith("/static/"):
                 # revalidate every time (cheap: 304 if unchanged): after an update the browser must not keep an old
                 # app.js (09-25 lesson with the old HUD's page)

@@ -309,3 +309,23 @@ def test_hub_log_rotates_at_start_when_big(tmp_path):
     (tmp_path / "hub.log.old").write_text("older")
     assert hub.rotate_log(log, max_bytes=100) is True
     assert not log.exists() and (tmp_path / "hub.log.old").read_text() == "y" * 200
+
+
+def test_hub_cors_allows_youtube_with_token(the_hub):
+    c = TestClient(the_hub.build_app())
+    # 1. OPTIONS preflight from YouTube
+    opt = c.options("/api/action", headers={"Origin": "https://www.youtube.com"})
+    assert opt.status_code == 204
+    assert opt.headers["access-control-allow-origin"] == "https://www.youtube.com"
+
+    # 2. Evil origin rejected
+    opt_evil = c.options("/api/action", headers={"Origin": "https://evil.com"})
+    assert opt_evil.status_code != 204
+
+    # 3. POST with x-sol-control and YouTube origin allowed
+    res = c.post("/api/action", json={"action": "test"}, headers={"X-SOL-Control": "1", "Origin": "https://www.youtube.com"})
+    assert res.status_code != 403
+
+    # 4. POST with evil origin rejected
+    res_evil = c.post("/api/action", json={"action": "test"}, headers={"X-SOL-Control": "1", "Origin": "https://evil.com"})
+    assert res_evil.status_code == 403
