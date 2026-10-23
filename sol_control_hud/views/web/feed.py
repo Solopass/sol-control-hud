@@ -148,7 +148,7 @@ def activity(away_log: Path = LLM_DIR / "away.jsonl", chains_log: Path = LLM_DIR
 
     if tasks_file and tasks_file.exists():
         try:
-            tdata = json.loads(tasks_file.read_text(encoding="utf-8"))
+            tdata = json.loads(tasks_file.read_text(encoding="utf-8-sig"))
             act = tdata.get("active")
             if isinstance(act, dict) and act.get("task") and act.get("started"):
                 desc_str = f" ({act['desc']})" if act.get("desc") else ""

@@ -80,7 +80,7 @@ def read_llm_state(path: Path = STATE_FILE) -> tuple[str, str | None, str | None
     if not path.exists():
         return "desk", None, None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         return data.get("mode", "desk"), data.get("reason"), data.get("until")
     except (OSError, ValueError):
         return "desk", None, None
@@ -91,7 +91,7 @@ def read_chains_state(path: Path = CHAINS_FILE) -> tuple[str | None, str | None,
     if not path.exists():
         return None, None, 0
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         running = data.get("running")
         chain_name = None
         step_info = None
@@ -198,7 +198,7 @@ def ai_busy(ai_state: str, gpu_load: float | None, processes: list[dict]) -> boo
 
 def read_state(path: Path = STATE_FILE) -> dict:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -221,7 +221,7 @@ def away_progress(state: dict, eta: "away_screen.EtaTracker", now: float) -> dic
 def read_chains_extra(path: Path = CHAINS_FILE, now: datetime | None = None) -> tuple[list[dict], str | None]:
     """Why queued chains wait (chains.json pending[].blocked) and the next scheduled run ("Weekly digest Sun 20:00")."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return [], None
     pending = [{"chain": p.get("chain"), "blocked": p.get("blocked")} for p in data.get("pending") or [] if isinstance(p, dict)]
@@ -242,7 +242,7 @@ def read_chains_extra(path: Path = CHAINS_FILE, now: datetime | None = None) -> 
 def read_chains_waiting(path: Path = CHAINS_FILE) -> str | None:
     """Reads waiting message from running chain in chains.json if present."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         running = data.get("running")
         if isinstance(running, dict):
             return running.get("waiting")
@@ -459,7 +459,7 @@ def read_hud_tasks(path: Path = TASKS_FILE, now: float | None = None) -> tuple[s
     if not path.exists():
         return None, None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         active = data.get("active")
         if isinstance(active, dict) and active.get("task"):
             return active.get("task"), active.get("desc")
