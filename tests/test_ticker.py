@@ -1226,3 +1226,11 @@ def test_format_slides_chain_waiting():
     assert "waiting" in run_slide["text"]
     assert run_slide["color"] == "#fbbf24"
     assert "Note Condenser" in run_slide["detail"]
+
+
+def test_format_slides_shows_hud_task():
+    s = Snapshot(hud_task="Daily Doctor", hud_task_desc="stability check")
+    slides = format_slides(s)
+    run_slide = next(sl for sl in slides if sl["tag"] == "RUN")
+    assert "Daily Doctor (stability check)" in run_slide["text"]
+    assert "SOL HUD Task: Daily Doctor" in run_slide["detail"]

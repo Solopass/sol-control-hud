@@ -200,6 +200,11 @@ def format_slides(s: Snapshot) -> list[dict]:
             chain_txt = f"Run: {s.chain_running}{step_part}"
             chain_color = "#38bdf8"
             chain_detail = f"Running: {s.chain_running}{step_part}"
+    elif s.hud_task:
+        desc_part = f" ({s.hud_task_desc})" if s.hud_task_desc else ""
+        chain_txt = f"Run: {s.hud_task}{desc_part}"
+        chain_color = "#38bdf8"
+        chain_detail = f"SOL HUD Task: {s.hud_task}\n{s.hud_task_desc or ''}"
     else:
         # say *why* a queued chain waits ("Code review waits for Away mode"), and when the next scheduled one runs
         blocked = next((p for p in s.chain_pending if p.get("blocked")), None)
@@ -219,7 +224,7 @@ def format_slides(s: Snapshot) -> list[dict]:
         "tag": "RUN",
         "text": chain_txt,
         "color": chain_color,
-        "detail": chain_detail if s.chain_running else (f"Last finished: {s.chain_last_finished}" if s.chain_last_finished else "sol-hud pipelines daemon")
+        "detail": chain_detail if (s.chain_running or s.hud_task) else (f"Last finished: {s.chain_last_finished}" if s.chain_last_finished else "sol-hud pipelines daemon")
     })
 
     # Slide 3: Services
@@ -632,6 +637,9 @@ def format_multiline_rows(s: Snapshot) -> list[dict]:
     # Row 3: Chains
     if s.chain_running:
         status_txt = f"{s.chain_running}" + (f" [{s.chain_step}]" if s.chain_step else "")
+        status_col = "#38bdf8"
+    elif s.hud_task:
+        status_txt = f"{s.hud_task}" + (f" ({s.hud_task_desc})" if s.hud_task_desc else "")
         status_col = "#38bdf8"
     elif s.chain_last_finished:
         status_txt = f"Idle (Last: {s.chain_last_finished})"

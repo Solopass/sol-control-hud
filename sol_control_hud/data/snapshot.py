@@ -26,7 +26,7 @@ from ..chains.gpulock import is_held
 
 from .snapshot_model import (  # noqa: F401 - moved verbatim; old imports keep working
     AMBER, AWAY_LOG_FILE, CARD_FULL_GB, CHAINS_FILE, CHAINS_LOG_FILE, CHECK_PORTS,
-    clean_log_line, CYAN, DISK_TREND_GB, DISK_TREND_WINDOW, GIT_OLD_DAYS, GPU_LOCK_FILE,
+    clean_log_line, CYAN, DISK_TREND_GB, DISK_TREND_WINDOW, GIT_OLD_DAYS, GPU_LOCK_FILE, TASKS_FILE,
     GREEN, HOTSPOT_ALERT_C, joined, MUTED, NIGHT_SHOWN_HOURS, NO_SPILL,
     NO_WINDOW, plain, RED, RUN_RESULT, RUN_WORDS, SEP,
     SERVICE_ORDER, Snapshot, SPILL_WORD, STATE_FILE, TEMP_RISE_C, TEXT,
@@ -453,6 +453,27 @@ def _review_state() -> dict | None:
         return None
 
 
+
+def read_hud_tasks(path: Path = TASKS_FILE, now: float | None = None) -> tuple[str | None, str | None]:
+    """Reads currently running HUD task or recent task from tasks.json."""
+    if not path.exists():
+        return None, None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        active = data.get("active")
+        if isinstance(active, dict) and active.get("task"):
+            return active.get("task"), active.get("desc")
+        last = data.get("last")
+        if isinstance(last, dict) and last.get("task") and last.get("finished"):
+            t_now = time.time() if now is None else now
+            dt = datetime.fromisoformat(last["finished"]).timestamp()
+            if t_now - dt <= 60.0:
+                return f"{last['task']} done", last.get("desc")
+        return None, None
+    except Exception:
+        return None, None
+
+
 class TickerCollector:
     """Gathers data asynchronously and provides the latest Snapshot without blocking UI."""
 
@@ -628,6 +649,7 @@ class TickerCollector:
             away = {}
 
         # 4. Chains
+        hud_task, hud_task_desc = read_hud_tasks()
         chain_name, chain_step, pending_count = read_chains_state()
         chain_waiting = read_chains_waiting() if chain_name else None
         chain_last_finished = None
@@ -803,6 +825,8 @@ class TickerCollector:
             ai_generating=ai_generating,
             ai_ctx_size=ai_ctx_size,
             **away,
+            hud_task=hud_task,
+            hud_task_desc=hud_task_desc,
             chain_running=chain_name,
             chain_step=chain_step,
             chain_waiting=chain_waiting,

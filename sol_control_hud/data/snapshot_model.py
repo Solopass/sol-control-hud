@@ -44,6 +44,7 @@ STATE_FILE = Path(r"D:\AI\Cache\llm\state.json")
 CHAINS_FILE = Path(r"D:\AI\Cache\llm\chains.json")
 CHAINS_LOG_FILE = Path(r"D:\AI\Cache\llm\chains.log")
 GPU_LOCK_FILE = Path(r"D:\AI\Cache\llm\gpu.lock")
+TASKS_FILE = Path(os.environ.get("SOL_TASKS_FILE", r"D:\AI\Cache\llm\tasks.json"))
 
 # Only Windows-side services are probed. media-api / speedman / voice-savior / omni-tools run in WSL behind systemd
 # socket activation: a TCP connect *starts* them, so probing every 2 s would keep them loaded (RAM/VRAM) for good.
@@ -104,6 +105,10 @@ class Snapshot:
     away_eta: str = ""                 # "about 18 min left · done around 22:10"
     away_present: bool = False         # you came back; the AI keeps working (corner panel)
     away_phase: str | None = None      # working | done | stopped | ...
+
+    # SOL HUD Background Tasks
+    hud_task: str | None = None
+    hud_task_desc: str | None = None
 
     # Chains
     chain_running: str | None = None

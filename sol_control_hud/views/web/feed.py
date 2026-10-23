@@ -2,6 +2,8 @@
 activity feed. Pure functions + one small ring buffer; the hub owns the instances."""
 from __future__ import annotations
 
+import os
+import re
 import json
 import threading
 from collections import deque
@@ -11,6 +13,10 @@ from ...data.snapshot import RED, AMBER, GREEN, CYAN, MUTED, RUN_RESULT, RUN_WOR
 
 LLM_DIR = Path(r"D:\AI\Cache\llm")
 QUEUE_DIR = Path(r"D:\AI\Queue")
+DOCTOR_LOG = Path(r"D:\OBVLT\reports\doctor\history.log")
+BRIEFING_LOG = Path(r"D:\OBVLT\reports\briefing.log")
+TASKS_FILE = Path(os.environ.get("SOL_TASKS_FILE", r"D:\AI\Cache\llm\tasks.json"))
+
 SERIES = ("gpu", "vram", "ram", "cpu", "temp", "hotspot", "down", "up")
 
 
@@ -90,9 +96,19 @@ def _tail_lines(path: Path, max_bytes: int = 16384) -> list[str]:
         return []
 
 
-def activity(away_log: Path = LLM_DIR / "away.jsonl", chains_log: Path = LLM_DIR / "chains.log", n: int = 12) -> list[dict]:
-    """The latest things that happened (Away events + chain results), newest first: {time, text, color}."""
+def activity(away_log: Path = LLM_DIR / "away.jsonl", chains_log: Path = LLM_DIR / "chains.log",
+             doctor_log: Path | None = None, briefing_log: Path | None = None,
+             tasks_file: Path | None = None, n: int = 12) -> list[dict]:
+    """The latest things that happened (Away events, chains, doctor checks, briefings, and tasks), newest first: {time, text, color}."""
     items = []
+    # Only use machine defaults when called without custom paths (e.g. tests provide tmp_path)
+    if doctor_log is None and away_log == LLM_DIR / "away.jsonl":
+        doctor_log = DOCTOR_LOG
+    if briefing_log is None and away_log == LLM_DIR / "away.jsonl":
+        briefing_log = BRIEFING_LOG
+    if tasks_file is None and away_log == LLM_DIR / "away.jsonl":
+        tasks_file = TASKS_FILE
+
     for line in _tail_lines(away_log):
         try:
             e = json.loads(line)
@@ -113,6 +129,33 @@ def activity(away_log: Path = LLM_DIR / "away.jsonl", chains_log: Path = LLM_DIR
         elif " start " in f" {rest} " and rest.startswith("start "):
             items.append({"time": stamp, "text": f"chain {rest[6:].split(' (')[0].removesuffix('.md')} started",
                           "color": CYAN})
+
+    if doctor_log and doctor_log.exists():
+        for line in _tail_lines(doctor_log):
+            m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\s+exit=(\d+)", line)
+            if m:
+                stamp, code = m.group(1), int(m.group(2))
+                color = GREEN if code == 0 else (AMBER if code == 1 else RED)
+                status_txt = "all OK" if code == 0 else ("warnings" if code == 1 else "failures")
+                items.append({"time": stamp, "text": f"doctor: stability check {status_txt} (exit {code})", "color": color})
+
+    if briefing_log and briefing_log.exists():
+        for line in _tail_lines(briefing_log):
+            m = re.match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\s+\[\w+\]\s+wrote\s+(.+)$", line)
+            if m:
+                stamp, name = m.group(1), m.group(2)
+                items.append({"time": stamp, "text": f"briefing: wrote {name.split(' (')[0]}", "color": GREEN})
+
+    if tasks_file and tasks_file.exists():
+        try:
+            tdata = json.loads(tasks_file.read_text(encoding="utf-8"))
+            act = tdata.get("active")
+            if isinstance(act, dict) and act.get("task") and act.get("started"):
+                desc_str = f" ({act['desc']})" if act.get("desc") else ""
+                items.append({"time": act["started"][:19], "text": f"task: {act['task']}{desc_str} running", "color": CYAN})
+        except Exception:
+            pass
+
     items = [i for i in items if len(i["time"]) >= 16]
     items.sort(key=lambda i: i["time"], reverse=True)
     return items[:n]

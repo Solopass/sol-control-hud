@@ -144,3 +144,18 @@ def test_stream_sends_everything_once_then_only_changes():
     assert msg == {"patch": {"chains": {"a": 2}}, "snap": {"gpu_load": 12.0, "sampled_at": 3.0}}   # not ai_model, not views
     msg, st = stream_message(st, p2)
     assert msg == {}                                                        # nothing changed: an empty heartbeat
+
+
+def test_activity_feed_includes_doctor_and_tasks(tmp_path):
+    away = tmp_path / "away.jsonl"
+    away.write_text("")
+    chains = tmp_path / "chains.log"
+    chains.write_text("")
+    doctor = tmp_path / "doctor.log"
+    doctor.write_text("2026-10-23T12:00:05 exit=1 -> D:\\reports\\doctor\\2026-10-23.json\n")
+    tasks = tmp_path / "tasks.json"
+    tasks.write_text(json.dumps({"active": {"task": "Daily Doctor", "desc": "Health check", "started": "2026-10-23T12:00:01"}}))
+    items = feed.activity(away, chains, doctor_log=doctor, tasks_file=tasks)
+    assert len(items) == 2
+    assert any("task: Daily Doctor (Health check) running" in i["text"] for i in items)
+    assert any("doctor: stability check warnings (exit 1)" in i["text"] for i in items)
