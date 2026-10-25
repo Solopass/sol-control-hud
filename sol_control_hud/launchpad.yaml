@@ -20,6 +20,13 @@ hidden:
   Ideas: notes, not a project
 
 projects:
+  sol-deck:
+    title: SOL iPad Deck
+    description: Ultra-fast iPad companion deck & Windows Win32 control server.
+    start: {cmd: ['D:\Workspace\sol-deck\sol-deck.exe']}
+    stop: {cmd: ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'D:\Workspace\sol-deck\run-deck.ps1', '-Stop']}
+    port: 5000
+    url: 'http://127.0.0.1:5000/deck'
   sol-control-hud:
     self: true                     # this app: no Start / Stop
     url: 'http://127.0.0.1:7900/'
