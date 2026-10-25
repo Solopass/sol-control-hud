@@ -23,7 +23,7 @@ projects:
   sol-deck:
     title: SOL iPad Deck
     description: Ultra-fast iPad companion deck & Windows Win32 control server.
-    start: {cmd: ['D:\Workspace\sol-deck\sol-deck.exe']}
+    start: {cmd: ['C:\Program Files\Python314\python.exe', 'D:\Workspace\sol-deck\pc_deck_server.py']}
     stop: {cmd: ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'D:\Workspace\sol-deck\run-deck.ps1', '-Stop']}
     port: 5000
     url: 'http://127.0.0.1:5000/deck'
