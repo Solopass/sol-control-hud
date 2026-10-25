@@ -11,6 +11,7 @@ Stopping a Windows dev server goes through `ports.close_listener`, which re-chec
 from __future__ import annotations
 
 import os
+import psutil
 import shutil
 import sqlite3
 import subprocess
@@ -73,6 +74,12 @@ def spawn(cmd: list[str], cwd: Path | str | None, log_name: str, popen=subproces
             p = popen(cmd, creationflags=NO_WINDOW | NEW_GROUP | BREAKAWAY, **kw)
         except OSError:
             p = popen(cmd, creationflags=NO_WINDOW | NEW_GROUP, **kw)    # the job doesn't allow breakaway
+        try:
+            pids_dir = DATA_DIR / "launch-pids"
+            pids_dir.mkdir(parents=True, exist_ok=True)
+            (pids_dir / f"{log_name}.pid").write_text(str(p.pid), encoding="utf-8")
+        except OSError:
+            pass
         return p.pid
     finally:
         log.close()
@@ -170,9 +177,40 @@ def stop_project(reg: dict, name: str, rows: list[dict], tiles: list[dict] | Non
         return {"ok": True, "why": f"{name} isn't running"}
     spec = reg["projects"].get(name) or {}
     if row["running"].get("pid"):
-        if close is None:
-            from .data.collectors.ports import close_listener as close
-        return close(row["running"]["port"], row["running"]["pid"])
+        if row["running"].get("port"):
+            if close is None:
+                from .data.collectors.ports import close_listener as close
+            return close(row["running"]["port"], row["running"]["pid"])
+        # Stop non-port watcher / process
+        pid = row["running"]["pid"]
+        try:
+            proc = psutil.Process(pid)
+            kids = proc.children(recursive=True)
+            proc.terminate()
+            if psutil.wait_procs([proc], timeout=2.0)[1]:
+                proc.kill()
+            for kid in kids:
+                try:
+                    kid.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            pid_file = DATA_DIR / "launch-pids" / f"{name}.pid"
+            if pid_file.exists():
+                try:
+                    pid_file.unlink()
+                except OSError:
+                    pass
+            return {"ok": True, "why": f"stopped {name} watcher (pid {pid})"}
+        except psutil.NoSuchProcess:
+            pid_file = DATA_DIR / "launch-pids" / f"{name}.pid"
+            if pid_file.exists():
+                try:
+                    pid_file.unlink()
+                except OSError:
+                    pass
+            return {"ok": True, "why": f"{name} had already stopped"}
+        except (psutil.AccessDenied, psutil.Error, OSError) as e:
+            return {"ok": False, "why": f"could not stop {name} (pid {pid}): {e}"}
     if spec.get("stop", {}).get("wsl"):
         try:
             run(_wsl(str(spec["stop"]["wsl"]), reg.get("wsl_distro", "Ubuntu-24.04")), capture_output=True, timeout=10,

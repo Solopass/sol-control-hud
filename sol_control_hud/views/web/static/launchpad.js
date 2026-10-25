@@ -48,8 +48,13 @@ function projRow(p) {
   const g = p.git || {};
   const chips = [];
   if (p.status) chips.push(`<span class="pill ${p.status === 'paused' ? 'warn' : p.status === 'active' ? 'ok' : 'dim'}" title="${p.status_from === 'you' ? 'your tag' : 'from its README'}">${esc(p.status)}${p.status_from === 'you' ? ' ✎' : ''}</span>`);
-  if (p.running) chips.push(`<span class="pill ok" title="${p.running.where === 'wsl' ? 'runs in WSL' : `pid ${p.running.pid}`}">:${p.running.port}${p.running.up_seconds ? ` · ${upWords(p.running.up_seconds)}` : ''}</span>`);
-  else if (p.busy_by) chips.push(`<span class="pill warn" title="Something else holds its port">:${p.port} taken · ${esc(p.busy_by)}</span>`);
+  if (p.running) {
+    if (p.running.port) {
+      chips.push(`<span class="pill ok" title="${p.running.where === 'wsl' ? 'runs in WSL' : `pid ${p.running.pid}`}">:${p.running.port}${p.running.up_seconds ? ` · ${upWords(p.running.up_seconds)}` : ''}</span>`);
+    } else {
+      chips.push(`<span class="pill ok" title="Watcher running · pid ${p.running.pid}">👀 watching${p.running.up_seconds ? ` · ${upWords(p.running.up_seconds)}` : ''}</span>`);
+    }
+  } else if (p.busy_by) chips.push(`<span class="pill warn" title="Something else holds its port">:${p.port} taken · ${esc(p.busy_by)}</span>`);
   if (g.dirty_files) chips.push(`<span class="pill ${(g.dirty_days || 0) > 3 ? 'red' : 'warn'}" title="Uncommitted changes; the oldest is ${g.dirty_days ?? '?'} days old">${g.dirty_files} uncommitted${g.dirty_days ? ` · ${g.dirty_days}d` : ''}</span>`);
   if (p.review) {
     const t = p.review.tasks || { total: 0, open: 0, resolved: 0 };
@@ -69,10 +74,19 @@ function projRow(p) {
   if (p.auto_hunt) chips.push(`<span class="pill ok" title="Auto-hunt git hook active: commits trigger background local AI review">⚡ auto-hunt</span>`);
   if (p.hidden) chips.push(`<span class="pill dim" title="${esc(p.why_hidden)}">hidden</span>`);
   const acts = [];
+  const isWatcher = Boolean(p.watcher || p.name === 'gatkam' || (!p.port && !p.url));
   if (p.running && p.url) acts.push(`<button class="mini" data-p="open" title="${esc(p.url)}">↗ Open</button>`);
   else if (p.open_file) acts.push(`<button class="mini" data-p="file" title="${esc(p.open_file)}">↗ Open</button>`);
-  if (!p.running && p.can_start) acts.push(`<button class="mini go" data-p="start" title="${p.port ? `Start it on :${p.port}` : 'Start it'}">▶ Start</button>`);
-  if (p.running && p.can_stop) acts.push(`<button class="mini danger" data-p="stop" title="Stop it">■</button>`);
+  if (!p.running && p.can_start) {
+    const btnTitle = isWatcher ? `Start ${esc(p.title)} compiler & dev watcher` : (p.port ? `Start it on :${p.port}` : 'Start it');
+    const btnLabel = isWatcher ? '▶ Watcher' : '▶ Start';
+    acts.push(`<button class="mini go" data-p="start" title="${btnTitle}">${btnLabel}</button>`);
+  }
+  if (p.running && p.can_stop) {
+    const btnTitle = isWatcher ? `Stop ${esc(p.title)} dev watcher` : 'Stop it';
+    const btnLabel = isWatcher ? '■ Watcher' : '■';
+    acts.push(`<button class="mini danger" data-p="stop" title="${btnTitle}">${btnLabel}</button>`);
+  }
   if (p.live) acts.push(`<button class="mini ghost" data-p="live" title="${esc(p.live)}">🌐 Site</button>`);
   if (p.github) acts.push(`<button class="mini ghost" data-p="github" title="${esc(p.github)}">GitHub</button>`);
   const huntClass = (p.review && p.review.unreviewed_commits) ? 'mini warn' : 'mini ghost';

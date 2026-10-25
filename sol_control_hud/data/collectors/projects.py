@@ -271,6 +271,40 @@ def match_listeners(folders: dict[str, Path], listening: list[dict], paths=_proc
     return found
 
 
+def find_project_proc(folder: Path, name: str) -> dict | None:
+    """Check if a background watcher or runner is active for a project without a port."""
+    from ...paths import DATA_DIR
+    pid_file = DATA_DIR / "launch-pids" / f"{name}.pid"
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            p = psutil.Process(pid)
+            if p.is_running() and p.status() != psutil.STATUS_ZOMBIE:
+                up_s = max(1, int(time.time() - p.create_time()))
+                return {"port": None, "pid": pid, "where": "windows", "up_seconds": up_s, "kind": "watcher"}
+        except (ValueError, psutil.NoSuchProcess, psutil.AccessDenied):
+            try:
+                pid_file.unlink()
+            except OSError:
+                pass
+
+    marker = _norm(str(folder))
+    for p in psutil.process_iter(["pid", "name"]):
+        try:
+            p_name = (p.name() or "").lower()
+            if not any(k in p_name for k in ("bun", "node", "powershell", "cmd", "python")):
+                continue
+            cwd = _norm(p.cwd()) if p.cwd() else ""
+            if cwd == marker or cwd.startswith(marker + "\\"):
+                cmd = [str(x).lower() for x in p.cmdline() if x]
+                if any("build.ts" in x or "dev" in x or "watch" in x for x in cmd):
+                    up_s = max(1, int(time.time() - p.create_time()))
+                    return {"port": None, "pid": p.pid, "where": "windows", "up_seconds": up_s, "kind": "watcher"}
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return None
+
+
 # ---------------------------------------------------------------- the card
 def _media_entry(reg: dict, name: str) -> dict | None:
     m = (reg["projects"].get(name) or {}).get("media")
@@ -278,7 +312,8 @@ def _media_entry(reg: dict, name: str) -> dict | None:
 
 
 def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict[int, bool] | None = None,
-                 workspace: Path | None = None, git=cached_git, paths=_proc_paths) -> list[dict]:
+                 workspace: Path | None = None, git=cached_git, paths=_proc_paths,
+                 find_proc=find_project_proc) -> list[dict]:
     """One row per folder in the workspace, most recently worked on first."""
     ws = Path(workspace or reg["workspace"])
     try:
@@ -312,6 +347,8 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             pick = next((r for r in mine if r["port"] == port), mine[0] if mine else None)
             if pick:
                 run = {"port": pick["port"], "pid": pick["pid"], "where": "windows", "up_seconds": pick.get("up_seconds")}
+            elif (not port or spec.get("watcher")) and find_proc:
+                run = find_proc(folder, name)
         busy = None
         if not run and port and runs_in != "wsl" and int(port) in by_port:
             other = by_port[int(port)]
@@ -361,10 +398,11 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "port": int(port) if port else None,
             "runs_in": runs_in,
             "running": run,
-            "url": spec.get("url") or (f"http://127.0.0.1:{run['port']}/" if run else None),
+            "url": spec.get("url") or (f"http://127.0.0.1:{run['port']}/" if run and run.get("port") else None),
             "busy_by": busy,
             "can_start": bool((start or (media or {}).get("start")) and not spec.get("self")),
             "can_stop": bool(run and not spec.get("self") and (run.get("pid") or spec.get("stop") or media)),
+            "watcher": bool(spec.get("watcher") or not port),
         })
     rows.sort(key=lambda r: (r["hidden"], not r["running"], -((r["git"] or {}).get("last_commit") or 0), r["name"].lower()))
     return rows

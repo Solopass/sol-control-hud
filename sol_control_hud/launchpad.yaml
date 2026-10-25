@@ -50,6 +50,7 @@ projects:
     title: GatKam (갓캠)
     description: Next-gen YouTube Studio Suite & Unified Camera Engine (PTZ + Autopilot + Telemetry).
     start: {cmd: [bun, run, dev]}
+    watcher: true
   youtube-alchemy:
     title: YouTube Alchemy
     description: 1-Click Userscript installer & Fancam / Local AI Vault Server.

@@ -284,6 +284,26 @@ def test_stop_windows_project_goes_through_close_listener(tmp_path):
     assert r["ok"] and asked == [(5173, 7)]
 
 
+def test_stop_windows_project_watcher_terminates_non_port_process(tmp_path, monkeypatch):
+    ws = make_ws(tmp_path)
+    reg = make_reg(ws)
+    rows = [{"name": "alpha", "self": False, "running": {"pid": 9999, "port": None}, "media": None}]
+    monkeypatch.setattr(launcher, "DATA_DIR", tmp_path / "data")
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+            self.terminated = False
+        def children(self, recursive=True):
+            return []
+        def terminate(self):
+            self.terminated = True
+    fake_proc = FakeProcess(9999)
+    monkeypatch.setattr(launcher.psutil, "Process", lambda pid: fake_proc)
+    monkeypatch.setattr(launcher.psutil, "wait_procs", lambda procs, timeout=None: (procs, []))
+    r = launcher.stop_project(reg, "alpha", rows)
+    assert r["ok"] and fake_proc.terminated and "stopped alpha watcher" in r["why"]
+
+
 def test_media_start_uses_the_shortcut(tmp_path):
     ws = make_ws(tmp_path)
     reg = make_reg(ws)
