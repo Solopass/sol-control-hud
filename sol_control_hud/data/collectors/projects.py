@@ -338,12 +338,26 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
         runs_in = spec.get("runs_in") or (media or {}).get("runs_in") or "windows"
         g = git(folder) if is_repo else None
 
+        # Sidecars: extra helper processes of a project with their own Start / Stop on its row (e.g. GatKam's lag
+        # logger). Their ports never count as the project itself running.
+        sidecar_specs = spec.get("sidecars") or {}
+        sidecar_ports = {int(s["port"]) for s in sidecar_specs.values() if s.get("port")}
+        own_listeners = running.get(name) or []
+        sidecars = []
+        for sc_name, sc in sidecar_specs.items():
+            sc_port = int(sc["port"]) if sc.get("port") else None
+            own = next((r for r in own_listeners if sc_port and r["port"] == sc_port), None)
+            other = by_port.get(sc_port) if (sc_port and not own) else None
+            sidecars.append({"name": sc_name, "title": sc.get("title") or sc_name, "port": sc_port,
+                             "running": {"pid": own["pid"], "port": sc_port} if own else None,
+                             "busy_by": other.get("name", "?") if other else None})
+
         run = None
         if runs_in == "wsl":
             if port and wsl_ports.get(int(port)):
                 run = {"port": int(port), "pid": None, "where": "wsl"}
         else:
-            mine = running.get(name) or []
+            mine = [r for r in own_listeners if r["port"] not in sidecar_ports]
             pick = next((r for r in mine if r["port"] == port), mine[0] if mine else None)
             if pick:
                 run = {"port": pick["port"], "pid": pick["pid"], "where": "windows", "up_seconds": pick.get("up_seconds")}
@@ -403,6 +417,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "can_start": bool((start or (media or {}).get("start")) and not spec.get("self")),
             "can_stop": bool(run and not spec.get("self") and (run.get("pid") or spec.get("stop") or media)),
             "watcher": bool(spec.get("watcher") or not port),
+            "sidecars": sidecars,
         })
     rows.sort(key=lambda r: (r["hidden"], not r["running"], -((r["git"] or {}).get("last_commit") or 0), r["name"].lower()))
     return rows

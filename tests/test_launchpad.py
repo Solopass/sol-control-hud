@@ -304,6 +304,56 @@ def test_stop_windows_project_watcher_terminates_non_port_process(tmp_path, monk
     assert r["ok"] and fake_proc.terminated and "stopped alpha watcher" in r["why"]
 
 
+def sidecar_reg(ws):
+    reg = make_reg(ws)
+    reg["projects"]["alpha"] = {"sidecars": {"logger": {"title": "Lag Logger", "cmd": ["bun", "run", "logger"], "port": 7917}}}
+    return reg
+
+
+def test_sidecar_shows_on_its_row_and_never_counts_as_the_project_running(tmp_path):
+    ws = make_ws(tmp_path)
+    reg = sidecar_reg(ws)
+    rows = rows_for(ws, reg, listening=[{"pid": 31, "port": 7917, "kind": "dev", "name": "bun"}])
+    alpha = next(r for r in rows if r["name"] == "alpha")
+    assert alpha["running"] is None                    # only the helper runs, not alpha's dev server on :5173
+    assert alpha["sidecars"] == [{"name": "logger", "title": "Lag Logger", "port": 7917,
+                                  "running": {"pid": 31, "port": 7917}, "busy_by": None}]
+    both = rows_for(ws, reg, listening=[{"pid": 31, "port": 7917, "kind": "dev", "name": "bun"},
+                                        {"pid": 7, "port": 5173, "kind": "dev", "name": "bun"}])
+    alpha = next(r for r in both if r["name"] == "alpha")
+    assert alpha["running"]["port"] == 5173 and alpha["sidecars"][0]["running"]["pid"] == 31
+    taken = rows_for(ws, reg, listening=[{"pid": 9, "port": 7917, "kind": "dev", "name": "node"}],
+                     paths=lambda pid: [r"c:\elsewhere"])
+    sc = next(r for r in taken if r["name"] == "alpha")["sidecars"][0]
+    assert sc["running"] is None and sc["busy_by"] == "node"
+
+
+def test_sidecar_start_and_stop_go_by_name_only(tmp_path, monkeypatch):
+    ws = make_ws(tmp_path)
+    reg = sidecar_reg(ws)
+    monkeypatch.setattr(launcher, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(launcher, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setattr(launcher, "resolve_exe", lambda n: r"C:\bun\bun.exe")
+    r = launcher.start_sidecar(reg, "alpha", "logger", rows_for(ws, reg), popen=FakePopen)
+    assert r["ok"] and r["auto_open"] is False and r["port"] == 7917
+    cmd, kw = FakePopen.calls[0]
+    assert cmd == [r"C:\bun\bun.exe", "run", "logger"] and kw["cwd"] == str(ws / "alpha")
+    assert (tmp_path / "logs" / "alpha-logger.log").exists()
+
+    running = rows_for(ws, reg, listening=[{"pid": 31, "port": 7917, "kind": "dev", "name": "bun"}])
+    assert launcher.start_sidecar(reg, "alpha", "logger", running, popen=FakePopen)["why"].endswith("already running on :7917")
+    asked = []
+    r = launcher.stop_sidecar(reg, "alpha", "logger", running, close=lambda port, pid: asked.append((port, pid)) or {"ok": True, "why": "closed"})
+    assert r["ok"] and asked == [(7917, 31)]
+    assert launcher.stop_sidecar(reg, "alpha", "logger", rows_for(ws, reg), close=lambda *a: 1 / 0)["ok"]   # not running: nothing closed
+
+    taken = rows_for(ws, reg, listening=[{"pid": 9, "port": 7917, "kind": "dev", "name": "node"}], paths=lambda pid: [r"c:\elsewhere"])
+    r = launcher.start_sidecar(reg, "alpha", "logger", taken, popen=FakePopen)
+    assert not r["ok"] and "taken by node" in r["why"] and len(FakePopen.calls) == 1
+    with pytest.raises(launcher.LaunchError):
+        launcher.start_sidecar(reg, "alpha", "rm -rf", rows_for(ws, reg), popen=FakePopen)     # only names from the registry
+
+
 def test_media_start_uses_the_shortcut(tmp_path):
     ws = make_ws(tmp_path)
     reg = make_reg(ws)

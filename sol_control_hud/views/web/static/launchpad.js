@@ -87,6 +87,10 @@ function projRow(p) {
     const btnLabel = isWatcher ? '■ Watcher' : '■';
     acts.push(`<button class="mini danger" data-p="stop" title="${btnTitle}">${btnLabel}</button>`);
   }
+  for (const s of (p.sidecars || [])) {      // a project's helper processes (launchpad.yaml `sidecars`)
+    if (s.running) acts.push(`<button class="mini danger" data-p="sc-stop" data-sc="${esc(s.name)}" title="Stop ${esc(s.title)} (:${s.port})">■ ${esc(s.title)}</button>`);
+    else acts.push(`<button class="mini go" data-p="sc-start" data-sc="${esc(s.name)}" title="${s.busy_by ? `:${s.port} is taken by ${esc(s.busy_by)}` : `Start ${esc(s.title)}${s.port ? ` on :${s.port}` : ''}`}">▶ ${esc(s.title)}</button>`);
+  }
   if (p.live) acts.push(`<button class="mini ghost" data-p="live" title="${esc(p.live)}">🌐 Site</button>`);
   if (p.github) acts.push(`<button class="mini ghost" data-p="github" title="${esc(p.github)}">GitHub</button>`);
   const huntClass = (p.review && p.review.unreviewed_commits) ? 'mini warn' : 'mini ghost';
@@ -228,6 +232,14 @@ $('projList').addEventListener('click', async (e) => {
     const r = await post('/api/action', { action: 'project', target: name, op, tag: b.dataset.tag || '' });
     toast(r.why || (r.ok ? 'saved' : 'that did not work'));
     if (op !== 'tag' || (b.dataset.tag && ['archived', 'deprecated'].includes(b.dataset.tag))) menuFor = null;
+    return loadProjects();
+  }
+  if (op === 'sc-start' || op === 'sc-stop') {
+    b.disabled = true;
+    const r = await post('/api/action', { action: 'project', target: name, op: op === 'sc-start' ? 'sidecar_start' : 'sidecar_stop', sidecar: b.dataset.sc });
+    toast(r.why || (r.ok ? 'done' : 'that did not work'));
+    b.disabled = false;
+    setTimeout(loadProjects, 1200);          // the listener needs a moment to appear / disappear
     return loadProjects();
   }
   if (op === 'stop' && !confirm(`Stop ${p.title}?\n\nIt is asked to stop first, then forced if it ignores that. Anything unsaved in it is lost.`)) return;

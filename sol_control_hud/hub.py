@@ -716,6 +716,10 @@ class Hub:
                     r = launcher.stop_project(reg, name, rows, tiles)
                 elif op in ("folder", "editor", "file"):
                     r = launcher.open_project(reg, name, op)
+                elif op == "sidecar_start":
+                    r = launcher.start_sidecar(reg, name, str(b.get("sidecar") or ""), rows)
+                elif op == "sidecar_stop":
+                    r = launcher.stop_sidecar(reg, name, str(b.get("sidecar") or ""), rows)
                 else:
                     r = {"ok": False, "why": f"unknown project action {op!r}"}
             elif op == "start":
@@ -728,8 +732,8 @@ class Hub:
                 r = {"ok": False, "why": f"unknown media action {op!r}"}
         except launcher.LaunchError as e:
             r = {"ok": False, "why": str(e)}
-        if op in ("start", "stop"):
-            log(f"{kind} {op} {name}: {r.get('why')}")
+        if op in ("start", "stop", "sidecar_start", "sidecar_stop"):
+            log(f"{kind} {op} {name}{' ' + str(b.get('sidecar')) if op.startswith('sidecar') else ''}: {r.get('why')}")
             projects.forget_git(name)
             self._refresh_launchpad()
         return r

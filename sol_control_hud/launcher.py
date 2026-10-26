@@ -221,6 +221,40 @@ def stop_project(reg: dict, name: str, rows: list[dict], tiles: list[dict] | Non
     return {"ok": False, "why": f"don't know how to stop {name}"}
 
 
+# ---------------------------------------------------------------- project sidecars
+def _sidecar_state(reg: dict, project: str, sidecar: str, rows: list[dict]) -> tuple[dict, dict]:
+    """(registry spec, current row state) for one sidecar; only names from launchpad.yaml are accepted."""
+    spec = ((reg["projects"].get(project) or {}).get("sidecars") or {}).get(sidecar)
+    if not spec or not spec.get("cmd"):
+        raise LaunchError(f"{project} has no helper called {sidecar!r}")
+    state = next((s for s in (_row(rows, project).get("sidecars") or []) if s["name"] == sidecar), None) or {}
+    return spec, state
+
+
+def start_sidecar(reg: dict, project: str, sidecar: str, rows: list[dict], popen=subprocess.Popen,
+                  opener=_open_path) -> dict:
+    spec, state = _sidecar_state(reg, project, sidecar, rows)
+    title = spec.get("title") or sidecar
+    if state.get("running"):
+        return {"ok": True, "why": f"{title} is already running on :{state['running']['port']}"}
+    if state.get("busy_by"):
+        return {"ok": False, "why": f":{spec.get('port')} is taken by {state['busy_by']} - close it first (Localhost card)"}
+    r = _run_spec(reg, f"{project}-{sidecar}", {"cmd": spec["cmd"]}, _folder(reg, project), popen, opener,
+                  port=spec.get("port"))
+    r["auto_open"] = False                      # a background helper, not a page to open
+    return r
+
+
+def stop_sidecar(reg: dict, project: str, sidecar: str, rows: list[dict], close=None) -> dict:
+    spec, state = _sidecar_state(reg, project, sidecar, rows)
+    run = state.get("running")
+    if not run:
+        return {"ok": True, "why": f"{spec.get('title') or sidecar} isn't running"}
+    if close is None:
+        from .data.collectors.ports import close_listener as close
+    return close(run["port"], run["pid"])
+
+
 def open_project(reg: dict, name: str, how: str, popen=subprocess.Popen, opener=_open_path) -> dict:
     """Open the folder in Explorer, the project in VS Code, or its standalone file (`open_file`)."""
     try:

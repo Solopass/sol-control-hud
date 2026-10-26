@@ -58,6 +58,9 @@ projects:
     description: Next-gen YouTube Studio Suite & Unified Camera Engine (PTZ + Autopilot + Telemetry).
     start: {cmd: [bun, run, dev]}
     watcher: true
+    sidecars:
+      # its own ▶/■ button on the row; loopback only, writes D:\Workspace\gatkam\logs\*.jsonl (lag flight recorder)
+      logger: {title: Lag Logger, cmd: [bun, run, logger], port: 7917}
   youtube-alchemy:
     title: YouTube Alchemy
     description: 1-Click Userscript installer & Fancam / Local AI Vault Server.
