@@ -90,7 +90,8 @@ def toggle_security_feature(target: str = "all", timeout: float = 2.0) -> dict:
 
     try:
         c = _client()
-        r = c.post(f"{DECK_URL}/api/security/settings", json=settings, timeout=timeout)
+        payload = {"action": "update_settings", "settings": settings}
+        r = c.post(f"{DECK_URL}/api/security", json=payload, timeout=timeout)
         if r.status_code == 200:
             return {"ok": True, "why": f"Watchdog {target} {action_name}"}
         return {"ok": False, "why": f"HTTP {r.status_code} saving settings"}
@@ -102,7 +103,8 @@ def trigger_test_alarm(timeout: float = 2.0) -> dict:
     """Trigger canary test alarm on iPad."""
     try:
         c = _client()
-        r = c.post(f"{DECK_URL}/api/security/test_alarm", timeout=timeout)
+        payload = {"action": "test_canary"}
+        r = c.post(f"{DECK_URL}/api/security", json=payload, timeout=timeout)
         if r.status_code == 200:
             return {"ok": True, "why": "🚨 Test Canary Alarm sent to iPad (PC silent)"}
         return {"ok": False, "why": f"HTTP {r.status_code} triggering alarm"}
@@ -114,7 +116,8 @@ def acknowledge_alerts(timeout: float = 2.0) -> dict:
     """Acknowledge active alerts."""
     try:
         c = _client()
-        r = c.post(f"{DECK_URL}/api/security/ack", timeout=timeout)
+        payload = {"action": "ack_alerts"}
+        r = c.post(f"{DECK_URL}/api/security", json=payload, timeout=timeout)
         if r.status_code == 200:
             return {"ok": True, "why": "Security alerts acknowledged"}
         return {"ok": False, "why": f"HTTP {r.status_code} acknowledging alerts"}

@@ -68,14 +68,16 @@ def test_toggle_security_feature():
         res = security.toggle_security_feature("canary")
         assert res["ok"] is True
         args, kwargs = mock_client.return_value.post.call_args
-        assert kwargs["json"]["canary_enabled"] is False
+        assert kwargs["json"]["action"] == "update_settings"
+        assert kwargs["json"]["settings"]["canary_enabled"] is False
 
         # Test toggling all (should turn off because canary_active is True)
         res = security.toggle_security_feature("all")
         assert res["ok"] is True
         args, kwargs = mock_client.return_value.post.call_args
-        assert kwargs["json"]["canary_enabled"] is False
-        assert kwargs["json"]["arp_watchdog_enabled"] is False
+        assert kwargs["json"]["action"] == "update_settings"
+        assert kwargs["json"]["settings"]["canary_enabled"] is False
+        assert kwargs["json"]["settings"]["arp_watchdog_enabled"] is False
 
 
 def test_trigger_alarm_and_ack():
