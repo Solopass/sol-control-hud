@@ -212,6 +212,7 @@ function render(p) {
   $('netRate').textContent = `${rate(s.net_down_kb)} / ${rate(s.net_up_kb)}`;
 
   renderDisks(s);
+  renderSecurity(p);
 
   // stability
   const sys = slide(p, 'SYS'); setHTML($('sysSeg'), sys ? segHtml(sys.segments) : '');
@@ -799,6 +800,155 @@ function renderFeed(items) {
     return `<li class="${fresh ? 'new' : ''}"><time>${esc(when(it.time))}</time><span style="color:${col(it.color)}">${esc(it.text)}</span></li>`;
   }).join('') || '<li class="dim">nothing yet</li>');
   firstFeed = false;
+}
+
+function renderSecurity(p) {
+  if (typeof cardShown === 'function' && !cardShown('c-security')) return;
+  const sec = p.security || {};
+  const pill = $('secPill');
+  const masterBtn = $('secMasterToggleBtn');
+  const alertsList = $('secAlertsList');
+  if (!pill || !masterBtn) return;
+
+  if (!sec.up) {
+    pill.className = 'pill dim';
+    pill.textContent = 'OFFLINE';
+    masterBtn.textContent = 'sol-deck Offline';
+    masterBtn.disabled = true;
+    masterBtn.className = 'mini ghost';
+    if ($('secCanaryBadge')) { $('secCanaryBadge').textContent = 'OFF'; $('secCanaryBadge').className = 'badge dim'; }
+    if ($('secArpBadge')) { $('secArpBadge').textContent = 'OFF'; $('secArpBadge').className = 'badge dim'; }
+    if ($('secRadarBadge')) { $('secRadarBadge').textContent = '–'; $('secRadarBadge').className = 'badge dim'; }
+    if ($('secSoundBadge')) { $('secSoundBadge').textContent = '–'; $('secSoundBadge').className = 'badge dim'; }
+    if ($('secCanaryPorts')) $('secCanaryPorts').textContent = 'sol-deck (:5000) not running';
+    if ($('secArpSub')) $('secArpSub').textContent = 'Start sol-deck.exe to enable';
+    if (alertsList) alertsList.hidden = true;
+    return;
+  }
+
+  masterBtn.disabled = false;
+  const s = sec.summary || {};
+  const set = sec.settings || {};
+  const alerts = sec.alerts || [];
+
+  // Master status pill
+  if (s.status === 'alert') {
+    pill.className = 'pill bad';
+    pill.textContent = '🚨 INTRUSION ACTIVE';
+  } else if (s.status === 'warning') {
+    pill.className = 'pill warn';
+    pill.textContent = '⚠️ WARNING';
+  } else if (!s.canary_active && !set.arp_watchdog_enabled) {
+    pill.className = 'pill dim';
+    pill.textContent = '⚪ DISABLED';
+  } else {
+    pill.className = 'pill ok';
+    pill.textContent = '🛡️ SECURE';
+  }
+
+  // Master toggle button
+  const anyActive = s.canary_active || set.arp_watchdog_enabled;
+  if (anyActive) {
+    masterBtn.textContent = 'Turn Off Watchdog';
+    masterBtn.className = 'mini swap-run';
+  } else {
+    masterBtn.textContent = 'Turn On Watchdog';
+    masterBtn.className = 'mini go';
+  }
+
+  // 1. Canary
+  const cBadge = $('secCanaryBadge');
+  const cBtn = $('secCanaryToggleBtn');
+  if (cBadge && cBtn) {
+    if (s.canary_active) {
+      cBadge.textContent = 'ACTIVE';
+      cBadge.className = 'badge ok';
+      cBtn.textContent = 'Turn Off';
+      cBtn.className = 'mini ghost';
+    } else {
+      cBadge.textContent = 'OFF';
+      cBadge.className = 'badge dim';
+      cBtn.textContent = 'Turn On';
+      cBtn.className = 'mini go';
+    }
+  }
+  const ports = (s.canary_ports && s.canary_ports.length) ? s.canary_ports.join(', ') : 'None';
+  if ($('secCanaryPorts')) $('secCanaryPorts').textContent = `TCP Decoys: ${ports}`;
+
+  // 2. ARP Guard
+  const aBadge = $('secArpBadge');
+  const aBtn = $('secArpToggleBtn');
+  if (aBadge && aBtn) {
+    if (!set.arp_watchdog_enabled) {
+      aBadge.textContent = 'DISABLED';
+      aBadge.className = 'badge dim';
+      aBtn.textContent = 'Turn On';
+      aBtn.className = 'mini go';
+    } else if (s.gateway_status === 'verified') {
+      aBadge.textContent = 'VERIFIED';
+      aBadge.className = 'badge ok';
+      aBtn.textContent = 'Turn Off';
+      aBtn.className = 'mini ghost';
+    } else {
+      aBadge.textContent = 'SPOOF DETECTED';
+      aBadge.className = 'badge bad';
+      aBtn.textContent = 'Turn Off';
+      aBtn.className = 'mini ghost';
+    }
+  }
+  if ($('secArpSub')) $('secArpSub').textContent = `Gateway: ${set.expected_gateway_ip || '192.168.0.1'}`;
+
+  // 3. Radar
+  const rBadge = $('secRadarBadge');
+  const rBtn = $('secRadarToggleBtn');
+  const known = s.known_device_count || 0;
+  const unknown = s.unknown_device_count || 0;
+  if (rBadge && rBtn) {
+    if (unknown > 0 && set.unknown_device_alerts) {
+      rBadge.textContent = `${unknown} UNKNOWN`;
+      rBadge.className = 'badge warn';
+    } else {
+      rBadge.textContent = `${known} KNOWN`;
+      rBadge.className = 'badge ok';
+    }
+    rBtn.textContent = set.unknown_device_alerts ? 'Alerts ON' : 'Alerts OFF';
+  }
+  if ($('secRadarSub')) $('secRadarSub').textContent = `${unknown} Unknown Devices`;
+
+  // 4. iPad Sound
+  const sndBadge = $('secSoundBadge');
+  const sndBtn = $('secSoundToggleBtn');
+  if (sndBadge && sndBtn) {
+    if (set.ipad_sound_alert) {
+      sndBadge.textContent = 'SIREN ON';
+      sndBadge.className = 'badge ok';
+      sndBtn.textContent = 'Mute';
+    } else {
+      sndBadge.textContent = 'MUTED';
+      sndBadge.className = 'badge dim';
+      sndBtn.textContent = 'Unmute';
+    }
+  }
+
+  // Alerts box
+  const unacked = s.unacked_alerts || 0;
+  if (alertsList) {
+    if (unacked > 0 || alerts.length > 0) {
+      const unackedAlerts = alerts.filter(a => !a.acked);
+      if (unackedAlerts.length > 0) {
+        alertsList.hidden = false;
+        alertsList.innerHTML = `<div class="sec-alert-banner">` +
+          `<strong>🚨 Intrusion Alert (${unackedAlerts.length}):</strong> ` +
+          `<span>${esc(unackedAlerts[0].message)}</span> ` +
+          `<span class="dim">(${esc(unackedAlerts[0].source_ip || '')} · ${esc(unackedAlerts[0].timestamp || '')})</span>` +
+          `</div>`;
+      } else {
+        alertsList.hidden = true;
+      }
+    } else {
+      alertsList.hidden = true;
+    }
+  }
 }
 
 // ---------- the stream (only while this tab is visible)

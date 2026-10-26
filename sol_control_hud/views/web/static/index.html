@@ -383,6 +383,55 @@
     </div>
   </article>
 
+  <article class="card wide" id="c-security">
+    <h2>
+      <span>🛡️ Cyber Security &amp; Canary <span class="pill" id="secPill">…</span></span>
+      <div class="sec-controls notes-controls">
+        <button class="mini" id="secMasterToggleBtn" data-act="security_toggle" data-target="all" title="Toggle active security watchdog & canary traps">Turn Off Watchdog</button>
+        <button class="mini ghost" id="secTestBtn" data-act="security_test" title="Send a test alarm to the iPad">🚨 Test Alarm</button>
+        <button class="mini ghost" id="secAckBtn" data-act="security_ack" title="Acknowledge security alerts">✓ Ack</button>
+        <a class="mini ghost" href="http://192.168.0.241:5000/deck" target="_blank" title="Open SOL iPad Deck on PC">Deck ↗</a>
+      </div>
+    </h2>
+    <div id="secBody">
+      <div class="sec-grid">
+        <div class="sec-item" id="secCanaryBox">
+          <div class="sec-item-header">
+            <span class="sec-item-title">🪤 Honeypot Canaries</span>
+            <span class="badge" id="secCanaryBadge">ON</span>
+          </div>
+          <div class="sec-item-sub" id="secCanaryPorts">TCP Decoys: 2323, 4444</div>
+          <button class="mini ghost" data-act="security_toggle" data-target="canary" id="secCanaryToggleBtn">Turn Off</button>
+        </div>
+        <div class="sec-item" id="secArpBox">
+          <div class="sec-item-header">
+            <span class="sec-item-title">🛡️ Gateway ARP Guard</span>
+            <span class="badge" id="secArpBadge">VERIFIED</span>
+          </div>
+          <div class="sec-item-sub" id="secArpSub">Router 192.168.0.1</div>
+          <button class="mini ghost" data-act="security_toggle" data-target="arp" id="secArpToggleBtn">Turn Off</button>
+        </div>
+        <div class="sec-item" id="secRadarBox">
+          <div class="sec-item-header">
+            <span class="sec-item-title">📡 LAN Device Radar</span>
+            <span class="badge" id="secRadarBadge">6 KNOWN</span>
+          </div>
+          <div class="sec-item-sub" id="secRadarSub">0 Unknown Devices</div>
+          <button class="mini ghost" data-act="security_toggle" data-target="unknown" id="secRadarToggleBtn">Alerts ON</button>
+        </div>
+        <div class="sec-item" id="secSoundBox">
+          <div class="sec-item-header">
+            <span class="sec-item-title">🔊 iPad Siren Alarm</span>
+            <span class="badge" id="secSoundBadge">ON</span>
+          </div>
+          <div class="sec-item-sub">iPad Web Audio (PC Silent)</div>
+          <button class="mini ghost" data-act="security_toggle" data-target="ipad_sound" id="secSoundToggleBtn">Mute</button>
+        </div>
+      </div>
+      <div id="secAlertsList" class="sec-alerts-box" hidden></div>
+    </div>
+  </article>
+
   <article class="card" id="c-stab" data-open="SYS">
     <h2>Stability &amp; backups <button class="mini danger" id="ackCrashBtn" hidden title="Clear crash events and unblock Away mode">✓ Clear Crashes</button></h2>
     <div class="seg" id="sysSeg"></div>

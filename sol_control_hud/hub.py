@@ -333,6 +333,19 @@ class Hub:
                 return {"ok": True, "why": why}
             except models_ctl.ModelError as e:
                 return {"ok": False, "why": str(e)}
+        if action in ("security_toggle", "security_test", "security_ack"):
+            from .data.collectors import security
+            if action == "security_toggle":
+                res = security.toggle_security_feature(target or "all")
+            elif action == "security_test":
+                res = security.trigger_test_alarm()
+            else:
+                res = security.acknowledge_alerts()
+            if hasattr(self, "collectors") and "security" in self.collectors:
+                self.collectors["security"].at = 0
+                self.collectors["security"].value = None
+            log(f"security: {action} target={target} -> {res.get('why')}")
+            return res
         if action in ("ask", "ask_remove", "chain"):
             from . import control
             b = body or {}
@@ -814,6 +827,7 @@ class Hub:
                 "point": self.history.latest(), "models": self._model_rows(),
                 "speed": c["speed"].get(), "heal": c["heal"].get(), "review": self._review_state(),
                 "ai_ops": c["ai_ops"].get() if "ai_ops" in c else {},
+                "security": c["security"].get() if "security" in c else {},
                 "layout": {"active": self._layouts["active"], "rev": self._layouts["rev"]}}
 
     @staticmethod
@@ -868,6 +882,8 @@ class Hub:
         self.collectors["guard"] = Cached(game_guard.state, 3)
         from .data.collectors import ai_ops
         self.collectors["ai_ops"] = Cached(lambda: ai_ops.sample_ai_ops(self.collectors["model_procs"].get()), 1.5)
+        from .data.collectors import security
+        self.collectors["security"] = Cached(security.get_security_status, 2)
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 

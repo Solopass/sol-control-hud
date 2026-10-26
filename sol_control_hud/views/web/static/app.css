@@ -1076,6 +1076,74 @@ main.grid.masonry > .card { margin-bottom:16px; }
 .crow.more-open .cmore-btn { color:var(--cyan); border-color:var(--cyan); }
 .crow .warnc { color:var(--amber); } .crow .badc { color:var(--red); }
 
+/* ---------- Cyber Security & Canary Watchdog card ---------- */
+.sec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.sec-item {
+  background: var(--badge);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  transition: border-color .2s;
+}
+.sec-item:hover { border-color: color-mix(in srgb, var(--cyan) 40%, var(--line)); }
+.sec-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.sec-item-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sec-item-sub {
+  font-size: 11px;
+  color: var(--dim);
+  font-family: Consolas, monospace;
+}
+.badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 8px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  border: 1px solid currentColor;
+}
+.badge.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.badge.warn { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); background: color-mix(in srgb, var(--amber) 12%, transparent); }
+.badge.bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); background: color-mix(in srgb, var(--red) 12%, transparent); animation: pulse 1.4s ease-in-out infinite; }
+.badge.dim { color: var(--dim); border-color: color-mix(in srgb, var(--dim) 30%, transparent); }
+
+.sec-alerts-box {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--red) 14%, var(--card));
+  border: 1px solid var(--red);
+  font-size: 12px;
+  color: var(--text);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.sec-alert-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* phone width (B6, 10-19): one column. A layout's inline "span 2" would otherwise make a second, 34 px column and a
    page twice the screen wide; !important beats those inline sizes (the layout itself is unchanged for wider screens).
    Kept last in the file so it wins over the card rules above at equal specificity. */
