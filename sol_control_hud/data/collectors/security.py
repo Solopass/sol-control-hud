@@ -42,6 +42,7 @@ def get_security_status(timeout: float = 1.5) -> dict:
                 "devices": data.get("devices", []),
                 "arp_table": data.get("arp_table", []),
                 "port_leaks": data.get("port_leaks", []),
+                "process": data.get("process", {}),
             }
         return {
             "up": False,

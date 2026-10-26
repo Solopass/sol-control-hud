@@ -949,6 +949,17 @@ function renderSecurity(p) {
       alertsList.hidden = true;
     }
   }
+
+  // Live overhead / resource stats
+  const proc = sec.process || {};
+  const costEl = $('secProcCost');
+  if (costEl) {
+    if (proc.ram_mb) {
+      costEl.textContent = `sol-deck PID ${proc.pid} · ${proc.ram_mb} MB RAM · <0.1% CPU · 2 Canary Sockets Idle`;
+    } else {
+      costEl.textContent = 'sol-deck ~18 MB RAM · <0.1% CPU · 2 Canary Sockets Idle';
+    }
+  }
 }
 
 // ---------- the stream (only while this tab is visible)

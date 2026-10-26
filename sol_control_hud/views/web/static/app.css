@@ -1143,6 +1143,20 @@ main.grid.masonry > .card { margin-bottom:16px; }
   gap: 8px;
   flex-wrap: wrap;
 }
+.sec-meta-row {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: Consolas, monospace;
+}
+.sec-meta-row span:last-child {
+  color: var(--cyan);
+}
 
 /* phone width (B6, 10-19): one column. A layout's inline "span 2" would otherwise make a second, 34 px column and a
    page twice the screen wide; !important beats those inline sizes (the layout itself is unchanged for wider screens).
