@@ -91,3 +91,27 @@ def test_trigger_alarm_and_ack():
 
         res_ack = security.acknowledge_alerts()
         assert res_ack["ok"] is True
+
+
+def test_deck_lifecycle_actions():
+    mock_path = MagicMock()
+    mock_path.exists.return_value = True
+
+    with patch("subprocess.run") as mock_run, \
+         patch.object(security, "get_deck_process_status", return_value={"running": True, "pid": 12345, "ram_mb": 18.0, "uptime_sec": 30}), \
+         patch.object(security, "RUN_DECK_PS1", mock_path), \
+         patch("time.sleep"):
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="Started", stderr="")
+
+        r_start = security.start_deck()
+        assert r_start["ok"] is True
+        assert "12345" in r_start["why"]
+
+        r_stop = security.stop_deck()
+        assert r_stop["ok"] is True
+        assert "stopped" in r_stop["why"]
+
+        r_restart = security.restart_deck()
+        assert r_restart["ok"] is True
+        assert "12345" in r_restart["why"]

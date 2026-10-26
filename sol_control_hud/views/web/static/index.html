@@ -394,6 +394,20 @@
       </div>
     </h2>
     <div id="secBody">
+      <div class="sec-link-bar" id="secLinkBar">
+        <div class="sec-link-status">
+          <div class="sec-link-main">
+            <span class="sec-link-dot" id="secDeckDot"></span>
+            <span class="sec-link-title" id="secDeckTitle">SOL Deck Service (:5000): <strong>ONLINE</strong></span>
+          </div>
+          <div class="sec-link-sub" id="secIpadStatus">📱 iPad mini (192.168.0.25): Connecting...</div>
+        </div>
+        <div class="sec-link-actions">
+          <button class="mini go" id="secDeckStartBtn" data-act="deck_start" title="Start sol-deck background service on PC" hidden>▶ Start Service</button>
+          <button class="mini ghost" id="secDeckRestartBtn" data-act="deck_restart" title="Restart sol-deck background service on PC">🔄 Restart</button>
+          <button class="mini danger ghost" id="secDeckStopBtn" data-act="deck_stop" title="Stop sol-deck background service on PC">🛑 Stop</button>
+        </div>
+      </div>
       <div class="sec-grid">
         <div class="sec-item" id="secCanaryBox">
           <div class="sec-item-header">

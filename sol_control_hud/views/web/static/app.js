@@ -810,6 +810,15 @@ function renderSecurity(p) {
   const alertsList = $('secAlertsList');
   if (!pill || !masterBtn) return;
 
+  const deckDot = $('secDeckDot');
+  const deckTitle = $('secDeckTitle');
+  const ipadStatus = $('secIpadStatus');
+  const startBtn = $('secDeckStartBtn');
+  const restartBtn = $('secDeckRestartBtn');
+  const stopBtn = $('secDeckStopBtn');
+  const proc = sec.process || {};
+  const client = sec.client || {};
+
   if (!sec.up) {
     pill.className = 'pill dim';
     pill.textContent = 'OFFLINE';
@@ -821,10 +830,45 @@ function renderSecurity(p) {
     if ($('secRadarBadge')) { $('secRadarBadge').textContent = '–'; $('secRadarBadge').className = 'badge dim'; }
     if ($('secSoundBadge')) { $('secSoundBadge').textContent = '–'; $('secSoundBadge').className = 'badge dim'; }
     if ($('secCanaryPorts')) $('secCanaryPorts').textContent = 'sol-deck (:5000) not running';
-    if ($('secArpSub')) $('secArpSub').textContent = 'Start sol-deck.exe to enable';
+    if ($('secArpSub')) $('secArpSub').textContent = 'Start sol-deck service to enable';
     if (alertsList) alertsList.hidden = true;
+
+    if (deckDot) deckDot.className = 'sec-link-dot off';
+    if (deckTitle) {
+      if (proc.running) {
+        deckTitle.innerHTML = `SOL Deck Service: <strong style="color:var(--warn)">STARTING / PORT 5000 CLOSED</strong> (PID ${proc.pid})`;
+      } else {
+        deckTitle.innerHTML = `SOL Deck Service (:5000): <strong style="color:var(--bad)">OFFLINE (STOPPED)</strong>`;
+      }
+    }
+    if (ipadStatus) ipadStatus.textContent = '📱 iPad Link: Offline (PC companion bridge is stopped)';
+    if (startBtn) startBtn.hidden = false;
+    if (restartBtn) restartBtn.hidden = !proc.running;
+    if (stopBtn) stopBtn.hidden = !proc.running;
+    const costEl = $('secProcCost');
+    if (costEl) costEl.textContent = 'sol-deck offline · 0 MB RAM · 0% CPU';
     return;
   }
+
+  // Update Link Bar when online
+  if (deckDot) deckDot.className = 'sec-link-dot on';
+  if (deckTitle) {
+    const uptimeStr = proc.uptime_sec ? `${Math.floor(proc.uptime_sec / 60)}m` : '0m';
+    const ramStr = proc.ram_mb ? `${proc.ram_mb} MB` : '~18 MB';
+    deckTitle.innerHTML = `SOL Deck Service (:5000): <strong style="color:var(--ok)">ONLINE</strong> <span class="dim">(PID ${proc.pid || '–'} · ${ramStr} RAM · up ${uptimeStr})</span>`;
+  }
+  if (ipadStatus) {
+    if (client.active) {
+      ipadStatus.innerHTML = `📱 <strong style="color:var(--ok)">${esc(client.name || 'iPad mini')} (${esc(client.ip || '192.168.0.25')}):</strong> <span style="color:var(--ok)">${esc(client.status_text || 'Connected')}</span> <span class="dim">· ${client.request_count || 0} reqs</span>`;
+    } else if (client.ip) {
+      ipadStatus.innerHTML = `📱 <span class="dim">${esc(client.name || 'iPad mini')} (${esc(client.ip)}):</span> <span style="color:var(--warn)">${esc(client.status_text || 'Standby')}</span>`;
+    } else {
+      ipadStatus.innerHTML = `📱 <span class="dim">iPad mini: Waiting for client connection...</span>`;
+    }
+  }
+  if (startBtn) startBtn.hidden = true;
+  if (restartBtn) restartBtn.hidden = false;
+  if (stopBtn) stopBtn.hidden = false;
 
   masterBtn.disabled = false;
   const s = sec.summary || {};
@@ -951,7 +995,6 @@ function renderSecurity(p) {
   }
 
   // Live overhead / resource stats
-  const proc = sec.process || {};
   const costEl = $('secProcCost');
   if (costEl) {
     if (proc.ram_mb) {

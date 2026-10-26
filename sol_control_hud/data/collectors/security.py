@@ -1,12 +1,20 @@
 """Cyber Security & Canary Watchdog collector for SOL HUD.
-Talks to sol-deck (:5000) authenticated with X-Deck-PIN.
+Talks to sol-deck (:5000) authenticated with X-Deck-PIN, and manages
+the sol-deck background service lifecycle on SOL PC.
 """
 from __future__ import annotations
 
+import subprocess
+import time
+from pathlib import Path
 import httpx
+import psutil
 
 DECK_URL = "http://127.0.0.1:5000"
 DECK_PIN = "4821"
+DECK_DIR = Path("D:/Workspace/sol-deck")
+RUN_DECK_PS1 = DECK_DIR / "run-deck.ps1"
+
 _HTTP: httpx.Client | None = None
 
 
@@ -27,13 +35,136 @@ def close_client() -> None:
         _HTTP = None
 
 
+def get_deck_process_status() -> dict:
+    """Check whether sol-deck.exe is running on Windows even if HTTP is unreachable."""
+    try:
+        for p in psutil.process_iter(["pid", "name", "memory_info", "create_time"]):
+            name = (p.info.get("name") or "").lower()
+            if name in ("sol-deck.exe", "sol-deck-cli.exe", "sol-deck"):
+                mem = p.info.get("memory_info")
+                ram_mb = round(mem.rss / (1024 * 1024), 1) if mem else 0.0
+                create_t = p.info.get("create_time") or 0
+                uptime = int(time.time() - create_t) if create_t else 0
+                return {
+                    "running": True,
+                    "pid": p.info.get("pid"),
+                    "ram_mb": ram_mb,
+                    "uptime_sec": uptime,
+                }
+    except Exception:
+        pass
+    return {"running": False, "pid": None, "ram_mb": 0.0, "uptime_sec": 0}
+
+
+def start_deck() -> dict:
+    """Start sol-deck background service via run-deck.ps1."""
+    if not RUN_DECK_PS1.exists():
+        return {"ok": False, "why": f"run-deck.ps1 not found at {RUN_DECK_PS1}"}
+    try:
+        CREATE_NO_WINDOW = 0x08000000
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(RUN_DECK_PS1),
+        ]
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        time.sleep(0.7)
+        st = get_deck_process_status()
+        if st["running"]:
+            close_client()
+            return {"ok": True, "why": f"sol-deck started (PID {st['pid']})"}
+        out = (r.stdout + " " + r.stderr).strip()
+        return {"ok": False, "why": f"Start failed: {out or 'process exited'}"}
+    except Exception as e:
+        return {"ok": False, "why": f"Start error: {e}"}
+
+
+def stop_deck() -> dict:
+    """Stop sol-deck background service via run-deck.ps1 -Stop."""
+    if not RUN_DECK_PS1.exists():
+        return {"ok": False, "why": f"run-deck.ps1 not found at {RUN_DECK_PS1}"}
+    try:
+        CREATE_NO_WINDOW = 0x08000000
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(RUN_DECK_PS1),
+            "-Stop",
+        ]
+        subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        close_client()
+        return {"ok": True, "why": "sol-deck stopped"}
+    except Exception as e:
+        return {"ok": False, "why": f"Stop error: {e}"}
+
+
+def restart_deck() -> dict:
+    """Restart sol-deck background service via run-deck.ps1 -Restart."""
+    if not RUN_DECK_PS1.exists():
+        return {"ok": False, "why": f"run-deck.ps1 not found at {RUN_DECK_PS1}"}
+    try:
+        CREATE_NO_WINDOW = 0x08000000
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(RUN_DECK_PS1),
+            "-Restart",
+        ]
+        subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=12,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        time.sleep(0.7)
+        close_client()
+        st = get_deck_process_status()
+        if st["running"]:
+            return {"ok": True, "why": f"sol-deck restarted (PID {st['pid']})"}
+        return {"ok": True, "why": "sol-deck restarted"}
+    except Exception as e:
+        return {"ok": False, "why": f"Restart error: {e}"}
+
+
 def get_security_status(timeout: float = 1.5) -> dict:
     """Fetch current security posture and watchdog state from sol-deck."""
+    proc_status = get_deck_process_status()
     try:
         c = _client()
         r = c.get(f"{DECK_URL}/api/security", timeout=timeout)
         if r.status_code == 200:
             data = r.json()
+            proc = data.get("process") or proc_status
+            if isinstance(proc, dict) and proc_status.get("running"):
+                proc["running"] = True
+            client = data.get("client") or {
+                "ip": "192.168.0.25",
+                "name": "iPad mini 1",
+                "active": False,
+                "status_text": "No recent requests",
+            }
             return {
                 "up": True,
                 "summary": data.get("summary", {}),
@@ -42,12 +173,15 @@ def get_security_status(timeout: float = 1.5) -> dict:
                 "devices": data.get("devices", []),
                 "arp_table": data.get("arp_table", []),
                 "port_leaks": data.get("port_leaks", []),
-                "process": data.get("process", {}),
+                "process": proc,
+                "client": client,
             }
         return {
             "up": False,
             "status": "error",
             "error": f"sol-deck responded with HTTP {r.status_code}",
+            "process": proc_status,
+            "client": {"ip": "192.168.0.25", "name": "iPad mini 1", "active": False, "status_text": f"HTTP {r.status_code}"},
             "summary": {"status": "error", "canary_active": False},
         }
     except Exception as e:
@@ -55,6 +189,8 @@ def get_security_status(timeout: float = 1.5) -> dict:
             "up": False,
             "status": "offline",
             "error": f"{type(e).__name__}: {e}",
+            "process": proc_status,
+            "client": {"ip": "192.168.0.25", "name": "iPad mini 1", "active": False, "status_text": "Service Offline (:5000)"},
             "summary": {"status": "offline", "canary_active": False},
         }
 

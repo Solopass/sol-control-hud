@@ -333,14 +333,20 @@ class Hub:
                 return {"ok": True, "why": why}
             except models_ctl.ModelError as e:
                 return {"ok": False, "why": str(e)}
-        if action in ("security_toggle", "security_test", "security_ack"):
+        if action in ("security_toggle", "security_test", "security_ack", "deck_start", "deck_stop", "deck_restart"):
             from .data.collectors import security
             if action == "security_toggle":
                 res = security.toggle_security_feature(target or "all")
             elif action == "security_test":
                 res = security.trigger_test_alarm()
-            else:
+            elif action == "security_ack":
                 res = security.acknowledge_alerts()
+            elif action == "deck_start":
+                res = security.start_deck()
+            elif action == "deck_stop":
+                res = security.stop_deck()
+            elif action == "deck_restart":
+                res = security.restart_deck()
             if hasattr(self, "collectors") and "security" in self.collectors:
                 self.collectors["security"].at = 0
                 self.collectors["security"].value = None
