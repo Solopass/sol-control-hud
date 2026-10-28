@@ -178,14 +178,13 @@ def check_and_advance(chains_dir: Path | None = None) -> dict:
     is_current_done = True
     current_status = "done"
     if current_path and current_path.is_file():
-        try:
-            c = chain_note.load_chain(current_path)
-            current_status = getattr(c, "status", "done")
-            # If still queued, running, or waiting, it is not done yet
-            if current_status in ("queued", "running", "waiting"):
-                is_current_done = False
-        except Exception:
-            is_current_done = True
+        # read only the note's properties: before 2026-10-28 this parsed the whole chain and read a `status` attribute
+        # the Chain object doesn't have (or failed to parse it), so every chain counted as "done" and a batch
+        # "finished" on its first tick, releasing the keep-awake while its chains were still queued
+        current_status = str(chain_note.chain_front(current_path).get("status") or "done").lower()
+        # If still queued, running, or waiting, it is not done yet
+        if current_status in ("queued", "running", "waiting"):
+            is_current_done = False
 
     # Also check live chains.json to ensure daemon is not actively processing or holding this chain
     if is_current_done and current:

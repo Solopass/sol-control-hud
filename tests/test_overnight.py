@@ -60,8 +60,10 @@ def test_start_and_advance_overnight(tmp_path: Path):
 
     with patch.object(overnight, "OVERNIGHT_STATE", state_file), \
          patch.object(overnight, "REPORTS_DIR", reports_dir), \
+         patch.object(overnight, "LLM_DIR", tmp_path), \
+         patch.object(overnight.chain_note, "CHAINS_DIR", chains_dir), \
          patch.object(display_ctl, "turn_monitors_off", return_value=True), \
-         patch.object(display_ctl, "release_pc_awake", return_value=True):
+         patch.object(display_ctl, "release_pc_awake", return_value=True) as released:
 
         # Start with 2 chains
         res = overnight.start_overnight(["Chain A", "Chain B"], display_mode="dpms_off", chains_dir=chains_dir)
@@ -71,13 +73,24 @@ def test_start_and_advance_overnight(tmp_path: Path):
         assert st["current"] == "Chain A"
         assert st["queue"] == ["Chain B"]
 
-        # Advance: since Chain A is marked 'done', it should advance to Chain B
+        # start queued Chain A: while it's queued (or running) the batch must wait, not "finish" on the first tick
+        assert "status: queued" in (chains_dir / "Chain A.md").read_text(encoding="utf-8")
+        st_wait = overnight.check_and_advance(chains_dir=chains_dir)
+        assert st_wait["active"] is True and st_wait["current"] == "Chain A" and st_wait["completed"] == []
+        (chains_dir / "Chain A.md").write_text("---\ntype: chain\nstatus: running\n---\n", encoding="utf-8")
+        assert overnight.check_and_advance(chains_dir=chains_dir)["current"] == "Chain A"
+        assert not released.called
+
+        # Chain A done: advance to Chain B (which gets queued)
+        (chains_dir / "Chain A.md").write_text("---\ntype: chain\nstatus: done\n---\n", encoding="utf-8")
         st_adv = overnight.check_and_advance(chains_dir=chains_dir)
         assert st_adv["current"] == "Chain B"
         assert "Chain A" in st_adv["completed"]
         assert st_adv["queue"] == []
 
-        # Advance again: Chain B is marked 'done', batch completes
+        # Chain B was queued by the advance: wait for it, then the batch completes
+        assert overnight.check_and_advance(chains_dir=chains_dir)["current"] == "Chain B"
+        (chains_dir / "Chain B.md").write_text("---\ntype: chain\nstatus: done\n---\n", encoding="utf-8")
         st_final = overnight.check_and_advance(chains_dir=chains_dir)
         assert st_final["active"] is False
         assert st_final["status"] == "completed"
