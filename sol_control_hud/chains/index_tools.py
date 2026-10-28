@@ -45,6 +45,8 @@ EMBED_URL = os.environ.get("SOL_EMBED_URL", "http://127.0.0.1:11443/v1/embedding
 EMBED_MODEL = "sol-embed"
 DB_PATH = Path(os.environ.get("SOL_INDEX_DB", r"D:\AI\Cache\index\sol.db"))
 ROOTS = [r"D:\OBVLT", r"D:\Workspace", r"D:\Polymatica Vault"]
+# never indexed: the user's private writing, and the frozen predecessor (a duplicate of sol-control-hud in every result)
+EXCLUDE_DIRS = {os.path.normcase(r"D:\OBVLT\1Notebook"), os.path.normcase(r"D:\Workspace\sol-hud")}
 
 CHARS_PER_TOKEN = 3.0
 CHUNK_MAX_CHARS = int(500 * CHARS_PER_TOKEN)
@@ -261,7 +263,7 @@ def _skip_file(name: str) -> bool:
 def walk_files(roots: list[str]):
     for root in roots:
         for dirpath, dirs, files in os.walk(root):
-            dirs[:] = [d for d in dirs if not _skip_dir(d)]
+            dirs[:] = [d for d in dirs if not _skip_dir(d) and os.path.normcase(os.path.join(dirpath, d)) not in EXCLUDE_DIRS]
             for f in files:
                 if _skip_file(f):
                     continue

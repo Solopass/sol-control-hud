@@ -176,3 +176,11 @@ def test_cli_survives_a_non_cp1252_stdout(env, monkeypatch):
     assert cli.main(["search", "abort button stops the overnight batch", "-k", "3"]) == 0
     out.flush()
     assert "⏹".encode("utf-8") in raw.getvalue()  # written as UTF-8, not crashed or dropped
+
+
+def test_excluded_dirs_are_not_walked(env, monkeypatch):
+    root, db = env
+    monkeypatch.setattr(it, "EXCLUDE_DIRS", {os.path.normcase(str(root / "other"))})
+    run(root, db)
+    names = {os.path.basename(p) for (p,) in it.connect(db).execute("SELECT DISTINCT path FROM chunks")}
+    assert "readme.md" not in names and "stall.py" in names
