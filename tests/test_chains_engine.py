@@ -15,7 +15,7 @@ from sol_control_hud.chains import file_tools as ft
 from sol_control_hud.chains.gpulock import LockTimeout, gpu_lock, holder
 from sol_control_hud.chains.llm import ChatResult, LLMError
 from sol_control_hud.chains.router import ModelUnavailable, RouterClient
-from sol_control_hud.chains.runner import Runner, compact_text
+from sol_control_hud.chains.runner import Runner, compact_text, with_today
 from sol_control_hud.chains.store import Store
 from sol_control_hud.chains.workflow import WorkflowError, parse
 
@@ -59,10 +59,28 @@ def test_system_prompt_reasoning_and_temperature_reach_the_client(store):
     client = Scripted({"m": ["a1", "b1", "c1"]})
     rid = Runner(client, store).run(parse(THREE), {"topic": "x"})
     assert store.run(rid)["status"] == "succeeded"
-    assert client.calls[0]["messages"][0] == {"role": "system", "content": "You are terse."}
+    today = with_today(None)
+    assert client.calls[0]["messages"][0] == {"role": "system", "content": f"You are terse.\n\n{today}"}
     assert client.calls[1]["reasoning"] == "high" and client.calls[1]["temperature"] == 0.7
     assert "reasoning" not in client.calls[0]                      # default: the model's own setting
-    assert client.calls[2]["messages"][0]["content"] == "You are a critic."  # a step's system replaces the default
+    assert client.calls[2]["messages"][0]["content"] == f"You are a critic.\n\n{today}"  # a step's system replaces the default
+
+
+def test_every_call_is_told_todays_date(store):
+    from datetime import datetime
+    assert with_today(None, datetime(2026, 10, 28)) == "Today is Wednesday 2026-10-28."
+    assert with_today("Be brief.", datetime(2026, 10, 28)) == "Be brief.\n\nToday is Wednesday 2026-10-28."
+    client = Scripted({"m": ["a1"]})                               # a workflow with no system prompt at all
+    Runner(client, store).run(parse({"name": "one", "steps": [{"id": "a", "model": "m", "prompt": "A"}]}), {})
+    assert client.calls[0]["messages"][0] == {"role": "system", "content": with_today(None)}
+
+
+def test_json_check_rejects_bad_output_then_accepts_a_retry(store):
+    wf = parse({"name": "j", "steps": [{"id": "a", "model": "m", "prompt": "list", "retries": 1,
+                                        "schema": {"type": "array", "items": {"type": "string"}}}]})
+    client = Scripted({"m": ["- not json", '["x", "y"]']})
+    rid = Runner(client, store).run(wf, {})
+    assert store.run(rid)["status"] == "succeeded" and len(client.calls) == 2
 
 
 def test_each_step_is_saved_and_resume_skips_finished_steps(store):
@@ -446,7 +464,8 @@ def test_ran_out_of_tokens_retries_with_twice_the_room(store):
     rid = Runner(client, store).run(parse(doc), {})
     assert store.run(rid)["status"] == "succeeded"
     assert [c["max_tokens"] for c in client.calls] == [3000, 6000]
-    assert len(client.calls[1]["messages"]) == 1          # a fresh try, not "your answer was rejected"
+    assert [m["role"] for m in client.calls[1]["messages"]] == ["system", "user"]  # a fresh try (date + prompt),
+    assert client.calls[1]["messages"][-1]["content"] == "p"                        # not "your answer was rejected"
 
 
 def test_compact_text_and_step_compaction(store):

@@ -30,12 +30,13 @@ from pathlib import Path
 import yaml
 
 from . import chain_note as cn
-from . import file_tools, media_tools, solang_tools
+from . import file_tools, media_tools, project_chains, solang_tools
 from .gpulock import gpu_lock
 from .router import DESK_FALLBACK, ModelUnavailable, RouterClient, engine_mode
 from .runner import Runner
 from .store import Store, owner_alive
 from ..paths import DATA_DIR
+from ..swallow import note as _swallowed
 
 LLM_DIR = Path(os.environ.get("SOL_LLM_DIR", r"D:\AI\Cache\llm"))
 QUEUE_RUNNING = Path(os.environ.get("SOL_QUEUE_RUNNING", r"D:\AI\Queue\running"))
@@ -44,6 +45,7 @@ IDLE_MINUTES = int(os.environ.get("SOL_CHAIN_IDLE_MINUTES", "10"))
 TICK = 10.0
 RETRY_WAITING = 60.0
 STABLE_SECONDS = 60
+SCORE_EVERY = 600.0  # seconds between acted-on scoreboard refreshes (chains v2 plan, phase 0)
 NEW_FILE_MAX_CHARS = 60000
 DAYS = {d: i for i, d in enumerate(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])}
 
@@ -299,6 +301,8 @@ class Daemon:
     def scan(self) -> None:
         now = self.clock()
         self._scheduled: list[dict] = []   # rebuilt every scan: active (not paused) schedules, for chains.json
+        score_due = time.time() - getattr(self, "_scored_at", 0) >= SCORE_EVERY  # reads review notes: not every tick
+        scores: list[dict] = []
         cur = self.current["path"] if self.current else None
         live = {str(p) for p in self.chain_files()}
         self.state["pending"] = [p for p in self.state["pending"] if p["path"] in live]
@@ -313,6 +317,12 @@ class Daemon:
                 continue
             if meta.get("type") not in (None, "chain"):
                 continue
+            if score_due:  # before the early exits below, so a running or cancelled chain keeps its score
+                try:
+                    if (s := project_chains.chain_scoreboard(path, meta)) is not None:
+                        scores.append(s)
+                except OSError:
+                    _swallowed("chain_daemon.scoreboard")
             info = self.state["chains"].setdefault(key, {"first_seen": now.timestamp()})
             status = str(meta.get("status") or "draft").lower()
             if status == "cancel":
@@ -338,6 +348,8 @@ class Daemon:
                 continue
             self._check_schedule(path, meta, info, now)
             self._check_watch(path, meta, info, now)
+        if score_due:
+            self._scoreboard, self._scored_at = scores, time.time()
 
     def _not_served(self, chain) -> list[str]:
         try:
@@ -545,7 +557,8 @@ class Daemon:
                   "pending": [{"chain": Path(p["path"]).stem, "lane": p.get("lane"), "reason": p.get("reason"),
                                "blocked": p.get("blocked")} for p in self.state["pending"]],
                   "runnable_now": len(runnable),
-                  "scheduled": sorted(getattr(self, "_scheduled", []), key=lambda s: (s["next"] == "on away", s["next"]))}
+                  "scheduled": sorted(getattr(self, "_scheduled", []), key=lambda s: (s["next"] == "on away", s["next"])),
+                  "scoreboard": getattr(self, "_scoreboard", [])}
         try:
             self.status_file.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.status_file.with_suffix(".tmp")

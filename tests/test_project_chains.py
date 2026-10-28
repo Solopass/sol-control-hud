@@ -90,9 +90,9 @@ def test_find_latest_review(tmp_path):
     assert res_speedman["tasks"]["resolved"] == 1
     items = res_speedman["tasks"]["items"]
     assert len(items) == 3
-    assert items[0] == {"text": "**[high]** bug in api", "resolved": False, "severity": "high"}
-    assert items[1] == {"text": "**[medium]** fixed crash", "resolved": True, "severity": "medium"}
-    assert items[2] == {"text": "**[low]** typo", "resolved": False, "severity": "low"}
+    assert items[0] == {"text": "**[high]** bug in api", "resolved": False, "severity": "high", "checkbox": True}
+    assert items[1] == {"text": "**[medium]** fixed crash", "resolved": True, "severity": "medium", "checkbox": True}
+    assert items[2] == {"text": "**[low]** typo", "resolved": False, "severity": "low", "checkbox": True}
 
 
 def test_toggle_review_task(tmp_path):
@@ -237,3 +237,50 @@ def test_git_post_commit_hook_install_and_uninstall(tmp_path: Path):
 
 
 
+
+
+def _review(rdir, name, lines, age):
+    import os, time
+    p = rdir / name
+    p.write_text("# Review\n\n## Real issues\n" + "\n".join(lines) + "\n", encoding="utf-8")
+    t = time.time() - age
+    os.utime(p, (t, t))
+    return p
+
+
+def test_scoreboard_counts_ticked_findings_over_the_last_four_runs(tmp_path):
+    meta = {"save_to": "1Notebook/Reviews/{{today}} bug hunt.md"}
+    for i in range(5):  # the oldest note is outside the window
+        _review(tmp_path, f"2026-10-0{i + 1} bug hunt.md",
+                ["- [x] **[high]** a.py: ticked", "- [ ] **[medium]** b.py: open"] if i else ["- [x] **[high]** old"], 100 - i)
+    _review(tmp_path, "2026-10-09 git auditor.md", ["- [ ] **[high]** other chain"], 0)
+    s = project_chains.chain_scoreboard(Path("Bug hunt.md"), meta, reviews_dir=tmp_path)
+    assert (s["chain"], s["runs"], s["findings"], s["acted"], s["flag"]) == ("Bug hunt", 4, 8, 4, False)
+
+
+def test_scoreboard_flags_findings_nobody_acts_on(tmp_path):
+    meta = {"save_to": "1Notebook/Reviews/{{today}} docs check.md"}
+    for i in range(4):
+        _review(tmp_path, f"2026-10-0{i + 1} docs check.md", ["- [ ] **[medium]** x", "- [ ] **[low]** y"], 10 - i)
+    s = project_chains.chain_scoreboard(Path("Docs check.md"), meta, reviews_dir=tmp_path)
+    assert s["flag"] and s["rate"] == 0
+    # three runs is too early to judge
+    s3 = project_chains.chain_scoreboard(Path("Docs check.md"), meta, reviews_dir=tmp_path, window=5)
+    assert s3["runs"] == 4 and not s3["flag"]
+
+
+def test_scoreboard_skips_maintenance_ingest_and_non_review_chains(tmp_path):
+    for kind in ("maintenance", "ingest", "Maintenance"):
+        assert project_chains.chain_scoreboard(Path("Index refresh.md"),
+                                               {"kind": kind, "save_to": "1Notebook/Reviews/{{today}} x.md"},
+                                               reviews_dir=tmp_path) is None
+    assert project_chains.chain_scoreboard(Path("Weekly digest.md"), {"save_to": "1Notebook/Digests/{{week}}.md"},
+                                           reviews_dir=tmp_path) is None
+
+
+def test_plain_bullet_findings_are_untracked_and_never_flag(tmp_path):
+    meta = {"save_to": "1Notebook/Reviews/{{today}} git auditor.md"}
+    for i in range(4):
+        _review(tmp_path, f"2026-10-0{i + 1} git auditor.md", ["- **[high]** a.py: not a checkbox"], 10 - i)
+    s = project_chains.chain_scoreboard(Path("WIP Git Auditor.md"), meta, reviews_dir=tmp_path)
+    assert (s["findings"], s["untracked"], s["rate"], s["flag"]) == (0, 4, None, False)

@@ -126,7 +126,7 @@ def test_run_writes_result_as_it_goes_and_updates_only_the_status_line(env):
     rid, snaps = _run(p, store, client)
     assert store.run(rid)["status"] == "succeeded"
     assert client.calls[0]["reasoning"] == "off" and client.calls[1]["model"] == "sol-smart"
-    assert client.calls[0]["messages"][0]["content"] == "You are terse about rivers."
+    assert client.calls[0]["messages"][0]["content"].startswith("You are terse about rivers.\n\nToday is ")
     assert "Expand one." in client.calls[2]["messages"][-1]["content"]   # bullets became loop items
     assert any("_running…_" in s or "_not run yet_" in s for s in snaps)   # it grew step by step
     result = (chains / "Results" / "Essay (result).md").read_text(encoding="utf-8")

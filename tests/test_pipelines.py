@@ -54,7 +54,7 @@ def test_success_passes_outputs_between_steps(store):
     run = store.run(run_id)
     assert run["status"] == "succeeded"
     assert json.loads(run["outputs"])["title"] == "Fuel contract plan"
-    assert "renegotiate the fuel contract" in client.calls[1][1][0]["content"]  # step 2 saw step 1's output
+    assert "renegotiate the fuel contract" in client.calls[1][1][-1]["content"]  # step 2 saw step 1's output
 
 
 def test_bad_json_is_retried_with_feedback(store):

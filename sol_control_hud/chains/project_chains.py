@@ -55,6 +55,7 @@ def parse_review_tasks(file_path: Path) -> dict:
                 "text": task_text,
                 "resolved": resolved,
                 "severity": severity,
+                "checkbox": True,
             })
             i += 1
             continue
@@ -105,6 +106,38 @@ def parse_review_tasks(file_path: Path) -> dict:
         "resolved": resolved_count,
         "items": items,
     }
+
+
+SCORE_EXEMPT_KINDS = {"maintenance", "ingest"}  # judged by run health, not by findings you act on
+
+
+def chain_scoreboard(chain_path: Path, meta: dict, reviews_dir: Path | None = None, window: int = 4,
+                     threshold: float = 0.2) -> dict | None:
+    """How often a chain's findings get acted on (chains v2 plan, phase 0): its last `window` review notes in
+    1Notebook/Reviews, counting checkbox findings and the ones you ticked. None for chains that aren't scored:
+    `kind: maintenance` / `kind: ingest`, or output that doesn't go to Reviews. `flag` = retirement candidate:
+    a full window, at least one tickable finding, and under `threshold` of them ticked. Findings written as plain
+    bullets can't be ticked; they're counted as `untracked` and never flag a chain."""
+    if str(meta.get("kind") or "").lower() in SCORE_EXEMPT_KINDS:
+        return None
+    save_to = str(meta.get("save_to") or "").replace("\\", "/")
+    if not save_to.startswith("1Notebook/Reviews/"):
+        return None
+    pattern = re.sub(r"\{\{[^}]*\}\}", "*", save_to.rsplit("/", 1)[-1])
+    rdir = reviews_dir or REVIEWS_DIR
+    notes = sorted(rdir.glob(pattern), key=lambda p: p.stat().st_mtime)[-window:] if rdir.is_dir() else []
+    tickable = acted = untracked = 0
+    for note in notes:
+        for it in parse_review_tasks(note)["items"]:
+            if it.get("checkbox"):
+                tickable += 1
+                acted += it["resolved"]
+            else:
+                untracked += 1
+    rate = acted / tickable if tickable else None
+    return {"chain": chain_path.stem, "runs": len(notes), "findings": tickable, "acted": acted,
+            "untracked": untracked, "rate": rate,
+            "flag": len(notes) >= window and rate is not None and rate < threshold}
 
 
 def toggle_review_task(file_path: Path, item_index: int, resolved: bool) -> dict:

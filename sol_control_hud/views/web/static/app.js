@@ -778,7 +778,16 @@ function renderChains(p) {
   setHTML($('chPending'), held + pend.map((x) => `<div class="item"><span>${esc(x.chain)}</span><span style="color:${x.blocked ? 'var(--amber)' : 'var(--cyan)'}">${esc(x.blocked || 'next')}${x.blocked ? skip(x.chain) : ''}</span></div>`).join('')
     || '<div class="empty">nothing waiting</div>');
   const sch = c.scheduled || [];
-  setHTML($('chSched'), sch.length ? sch.map((x) => `<div class="item"><span>${esc(x.chain)}</span><span>${esc(nextLabel(x.next))} <button class="mini ghost sched-btn" data-sched="${esc(x.chain)}" title="Edit schedule">⏱ Edit</button></span></div>`).join('')
+  // acted-on scoreboard (chains v2 plan, phase 0): a chain whose findings you rarely tick off is a retirement candidate
+  const score = Object.fromEntries((c.scoreboard || []).map((s) => [s.chain, s]));
+  const scoreTag = (name) => {
+    const s = score[name];
+    if (!s || s.findings === 0) return '';
+    const t = `${s.acted}/${s.findings} acted on (last ${s.runs})`;
+    return s.flag ? ` <span style="color:var(--amber)" title="Under 20% of its findings acted on over 4 runs: consider retiring it">⚠ ${esc(t)}</span>`
+      : ` <span class="dim">${esc(t)}</span>`;
+  };
+  setHTML($('chSched'), sch.length ? sch.map((x) => `<div class="item"><span>${esc(x.chain)}${scoreTag(x.chain)}</span><span>${esc(nextLabel(x.next))} <button class="mini ghost sched-btn" data-sched="${esc(x.chain)}" title="Edit schedule">⏱ Edit</button></span></div>`).join('')
     : '<div class="empty">no schedules</div>');
 }
 

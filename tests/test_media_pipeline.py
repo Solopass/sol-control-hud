@@ -75,9 +75,9 @@ def test_transcript_note_workflow_end_to_end(store, tmp_path):
     run = store.run(run_id)
     assert run["status"] == "succeeded", run["error"]
     assert calls["transcribe"]["source"] == r"D:\rec\standup.wav"
-    prompt = client.calls[0][1][0]["content"]                      # the part's notes see the transcript itself
+    prompt = client.calls[0][1][-1]["content"]                      # the part's notes see the transcript itself
     assert "[00:01:05] Mei owns the review." in prompt and "Title: Standup" in prompt and "Part 1 of 1" in prompt
-    merge = client.calls[1][1][0]["content"]                       # the merge sees the part notes, not the transcript
+    merge = client.calls[1][1][-1]["content"]                       # the merge sees the part notes, not the transcript
     flat = " ".join(merge.split())                                 # YAML wraps long lines in the rendered notes
     assert "summary: The team assigns the security review to Mei." in flat and "[00:01:05] Mei owns the review." not in merge
     kinds = [(e["step"], e["kind"]) for e in store.events(run_id)]

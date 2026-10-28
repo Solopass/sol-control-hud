@@ -23,6 +23,7 @@ import threading
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -31,6 +32,13 @@ import jsonschema
 from .llm import ChatClient, LLMError
 from .store import WHOLE, Store
 from .workflow import Cancelled, Step, Workflow, WorkflowError, references, render, resolve_args
+
+
+def with_today(system: str | None, now: datetime | None = None) -> str:
+    """Every model call is told today's date: without it the model guessed, and Docs check (retired 2026-10-28)
+    reported dates that had already passed as "in the future"."""
+    line = f"Today is {(now or datetime.now()).strftime('%A %Y-%m-%d')}."
+    return f"{system}\n\n{line}" if system else line
 
 try:  # optional: the router client's "not served right now" signal
     from .router import ModelUnavailable
@@ -305,7 +313,7 @@ class Runner:
             return self._run_tool(run_id, step, context)
         prompt = render(step.prompt, context)
         system_t = step.system if step.system is not None else wf.system
-        system = render(system_t, context) if system_t else None
+        system = with_today(render(system_t, context) if system_t else None)
         started = time.monotonic()
         self.store.event(run_id, "step_started", step.id, model=step.model, **({"item": label} if label else {}))
         plan = [(step.model, step.retries + 1)] + ([(step.escalate_to, 1)] if step.escalate_to else [])
