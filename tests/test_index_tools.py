@@ -1,4 +1,5 @@
 """sol-search (LOCAL_AI_CHAINS_V2_PLAN phase 1): chunking, breadcrumbs, incremental indexing, pruning, search, CLI size."""
+import sys
 import os
 import re
 import zlib
@@ -161,3 +162,17 @@ def test_cli_without_index(tmp_path, monkeypatch, capsys):
 def test_index_refresh_is_a_chain_tool():
     from sol_control_hud.chains import chain_daemon
     assert "index_refresh" in chain_daemon.CHAIN_TOOLS()
+
+
+def test_cli_survives_a_non_cp1252_stdout(env, monkeypatch):
+    """Piped on Windows, stdout is cp1252: a snippet with an emoji or a stop sign crashed the search (2026-10-28)."""
+    import io
+    root, db = env
+    (root / "proj" / "abort.md").write_text("Abort button ⏹ stops the overnight batch stall guard\n", encoding="utf-8")
+    run(root, db)
+    raw = io.BytesIO()
+    out = io.TextIOWrapper(raw, encoding="cp1252", errors="strict", newline="\n")
+    monkeypatch.setattr(sys, "stdout", out)
+    assert cli.main(["search", "abort button stops the overnight batch", "-k", "3"]) == 0
+    out.flush()
+    assert "⏹".encode("utf-8") in raw.getvalue()  # written as UTF-8, not crashed or dropped

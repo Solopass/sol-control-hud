@@ -316,7 +316,15 @@ def cmd_search(args) -> int:
     except (index_tools.IndexError_, OSError) as e:
         print(f"sol-search: {e}")
         return 1
-    print(index_tools.format_hits(hits) if hits else "no hits")
+    text = index_tools.format_hits(hits) if hits else "no hits"
+    # snippets carry any character (emoji, CJK, x-marks); piped on Windows, stdout is cp1252 and printing one crashed
+    # the whole search (2026-10-28). UTF-8 out, and anything the stream still can't take becomes "?"
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+    print(text)
     return 0
 
 
