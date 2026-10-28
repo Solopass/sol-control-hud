@@ -31,7 +31,7 @@ from pathlib import Path
 import yaml
 
 from . import chain_note as cn
-from . import file_tools, index_tools, media_tools, project_chains, solang_tools
+from . import file_tools, fix_tools, index_tools, media_tools, project_chains, solang_tools
 from .gpulock import gpu_lock
 from .router import DESK_FALLBACK, ModelUnavailable, RouterClient, engine_mode
 from .runner import Runner
@@ -553,9 +553,17 @@ class Daemon:
         self._log(f"start {path.name} ({job.get('reason')}, lane {job.get('lane')})")
         t.start()
 
+    def _signal_fix_abort(self) -> None:
+        """The fix lane runs in the idle/away lane: when that lane closes (you came back) tell it to stop between steps and
+        end only its test process. Everything else the runner does already stops by itself."""
+        lane = self.current.get("lane")
+        if lane in ("idle", "away") and not self.lane_open(lane, force=skip_wait(Path(self.current["path"])))[0]:
+            fix_tools.request_abort()
+
     def tick(self) -> None:
         self.scan()
         if self.current:
+            self._signal_fix_abort()
             r = self.current["holder"].get("runner")
             if r and r.current_run:
                 self.current["run"] = r.current_run
@@ -602,6 +610,13 @@ class Daemon:
 
     def run_forever(self) -> None:
         self._log(f"chain runner started (pid {os.getpid()})")
+        try:
+            gone = fix_tools.scrub_orphans()
+            if gone:
+                self._log(f"fix lane: removed {len(gone)} stale worktree(s): {', '.join(gone)}")
+        except Exception as e:  # noqa: BLE001 - the scrub must never stop the runner
+            _swallowed("chain_daemon.fix_scrub")
+            self._log(f"fix lane scrub error {type(e).__name__}: {e}")
         code_at_start = code_version()
         while True:
             try:
@@ -642,7 +657,7 @@ def chain_progress(chain, saved: dict) -> dict:
 
 
 def CHAIN_TOOLS() -> dict:
-    return {**file_tools.TOOLS, **cn.TOOLS, **media_tools.TOOLS, **solang_tools.TOOLS, **index_tools.TOOLS}
+    return {**file_tools.TOOLS, **cn.TOOLS, **media_tools.TOOLS, **solang_tools.TOOLS, **index_tools.TOOLS, **fix_tools.TOOLS}
 
 
 def single_instance(path: Path = LLM_DIR / "chains.lock"):

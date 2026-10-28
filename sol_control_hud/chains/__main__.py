@@ -29,7 +29,7 @@ from pathlib import Path
 
 import yaml
 
-from . import chain_note, file_tools, index_tools, media_tools, solang_tools
+from . import chain_note, file_tools, fix_tools, index_tools, media_tools, solang_tools
 from .gpulock import gpu_lock
 from .llm import load_registry
 from .router import RouterClient
@@ -41,7 +41,7 @@ from ..paths import ROOT as PKG_ROOT
 ROOT = PKG_ROOT
 WORKFLOWS = ROOT / "workflows"
 RUNS_DB = Path(os.environ.get("SOL_RUNS_DB", ROOT / "data" / "runs.sqlite"))
-TOOLS = {**media_tools.TOOLS, **file_tools.TOOLS, **chain_note.TOOLS, **solang_tools.TOOLS, **index_tools.TOOLS}
+TOOLS = {**media_tools.TOOLS, **file_tools.TOOLS, **chain_note.TOOLS, **solang_tools.TOOLS, **index_tools.TOOLS, **fix_tools.TOOLS}
 
 
 def open_store() -> Store:
