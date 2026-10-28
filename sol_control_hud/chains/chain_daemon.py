@@ -30,7 +30,7 @@ from pathlib import Path
 import yaml
 
 from . import chain_note as cn
-from . import file_tools, media_tools, project_chains, solang_tools
+from . import file_tools, index_tools, media_tools, project_chains, solang_tools
 from .gpulock import gpu_lock
 from .router import DESK_FALLBACK, ModelUnavailable, RouterClient, engine_mode
 from .runner import Runner
@@ -609,7 +609,7 @@ def chain_progress(chain, saved: dict) -> dict:
 
 
 def CHAIN_TOOLS() -> dict:
-    return {**file_tools.TOOLS, **cn.TOOLS, **media_tools.TOOLS, **solang_tools.TOOLS}
+    return {**file_tools.TOOLS, **cn.TOOLS, **media_tools.TOOLS, **solang_tools.TOOLS, **index_tools.TOOLS}
 
 
 def single_instance(path: Path = LLM_DIR / "chains.lock"):

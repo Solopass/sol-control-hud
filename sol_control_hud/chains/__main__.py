@@ -10,6 +10,8 @@
   python -m sol_control_hud.chains check <workflow.yaml | chain.md>   # validate without running
   python -m sol_control_hud.chains runs            # recent runs
   python -m sol_control_hud.chains show <run_id>   # one run's events and result
+  python -m sol_control_hud.chains search "query" [--in <project>] [-k 8]   # find file:lines in the local index (sol-search)
+  python -m sol_control_hud.chains index           # build/refresh that index now (the chain `Index refresh` does it nightly)
 
 Model calls go to the llama.cpp router (Local AI v2, 127.0.0.1:11440) and take turns on the GPU with other
 processes (gpulock.py). Exit codes: 0 succeeded, 1 stopped (needs you / failed / cancelled), 3 waiting for a model.
@@ -27,7 +29,7 @@ from pathlib import Path
 
 import yaml
 
-from . import chain_note, file_tools, media_tools, solang_tools
+from . import chain_note, file_tools, index_tools, media_tools, solang_tools
 from .gpulock import gpu_lock
 from .llm import load_registry
 from .router import RouterClient
@@ -39,7 +41,7 @@ from ..paths import ROOT as PKG_ROOT
 ROOT = PKG_ROOT
 WORKFLOWS = ROOT / "workflows"
 RUNS_DB = Path(os.environ.get("SOL_RUNS_DB", ROOT / "data" / "runs.sqlite"))
-TOOLS = {**media_tools.TOOLS, **file_tools.TOOLS, **chain_note.TOOLS, **solang_tools.TOOLS}
+TOOLS = {**media_tools.TOOLS, **file_tools.TOOLS, **chain_note.TOOLS, **solang_tools.TOOLS, **index_tools.TOOLS}
 
 
 def open_store() -> Store:
@@ -308,6 +310,28 @@ def cmd_show(args) -> int:
     return report(run)
 
 
+def cmd_search(args) -> int:
+    try:
+        hits = index_tools.search(args.query, project=args.project, k=args.k)
+    except (index_tools.IndexError_, OSError) as e:
+        print(f"sol-search: {e}")
+        return 1
+    print(index_tools.format_hits(hits) if hits else "no hits")
+    return 0
+
+
+def cmd_index(args) -> int:
+    class Say:
+        def note(self, msg):
+            print(msg, flush=True)
+    try:
+        print(index_tools.index_refresh({}, Say()))
+    except index_tools.IndexError_ as e:
+        print(f"index: {e}")
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m sol_control_hud.chains")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -349,6 +373,13 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("show", help="events and result of one run")
     s.add_argument("run_id", type=int)
     s.set_defaults(fn=cmd_show)
+    se = sub.add_parser("search", help="semantic + keyword search of the local index: file:lines, best first")
+    se.add_argument("query")
+    se.add_argument("--in", dest="project", help="only paths with this folder name in them (e.g. gatkam)")
+    se.add_argument("-k", type=int, default=8)
+    se.set_defaults(fn=cmd_search)
+    ix = sub.add_parser("index", help="build or refresh the search index now")
+    ix.set_defaults(fn=cmd_index)
     args = p.parse_args(argv)
     return args.fn(args)
 
