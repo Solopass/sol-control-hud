@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -77,9 +78,12 @@ def load_repos() -> dict:
 
 
 # ------------------------------------------------------------------ git helpers
-def git(cwd: str | Path, *args: str, timeout: int = 120, check: bool = True) -> subprocess.CompletedProcess:
-    # GIT_DIR / GIT_INDEX_FILE & co. (set when we run inside a git hook) would point git at the wrong repo
+def git(cwd: str | Path, *args: str, timeout: int = 120, check: bool = True, scrub: bool = False) -> subprocess.CompletedProcess:
+    # GIT_DIR / GIT_INDEX_FILE & co. (set when we run inside a git hook) would point git at the wrong repo.
+    # scrub=True also drops tokens/keys (a commit could run a repo hook).
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    if scrub:
+        env = scrub_env(env)
     r = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace",
                        timeout=timeout, creationflags=NO_WINDOW, env=env)
     if check and r.returncode != 0:
@@ -89,11 +93,19 @@ def git(cwd: str | Path, *args: str, timeout: int = 120, check: bool = True) -> 
 
 def fingerprint(repo: str | Path) -> dict:
     """[R1] What the lane must never change in the main checkout (its own ai/* branches don't count)."""
-    refs = [ln for ln in git(repo, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads").stdout.splitlines()
-            if not ln.startswith("refs/heads/ai/")]
+    refs = [ln for ln in git(repo, "for-each-ref", "--format=%(refname) %(objectname)").stdout.splitlines()
+            if not ln.startswith("refs/heads/ai/")]               # every ref (branches, remotes, tags), minus our own
+    gitdir = Path(git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip())
+    guarded = [gitdir / "config"] + (sorted((gitdir / "hooks").glob("*")) if (gitdir / "hooks").exists() else [])
+    files = {}
+    for f in guarded:                                              # remotes, core.hooksPath and hooks are how test code could stay behind
+        try:
+            files[f.name] = hashlib.sha256(f.read_bytes()).hexdigest() if f.is_file() else None
+        except OSError:
+            files[f.name] = "unreadable"
     return {"head": git(repo, "rev-parse", "HEAD").stdout.strip(),
             "status": git(repo, "status", "--porcelain").stdout,
-            "branches": refs,
+            "refs": refs, "files": files,
             "stash": git(repo, "stash", "list").stdout}
 
 
@@ -162,8 +174,8 @@ def check_edit_path(worktree: str | Path, file: str, task: str) -> str:
     why = denied_by_name(rel)
     if why:
         raise Rejected("denied", f"{rel} is {why}")
-    if is_test_path(rel) and Path(rel).name.lower() not in task.lower():
-        raise Rejected("denied", f"{rel} is a test file and the task doesn't name it")
+    if is_test_path(rel) and rel.lower() not in task.lower().replace("\\", "/"):
+        raise Rejected("denied", f"{rel} is a test file and the task doesn't name its full path")
     return rel
 
 
@@ -171,7 +183,8 @@ DANGEROUS = [("subprocess", r"\bsubprocess\b"), ("os.system", r"os\.system"), ("
              ("shutil", r"\bshutil\b"), ("unlink", r"unlink"), ("remove(", r"\bremove\("), ("os.rm", r"os\.rm"),
              ("write_text", r"write_(text|bytes)"), ("chmod", r"chmod"), ("socket", r"\bsocket\b"),
              ("requests", r"\brequests\b"), ("httpx", r"\bhttpx\b"), ("urllib", r"\burllib\b"), ("eval(", r"\beval\("),
-             ("exec(", r"\bexec\("), ("__import__", r"__import__"), ("ctypes", r"\bctypes\b"), ("winreg", r"\bwinreg\b"),
+             ("exec(", r"\bexec\("), ("__import__", r"__import__"), ("ctypes", r"\bctypes\b"), ("importlib", r"importlib"), ("_exit", r"_exit"),
+             ("os.rename", r"os\.(rename|replace|kill|startfile)"), ("getattr(", r"\bgetattr\("), ("winreg", r"\bwinreg\b"),
              ("open(", r"""\bopen\(.*["'][^"']*[wa+x][^"']*["']""")]
 
 
@@ -339,7 +352,19 @@ def remove_links(wt: Path) -> None:
         dirs[:] = [d for d in dirs if not _is_reparse(Path(root) / d) and d != ".git"]
 
 
+def _trusted(entry: dict) -> None:
+    """active.json is writable by the code the tests run, so never act on it blindly: the folder must be strictly inside
+    WORKTREES, the branch an ai/ branch, the repo one of the allowlisted checkouts."""
+    wt = Path(os.path.realpath(entry.get("path", "")))
+    root = Path(os.path.realpath(WORKTREES))
+    repos = {os.path.normcase(os.path.realpath(c["repo"])) for c in load_repos().values()}
+    if (not file_tools._under(wt, [str(root)]) or wt == root or not str(entry.get("branch", "")).startswith("ai/")
+            or os.path.normcase(os.path.realpath(entry.get("repo", ""))) not in repos):
+        raise FixError(f"refusing to clean up a ledger entry that looks wrong: {entry.get('path')!r}")
+
+
 def discard_worktree(entry: dict, delete_branch: bool = True) -> None:
+    _trusted(entry)
     wt = Path(entry["path"])
     remove_links(wt) if wt.exists() else None
     try:
@@ -473,6 +498,15 @@ def run_tests(cfg: dict, entry: dict, abort, timeout: int = TEST_TIMEOUT) -> dic
     job = _make_job()
     proc = subprocess.Popen(argv, cwd=str(wt), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             creationflags=NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    if job is not None:                                  # first thing: a child started before this escapes the job
+        try:
+            import win32api
+            import win32job
+            handle = win32api.OpenProcess(0x1F0FFF, False, proc.pid)
+            win32job.AssignProcessToJobObject(job, handle)
+            win32api.CloseHandle(handle)
+        except Exception:  # noqa: BLE001 - taskkill /T is the fallback
+            pass
     created = None
     try:
         import psutil
@@ -480,13 +514,6 @@ def run_tests(cfg: dict, entry: dict, abort, timeout: int = TEST_TIMEOUT) -> dic
     except Exception:  # noqa: BLE001
         pass
     ledger_update(entry["path"], test_pid=proc.pid, test_pid_created=created, runid=runid, stack=cfg["stack"])
-    if job is not None:
-        try:
-            import win32api
-            import win32job
-            win32job.AssignProcessToJobObject(job, win32api.OpenProcess(0x1F0FFF, False, proc.pid))
-        except Exception:  # noqa: BLE001 - taskkill /T is the fallback
-            pass
     chunks: list[str] = []
     reader = threading.Thread(target=lambda: chunks.extend(iter(lambda: proc.stdout.readline().decode("utf-8", "replace"), "")),
                               daemon=True)
@@ -503,6 +530,7 @@ def run_tests(cfg: dict, entry: dict, abort, timeout: int = TEST_TIMEOUT) -> dic
                 break
             time.sleep(1)
         reader.join(10)
+        proc.stdout.close()
     finally:
         if proc.poll() is None:
             _kill_tree(proc, job, {"stack": cfg["stack"]}, runid)
@@ -614,8 +642,12 @@ def _attempt(repo_key: str, cfg: dict, task: str, propose, abort, note) -> dict:
                 if not gitleaks_clean(wt):
                     return {"status": "failed", "reason": "gitleaks", "detail": "gitleaks flagged (or is missing for) the diff"}
                 git(wt, "add", "--", *changed)
-                c = git(wt, "commit", "-m", f"ai fix: {task[:100]}\n\nWritten by the SOL fix lane. Tests show no regression "
-                                              f"({after['passed']} passed). Review before merging.", check=False)
+                try:
+                    c = git(wt, "commit", "-m", f"ai fix: {task[:100]}\n\nWritten by the SOL fix lane. Tests show no regression "
+                                                  f"({after['passed']} passed). Review before merging.",
+                            check=False, scrub=True, timeout=600)
+                except subprocess.TimeoutExpired:
+                    return {"status": "failed", "reason": "commit-failed", "detail": "the commit (its hooks) took over 10 minutes"}
                 if c.returncode != 0:
                     return {"status": "failed", "reason": "commit-failed", "detail": (c.stderr or c.stdout)[-300:]}
                 keep = True
@@ -770,7 +802,13 @@ def router_propose(model: str):
     client = RouterClient()
 
     def propose(messages: list[dict]) -> str:
-        return client.chat(model, messages, schema=EDIT_SCHEMA, max_tokens=4096).content
+        # take the GPU like the runner does for chain steps, and give up (an abort) if you come back while waiting
+        from .gpulock import LockTimeout, gpu_lock
+        try:
+            with gpu_lock("fix attempt", should_stop=abort_requested):
+                return client.chat(model, messages, schema=EDIT_SCHEMA, max_tokens=4096).content
+        except LockTimeout as e:
+            raise Aborted(str(e)) from e
     return propose
 
 

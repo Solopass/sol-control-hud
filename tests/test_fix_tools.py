@@ -11,6 +11,7 @@ import pytest
 
 from sol_control_hud.chains import fix_tools as fx
 
+REAL_GITLEAKS = fx.gitleaks_clean
 GOOD = [{"file": "pkg/mod.py", "old": "return a - b", "new": "return a + b", "target_symbol": "", "replacement": ""}]
 BAD = [{"file": "pkg/mod.py", "old": "return a - b", "new": "return a * b", "target_symbol": "", "replacement": ""}]
 
@@ -46,6 +47,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(fx, "gitleaks_clean", lambda wt: True)
     main = make_repo(tmp_path / "main")
     repos = {"proj": {"repo": str(main), "stack": "win-python", "python": sys.executable, "pkgs": ["pkg"]}}
+    monkeypatch.setattr(fx, "load_repos", lambda: repos)         # the ledger check trusts only allowlisted repos
     return main, repos, tmp_path
 
 
@@ -149,6 +151,7 @@ def test_import_probe_stops_a_run_that_imports_the_main_checkout(tmp_path, monke
     conf = f"import sys\nsys.path.insert(0, {str(main)!r})\nimport pkg.mod\n"
     make_repo(main, conftest=conf)
     repos = {"proj": {"repo": str(main), "stack": "win-python", "python": sys.executable, "pkgs": ["pkg"]}}
+    monkeypatch.setattr(fx, "load_repos", lambda: repos)
     res = fx.run_attempt("proj", "fix add in mod.py", scripted(GOOD), repos=repos)
     assert res["status"] == "needs-you" and res["reason"] == "import-escape"
     assert (tmp_path / "wt" / "active.json").exists() and fx.ledger_read() == []
@@ -217,7 +220,9 @@ def test_test_and_config_files_are_rejected_unless_a_test_is_named(env):
     wt = tmp / "w"
     with pytest.raises(fx.Rejected):
         fx.check_edit_path(wt, "tests/test_mod.py", "fix mod.py")
-    assert fx.check_edit_path(wt, "tests/test_mod.py", "fix test_mod.py")      # named explicitly
+    assert fx.check_edit_path(wt, "tests/test_mod.py", "fix tests/test_mod.py")   # full path named
+    with pytest.raises(fx.Rejected):
+        fx.check_edit_path(wt, "tests/test_mod.py", "fix test_mod.py")          # a bare file name is not enough
     for cfg in ("pyproject.toml",):
         with pytest.raises(fx.Rejected):
             fx.check_edit_path(wt, cfg, f"fix {cfg}")                           # config is never allowed, even when named
@@ -320,6 +325,7 @@ def test_abort_mid_test_kills_the_test_removes_the_worktree_and_gives_the_attemp
     (main / "tests" / "test_slow.py").write_text("import time\n\n\ndef test_slow():\n    time.sleep(60)\n")
     run_git(main, "add", "-A"); run_git(main, "commit", "-qm", "slow")
     repos = {"proj": {"repo": str(main), "stack": "win-python", "python": sys.executable, "pkgs": ["pkg"]}}
+    monkeypatch.setattr(fx, "load_repos", lambda: repos)
     queue = tmp_path / "q.md"
     queue.write_text("- [ ] [attempts: 0/2] proj: fix add in mod.py\n", encoding="utf-8")
     t0 = time.time()
@@ -348,9 +354,8 @@ def test_junction_is_unlinked_before_remove_and_main_node_modules_survives(env):
 
 @pytest.mark.skipif(not __import__("shutil").which("gitleaks"), reason="gitleaks not installed")
 def test_gitleaks_blocks_a_planted_secret(env, monkeypatch):
-    monkeypatch.undo()
     main, repos, tmp = env
-    monkeypatch.setattr(fx, "WORKTREES", tmp / "wt")
+    monkeypatch.setattr(fx, "gitleaks_clean", REAL_GITLEAKS)      # the env fixture stubs it out
     secret = [{**GOOD[0], "new": 'return a + b  # ghp_' + "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5"}]
     res = fx.run_attempt("proj", "fix add in mod.py", scripted(secret), repos=repos)
     assert res["status"] == "failed" and res["reason"] == "gitleaks"
@@ -459,3 +464,35 @@ def test_abort_flag_roundtrip(tmp_path, monkeypatch):
     assert fx.abort_requested()
     fx.clear_abort()
     assert not fx.abort_requested()
+
+
+def branches_all(main):
+    return run_git(main, "branch", "--list").replace("*", " ").split()
+
+
+def test_scrub_refuses_a_tampered_ledger_entry(env):
+    main, repos, tmp = env
+    victim = tmp / "precious"
+    victim.mkdir()
+    (victim / "keep.txt").write_text("x")
+    (tmp / "wt").mkdir(exist_ok=True)
+    fx.ledger_write([{"path": str(victim), "branch": "ai/x", "repo": str(main), "started": 0},
+                     {"path": str(tmp / "wt" / "proj-a"), "branch": "main", "repo": str(main), "started": 0},
+                     {"path": str(tmp / "wt" / "proj-b"), "branch": "ai/x", "repo": str(tmp), "started": 0}])
+    fx.scrub_orphans()
+    assert (victim / "keep.txt").exists() and "main" in branches_all(main)
+    assert fx.ledger_read() == []
+
+
+def test_fingerprint_sees_tags_config_and_hooks(env):
+    main, _, _ = env
+    fp = fx.fingerprint(main)
+    run_git(main, "tag", "sneaky")
+    assert fx.fingerprint(main) != fp
+    run_git(main, "tag", "-d", "sneaky")
+    assert fx.fingerprint(main) == fp
+    run_git(main, "config", "core.hooksPath", "evil")
+    assert fx.fingerprint(main) != fp
+    run_git(main, "config", "--unset", "core.hooksPath")
+    (main / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\n")
+    assert fx.fingerprint(main) != fp
