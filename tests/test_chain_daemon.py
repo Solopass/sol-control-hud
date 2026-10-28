@@ -88,6 +88,19 @@ def test_parse_schedule(text, days, hm):
     assert s["days"] == days and (s["h"], s["m"]) == hm
 
 
+def test_monthly_schedule():
+    last = cd.parse_schedule("monthly last 21:00")
+    assert cd.last_occurrence(last, datetime(2026, 10, 31, 20, 0)) == datetime(2026, 9, 30, 21, 0)
+    assert cd.last_occurrence(last, datetime(2026, 10, 31, 21, 0)) == datetime(2026, 10, 31, 21, 0)
+    assert cd.next_occurrence(last, datetime(2026, 10, 31, 21, 0)) == datetime(2026, 11, 30, 21, 0)   # strictly after
+    assert cd.next_occurrence(last, datetime(2026, 12, 31, 22, 0)) == datetime(2027, 1, 31, 21, 0)
+    assert cd.last_occurrence(last, datetime(2027, 1, 5, 9, 0)) == datetime(2026, 12, 31, 21, 0)
+    first = cd.parse_schedule("Monthly 1 9:00")
+    assert cd.next_occurrence(first, datetime(2028, 2, 10)) == datetime(2028, 3, 1, 9, 0)
+    with pytest.raises(cd.ScheduleError, match="1-28"):
+        cd.parse_schedule("monthly 31 09:00")
+
+
 def test_bad_schedule_is_explained():
     with pytest.raises(cd.ScheduleError, match="weekly Sun 20:00"):
         cd.parse_schedule("every sunday evening")

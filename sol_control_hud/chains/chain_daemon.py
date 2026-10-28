@@ -5,7 +5,7 @@
 Every 10 s it reads the properties of 1Notebook\\Chains\\*.md and:
 - `status: queued` -> runs the chain (resumes its last stopped run if you fixed it; see chain_note.plan_run);
 - `status: cancel` -> stops that chain after its current step;
-- `schedule:` due (`daily 07:00`, `weekly Sun 20:00`, `weekly Mon,Thu 09:30`, `on away`) -> a new run; if the PC was
+- `schedule:` due (`daily 07:00`, `weekly Sun 20:00`, `weekly Mon,Thu 09:30`, `monthly last 21:00`, `on away`) -> a new run; if the PC was
   asleep at that time it runs once at the next chance, never twice. A chain created after today's time waits for the next one;
 - `watch: <folder>\\<glob>` -> one new run per new file (after it stopped changing for 60 s; at most `watch_limit`
   per hour, default 6). `{{new file}}` / `{{new file text}}` hold it;
@@ -17,6 +17,7 @@ runs. One chain at a time. Writes D:\\AI\\Cache\\llm\\chains.json (read by the w
 """
 from __future__ import annotations
 
+import calendar
 import ctypes
 import json
 import os
@@ -132,12 +133,39 @@ def parse_schedule(text: str) -> dict:
                 raise ScheduleError(f"unknown day '{d}'")
             days.append(DAYS[d[:3]])
         return {"kind": "at", "days": sorted(set(days)), "h": int(m.group(2)), "m": int(m.group(3))}
+    m = re.fullmatch(r"monthly (last|\d{1,2}) (\d{1,2}):(\d{2})", t)
+    if m:
+        mday = -1 if m.group(1) == "last" else int(m.group(1))
+        if mday != -1 and not 1 <= mday <= 28:
+            raise ScheduleError(f"monthly day must be 1-28 or `last`, not {mday}")
+        return {"kind": "at", "mday": mday, "days": list(range(7)), "h": int(m.group(2)), "m": int(m.group(3))}
     raise ScheduleError(f"I don't understand `schedule: {text}`. Use `daily 07:00`, `weekdays 09:00`, `weekends 10:00`, `weekly Sun 20:00`, "
-                        f"`weekly Mon,Thu 09:30` or `on away`")
+                        f"`weekly Mon,Thu 09:30`, `monthly last 21:00`, `monthly 1 09:00` or `on away`")
+
+
+def _month_at(sched: dict, year: int, month: int) -> datetime:
+    day = calendar.monthrange(year, month)[1] if sched["mday"] == -1 else sched["mday"]
+    return datetime(year, month, day, sched["h"], sched["m"])
+
+
+def _months_from(now: datetime, step: int):
+    y, mo = now.year, now.month
+    while True:
+        yield y, mo
+        mo += step
+        if mo == 0:
+            y, mo = y - 1, 12
+        elif mo == 13:
+            y, mo = y + 1, 1
 
 
 def last_occurrence(sched: dict, now: datetime) -> datetime | None:
-    """The most recent scheduled time at or before now (within the last 8 days)."""
+    """The most recent scheduled time at or before now (within the last 8 days; monthly: this month or last)."""
+    if "mday" in sched:
+        for (y, mo), _ in zip(_months_from(now, -1), range(2)):
+            if (at := _month_at(sched, y, mo)) <= now:
+                return at
+        return None
     for back in range(0, 8):
         day = now - timedelta(days=back)
         if day.weekday() in sched["days"]:
@@ -149,6 +177,11 @@ def last_occurrence(sched: dict, now: datetime) -> datetime | None:
 
 def next_occurrence(sched: dict, now: datetime) -> datetime | None:
     """The next scheduled time after now (for the ticker: "next: Weekly digest Sun 20:00")."""
+    if "mday" in sched:
+        for (y, mo), _ in zip(_months_from(now, 1), range(2)):
+            if (at := _month_at(sched, y, mo)) > now:
+                return at
+        return None
     for ahead in range(0, 8):
         day = now + timedelta(days=ahead)
         if day.weekday() in sched["days"]:

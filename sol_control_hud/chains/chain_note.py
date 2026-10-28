@@ -35,7 +35,7 @@ Rules: each `## heading` is a step (headings inside ``` code blocks don't count)
 References: `{{Step name}}`, `{{previous}}`, an input's name, `{{file.name}}` / `{{file.text}}` / `{{line}}` in loops,
 and `{{today}}` (2026-09-25), `{{week}}` (2026-W39), `{{now}}`. (Not {{date}}/{{title}}: Obsidian's templates use those.)
 Triggers (phase 3, the chain runner `python -m sol_control_hud.chains daemon`): `status: queued` · `schedule: daily 07:00` /
-`weekly Sun 20:00` / `on away` · `watch: D:\\Output\\Transcripts\\*.md` (one run per new file; `{{new file}}` is its path,
+`weekly Sun 20:00` / `monthly last 21:00` / `on away` · `watch: D:\\Output\\Transcripts\\*.md` (one run per new file; `{{new file}}` is its path,
 `{{new file text}}` its text) · `status: cancel` stops a running chain after its current step.
 """
 from __future__ import annotations

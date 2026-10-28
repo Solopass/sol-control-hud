@@ -325,7 +325,10 @@ def set_schedule(name: str, schedule: str, chains_dir: Path | None = None) -> st
             raise ControlError(f"{sched['h']:02d}:{sched['m']:02d} isn't a time of day")
         when = f"{sched['h']:02d}:{sched['m']:02d}"
         names = {i: d.capitalize() for d, i in DAYS.items()}
-        canon = f"daily {when}" if len(sched["days"]) == 7 else f"weekly {','.join(names[d] for d in sched['days'])} {when}"
+        if "mday" in sched:
+            canon = f"monthly {'last' if sched['mday'] == -1 else sched['mday']} {when}"
+        else:
+            canon = f"daily {when}" if len(sched["days"]) == 7 else f"weekly {','.join(names[d] for d in sched['days'])} {when}"
     chain_note.set_note_props(paths[name], {"schedule": canon})
     return canon
 
