@@ -184,3 +184,30 @@ def test_excluded_dirs_are_not_walked(env, monkeypatch):
     run(root, db)
     names = {os.path.basename(p) for (p,) in it.connect(db).execute("SELECT DISTINCT path FROM chunks")}
     assert "readme.md" not in names and "stall.py" in names
+
+
+def _embedder_client(fail_first):
+    import httpx
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] <= fail_first:
+            raise httpx.ReadError("connection reset", request=request)
+        return httpx.Response(200, json={"data": [{"embedding": [3.0, 4.0]}]})
+    return httpx.Client(transport=httpx.MockTransport(handler)), calls
+
+
+def test_embedder_that_restarts_is_waited_for(monkeypatch):
+    monkeypatch.setattr(it, "CONNECT_WAITS", (0, 0, 0))
+    client, calls = _embedder_client(2)
+    assert len(it._embed_one(client, "hello")) == 8               # two float32 values
+    assert calls["n"] == 3
+
+
+def test_embedder_that_stays_down_still_fails(monkeypatch):
+    monkeypatch.setattr(it, "CONNECT_WAITS", (0, 0))
+    client, calls = _embedder_client(99)
+    with pytest.raises(it.IndexError_):
+        it._embed_one(client, "hello")
+    assert calls["n"] == 3

@@ -860,6 +860,9 @@ def fix_attempts(args: dict, ctx=None, propose=None) -> dict:
         file_tools.save_note({"folder": REPORT_DIR, "name": f"{datetime.now():%Y-%m-%d} fix attempts", "text": report})
     except file_tools.FileToolError as e:
         note(f"couldn't save the report: {e}")
+    if any(d["status"] == "aborted" for d in done):          # not a finished run: let the runner retry it when the lane reopens
+        from .router import ModelUnavailable
+        raise ModelUnavailable("the fix lane was interrupted; it runs again when the AI is free")
     return {"attempts": done, "report": report}
 
 

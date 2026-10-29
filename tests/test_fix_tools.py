@@ -507,3 +507,19 @@ def test_daemon_aborts_the_fix_lane_only_when_you_come_back(tmp_path, monkeypatc
                           "lane_open": lambda self, lane, force=False: (False, why)})()
     chain_daemon.Daemon._signal_fix_abort(fake)
     assert fx.abort_requested() is aborted
+
+
+def test_an_interrupted_fix_lane_asks_the_runner_to_retry(env, monkeypatch):
+    from sol_control_hud.chains.router import ModelUnavailable
+    main, repos, tmp = env
+    saved = {}
+    monkeypatch.setattr(fx.file_tools, "save_note", lambda a: saved.update(a) or {"path": "x"})
+    q = tmp / "queue.md"
+    q.write_text("- [ ] [attempts: 0/2] proj: fix add in mod.py\n", encoding="utf-8")
+
+    def interrupted(messages):
+        raise fx.Aborted("you came back")
+    with pytest.raises(ModelUnavailable):
+        fx.fix_attempts({"queue": str(q), "max_tasks": 1}, None, propose=interrupted)
+    assert "[attempts: 0/2]" in q.read_text()                     # the attempt was given back
+    assert "interrupted" in saved["text"]                         # and the report still says what happened

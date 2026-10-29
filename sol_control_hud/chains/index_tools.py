@@ -41,6 +41,7 @@ try:  # Application Control has blocked native DLLs on this PC before (sklearn);
 except Exception:  # pragma: no cover - depends on the machine
     np = None
 
+CONNECT_WAITS = (2, 5, 10, 20, 30)   # seconds to wait before each retry when the embedder drops the connection
 EMBED_URL = os.environ.get("SOL_EMBED_URL", "http://127.0.0.1:11443/v1/embeddings")
 EMBED_MODEL = "sol-embed"
 DB_PATH = Path(os.environ.get("SOL_INDEX_DB", r"D:\AI\Cache\index\sol.db"))
@@ -190,14 +191,22 @@ def _embed_one(client: httpx.Client, text: str) -> bytes:
     """One input per request: the embedder's physical batch is 512 tokens, so a dense chunk (code is ~2.5 chars/token) can
     overflow it and get a 500. Retry with the tail cut off; a vector of the first part is still a fine address."""
     err = None
-    for _ in range(4):
+    dropped = 0                                           # connection resets: the embedder restarts after a wake or an Away switch
+    attempts = 0
+    while attempts < 4:
         try:
             r = client.post(EMBED_URL, json={"model": EMBED_MODEL, "input": text})
             if r.status_code >= 500 and len(text) > 200:
                 text, err = text[:len(text) // 2], r.text[:200]
+                attempts += 1
                 continue
             r.raise_for_status()
             return _unit(r.json()["data"][0]["embedding"])
+        except (httpx.TransportError, ConnectionError) as e:
+            dropped += 1
+            if dropped > len(CONNECT_WAITS):
+                raise IndexError_(f"embedder at {EMBED_URL} failed: {e}") from e
+            time.sleep(CONNECT_WAITS[dropped - 1])
         except (httpx.HTTPError, ValueError, KeyError, IndexError) as e:
             raise IndexError_(f"embedder at {EMBED_URL} failed: {e}") from e
     raise IndexError_(f"embedder at {EMBED_URL} rejected a chunk even when cut short: {err}")
