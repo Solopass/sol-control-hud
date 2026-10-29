@@ -557,7 +557,10 @@ class Daemon:
         """The fix lane runs in the idle/away lane: when that lane closes (you came back) tell it to stop between steps and
         end only its test process. Everything else the runner does already stops by itself."""
         lane = self.current.get("lane")
-        if lane in ("idle", "away") and not self.lane_open(lane, force=skip_wait(Path(self.current["path"])))[0]:
+        if lane not in ("idle", "away"):
+            return
+        ok, why = self.lane_open(lane, force=skip_wait(Path(self.current["path"])))
+        if not ok and not why.startswith("an Away queue job"):  # a queue job only makes the model call wait (gpu lock); it is not you coming back
             fix_tools.request_abort()
 
     def tick(self) -> None:

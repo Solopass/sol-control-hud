@@ -496,3 +496,14 @@ def test_fingerprint_sees_tags_config_and_hooks(env):
     run_git(main, "config", "--unset", "core.hooksPath")
     (main / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\n")
     assert fx.fingerprint(main) != fp
+
+
+@pytest.mark.parametrize("why, aborted", [("an Away queue job is running", False), ("the game guard has the AI off", True),
+                                          ("waits until you've been idle 10 min (or Away mode)", True)])
+def test_daemon_aborts_the_fix_lane_only_when_you_come_back(tmp_path, monkeypatch, why, aborted):
+    from sol_control_hud.chains import chain_daemon
+    monkeypatch.setattr(fx, "WORKTREES", tmp_path / "w")
+    fake = type("D", (), {"current": {"lane": "away", "path": str(tmp_path / "n.md")},
+                          "lane_open": lambda self, lane, force=False: (False, why)})()
+    chain_daemon.Daemon._signal_fix_abort(fake)
+    assert fx.abort_requested() is aborted
