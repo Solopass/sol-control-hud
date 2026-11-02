@@ -892,6 +892,8 @@ class Hub:
         self.collectors["guard"] = Cached(game_guard.state, 3)
         from .data.collectors import ai_ops
         self.collectors["ai_ops"] = Cached(lambda: ai_ops.sample_ai_ops(self.collectors["model_procs"].get()), 1.5)
+        from .data.collectors import ai_usage
+        self.collectors["ai_usage"] = Cached(ai_usage.get_ai_usage, 10)
         from .data.collectors import security
         self.collectors["security"] = Cached(security.get_security_status, 2)
         app = create_app(collectors=self.collectors)
@@ -1121,6 +1123,11 @@ class Hub:
         def display_adapters() -> dict:
             """Which adapters drive a monitor, and what is rendering on one that doesn't (the GPU card polls this)."""
             return {"ok": True, **(self.collectors["displays"].get() or {})}
+
+        @app.get("/api/ai-usage")
+        def ai_usage_list() -> dict:
+            """Daily and weekly Claude + Antigravity consumption from AI Usage Tracker."""
+            return {"ok": True, **(self.collectors["ai_usage"].get() or {})}
 
         @app.get("/api/settings")
         def settings_read() -> dict:

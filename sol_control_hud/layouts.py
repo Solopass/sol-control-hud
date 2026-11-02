@@ -52,6 +52,7 @@ WIDGETS: dict[str, tuple[str, dict[str, list[int]], str]] = {
     "c-work": ("Workspace", {"XS": [1, 1], "M": [1, 1]}, "M"),
     "c-notes": ("Obsidian Notes", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-week": ("This week", {"XS": [1, 1], "S": [1, 1], "M": [1, 1]}, "M"),
+    "c-ai-usage": ("AI Usage", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "L"),
     "c-activity": ("Activity", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
 }
 TICKER_SLIDES = ("HW", "AI", "RUN", "SVC", "DISK", "SYS", "NOTE", "GIT", "NET", "MEDIA", "APPS")
