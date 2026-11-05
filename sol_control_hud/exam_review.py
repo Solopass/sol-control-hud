@@ -790,7 +790,7 @@ class ReviewWatcher:
                 "topic": sol.get("topic") or (cur or {}).get("topic") or "Exam Revision",
                 "explanation": sol.get("explanation") or "",
                 "why_previous_wrong": sol.get("why_previous_wrong") or "",
-                "model": model,
+                "model": sol.get("model") or model,
                 "gemini_retried": True,
                 "at": time.strftime("%H:%M:%S"),
             })

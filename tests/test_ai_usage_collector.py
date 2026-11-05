@@ -1,3 +1,4 @@
+import datetime
 import json
 import pytest
 from fastapi.testclient import TestClient
@@ -14,18 +15,19 @@ def test_ai_usage_collector_missing_file(monkeypatch, tmp_path):
 
 
 def test_ai_usage_collector_with_data(monkeypatch, tmp_path):
+    today_str = datetime.date.today().isoformat()
     summary_path = tmp_path / "summary.json"
     data = {
         "week_id": "2026-W45",
-        "last_updated": "2026-11-02 17:30",
+        "last_updated": f"{today_str} 17:30",
         "weekly_totals": {
             "total_turns": 500,
             "claude": {"exact_tokens": 1200000, "turns": 150},
             "antigravity": {"estimated_tokens": 800000, "turns": 350},
         },
         "daily": {
-            "2026-11-02": {
-                "date": "2026-11-02",
+            today_str: {
+                "date": today_str,
                 "providers": {
                     "claude": {
                         "turn_count": 40,

@@ -24,6 +24,7 @@ import httpx
 from .paths import DATA_DIR, ROOT
 
 DEFAULT_MODEL = "gemini-3.8-flash"
+FALLBACK_MODELS = ("gemini-3.6-flash", "gemini-3-flash-preview")
 API_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 SOLVE_PROMPT_TEMPLATE = """You are an expert exam tutor. Re-examine this practice exam question carefully and provide the definitive correct answer.
@@ -105,6 +106,25 @@ def get_api_key(settings_path: Path | None = None) -> str | None:
     return None
 
 
+def get_model(settings_path: Path | None = None) -> str:
+    """Find Gemini model in env or exam-review / hub settings, defaulting to DEFAULT_MODEL."""
+    model = os.environ.get("GEMINI_MODEL")
+    if model and model.strip():
+        return model.strip()
+
+    paths_to_check = ([settings_path] if settings_path else []) + [DATA_DIR / "exam-review.json", DATA_DIR / "hub-settings.json"]
+    for p in paths_to_check:
+        if p and p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                m = data.get("gemini_model")
+                if m and isinstance(m, str) and m.strip():
+                    return m.strip()
+            except (OSError, ValueError):
+                pass
+    return DEFAULT_MODEL
+
+
 def call_with_retry(func: Callable[[], Any], max_retries: int = 3, base_delay: float = 3.0) -> Any:
     """Executes func with exponential backoff on 429 rate limit errors and network glitches."""
     for attempt in range(max_retries):
@@ -123,6 +143,12 @@ def call_with_retry(func: Callable[[], Any], max_retries: int = 3, base_delay: f
                     time.sleep(wait_time)
                 else:
                     raise GeminiRateLimitError(f"Gemini API rate limit exceeded (429): {e}") from e
+            elif e.response.status_code in (500, 502, 503, 504):
+                if attempt < max_retries - 1:
+                    wait_time = (2 ** attempt) * base_delay
+                    time.sleep(wait_time)
+                else:
+                    raise GeminiError(f"Gemini API temporarily unavailable ({e.response.status_code}): {e}") from e
             else:
                 raise GeminiError(f"HTTP error {e.response.status_code}: {e}") from e
         except (httpx.TimeoutException, httpx.ConnectError) as e:
@@ -133,7 +159,7 @@ def call_with_retry(func: Callable[[], Any], max_retries: int = 3, base_delay: f
                 raise GeminiError(f"Network error communicating with Gemini API: {e}") from e
         except Exception as e:
             err_str = str(e).lower()
-            if ("429" in err_str or "resource_exhausted" in err_str or "quota" in err_str) and attempt < max_retries - 1:
+            if ("429" in err_str or "503" in err_str or "resource_exhausted" in err_str or "quota" in err_str or "unavailable" in err_str) and attempt < max_retries - 1:
                 wait_time = (2 ** attempt) * base_delay
                 time.sleep(wait_time)
             else:
@@ -227,27 +253,48 @@ def solve_with_gemini(
         },
     }
 
-    url = f"{API_URL_TEMPLATE.format(model=model)}?key={key}"
+    primary_model = get_model() if (not model or model == DEFAULT_MODEL) else model
+    models_to_try = [primary_model]
+    for fb in FALLBACK_MODELS:
+        if fb not in models_to_try:
+            models_to_try.append(fb)
 
-    def _execute() -> dict:
-        local_client = client or httpx.Client(timeout=timeout)
+    last_err: Exception | None = None
+    for attempt_model in models_to_try:
+        url = f"{API_URL_TEMPLATE.format(model=attempt_model)}?key={key}"
+
+        def _execute() -> dict:
+            local_client = client or httpx.Client(timeout=timeout)
+            try:
+                resp = local_client.post(url, json=payload)
+                if resp.status_code == 429:
+                    raise GeminiRateLimitError(f"Rate limited (429): {resp.text}")
+                resp.raise_for_status()
+                data = resp.json()
+                candidates = data.get("candidates") or []
+                if not candidates:
+                    raise GeminiError(f"No response candidates returned: {data}")
+                cand_parts = candidates[0].get("content", {}).get("parts", [])
+                raw_text = "".join(p.get("text", "") for p in cand_parts if isinstance(p, dict) and p.get("text"))
+                parsed = _clean_and_parse_json(raw_text)
+                parsed["model"] = attempt_model
+                return parsed
+            finally:
+                if client is None:
+                    local_client.close()
+
         try:
-            resp = local_client.post(url, json=payload)
-            if resp.status_code == 429:
-                raise GeminiRateLimitError(f"Rate limited (429): {resp.text}")
-            resp.raise_for_status()
-            data = resp.json()
-            candidates = data.get("candidates") or []
-            if not candidates:
-                raise GeminiError(f"No response candidates returned: {data}")
-            cand_parts = candidates[0].get("content", {}).get("parts", [])
-            raw_text = "".join(p.get("text", "") for p in cand_parts if isinstance(p, dict) and p.get("text"))
-            return _clean_and_parse_json(raw_text)
-        finally:
-            if client is None:
-                local_client.close()
+            return call_with_retry(_execute)
+        except (GeminiError, httpx.HTTPError) as e:
+            last_err = e
+            err_str = str(e).lower()
+            is_transient = any(tok in err_str for tok in ("503", "500", "502", "504", "unavailable", "timeout", "timed out", "rate limit"))
+            if not is_transient or attempt_model == models_to_try[-1]:
+                raise
 
-    return call_with_retry(_execute)
+    if last_err:
+        raise last_err
+    raise GeminiError("No models available to fulfill request.")
 
 
 def _clean_and_parse_json(text: str) -> dict:
