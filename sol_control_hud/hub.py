@@ -612,6 +612,17 @@ class Hub:
                 self.cmds.put(("review_snip_added", r.get("parts", 2)))
                 self.notify_now("Exam Auto-Scroll", "Captured, stitched, and solved scrolled question")
             return r
+        if target in ("brave_search", "brave"):
+            cur = w.state().get("current")
+            if not cur:
+                return {"ok": False, "why": "No current question to verify"}
+            text = exam_review.format_verification_text(cur)
+            query = exam_review.build_brave_ai_query(cur)
+            import urllib.parse
+            url = f"https://search.brave.com/search?q={urllib.parse.quote_plus(query)}"
+            webbrowser.open_new_tab(url)
+            log(f"exam review: brave_search -> opened {url[:60]}...")
+            return {"ok": True, "why": "Opened Brave AI Search", "query": query, "text": text}
         if target in ("hud", "popup", "toggle_hud"):
             b = body or {}
             enabled = b.get("enabled") if "enabled" in b else not w.state().get("hud_enabled", False)

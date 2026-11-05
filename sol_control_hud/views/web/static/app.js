@@ -1017,8 +1017,47 @@ function renderSecurity(p) {
 // ---------- the stream (only while this tab is visible)
 // the Exam assist card (exam_review.py): solves practice exam questions in real time
 const REV_PILL = { watching: 'ok', reading: '', answering: '', waiting: 'warn', paused: 'warn', error: 'bad', stopped: '' };
+let lastReviewState = null;
+
+function formatVerificationText(c) {
+  if (!c) return '';
+  const parts = [];
+  if (c.question) parts.push(`Question:\n${c.question}`);
+  if (c.exhibit_text) parts.push(`Exhibit / Context:\n${c.exhibit_text}`);
+  if (c.question_type === 'matching' && c.matching_pairs) {
+    parts.push('Matching Pairs:\n' + c.matching_pairs.map(p => `- ${p.source} ➔ ${p.target}`).join('\n'));
+  } else if (c.question_type === 'fill_in_the_blank' && c.blank_answers) {
+    parts.push('Command / Value:\n' + c.blank_answers.join('\n'));
+  } else if (c.question_type === 'ordering' && c.ordered_sequence) {
+    parts.push('Ordered Sequence:\n' + c.ordered_sequence.join('\n'));
+  } else if (c.choices && c.choices.length) {
+    parts.push('Choices:\n' + c.choices.map(o => `${o.label}. ${o.text}`).join('\n'));
+  }
+  const ans = c.answer || (c.answer_labels || []).join(', ');
+  if (ans) parts.push(`Suggested Answer:\n${ans}`);
+  if (c.topic) parts.push(`Topic: ${c.topic}`);
+  if (c.explanation) parts.push(`Explanation:\n${c.explanation}`);
+  return parts.join('\n\n');
+}
+
+function buildBraveAiQuery(c) {
+  if (!c) return '';
+  const q = (c.question || '').trim();
+  let combined = q;
+  if (c.choices && c.choices.length) {
+    combined = `${q} ${c.choices.map(o => `${o.label}) ${o.text}`).join(' ')}`.trim();
+  } else if (c.answer) {
+    combined = `${q} Answer: ${c.answer}`.trim();
+  }
+  if (combined.length > 350) {
+    combined = combined.substring(0, 350).replace(/\s+\S*$/, '');
+  }
+  return `${combined} ??`;
+}
+
 function renderReview(p) {
   const r = p.review; if (!r) return;
+  lastReviewState = r;
   const st = r.running ? r.status : 'stopped', pill = $('revStatus');
   pill.textContent = st; pill.className = `pill ${REV_PILL[st] ?? ''}`;
   pill.style.color = ['reading', 'answering'].includes(st) ? 'var(--cyan)' : '';
@@ -1032,6 +1071,7 @@ function renderReview(p) {
   $('revBox').textContent = r.rect ? `Box ${r.rect[2]}×${r.rect[3]} at (${r.rect[0]}, ${r.rect[1]}) · looks every 3 s · real-time exam solver` : 'No box yet: drag a box around the question area, then Set box & start.';
   const c = r.current, cur = $('revCurrent');
   const retryTop = $('revRetryBtn'); if (retryTop) retryTop.disabled = !c;
+  const braveTop = $('revBraveTopBtn'); if (braveTop) braveTop.disabled = !c;
   const snipBtn = $('revSnipBtn'); if (snipBtn) { snipBtn.textContent = r.parts_count > 1 ? `➕ Add Snip (${r.parts_count} parts)` : '➕ Add Snip (Scroll)'; }
   const hudCb = $('revToggleHud'); if (hudCb && document.activeElement !== hudCb) { hudCb.checked = !!r.hud_enabled; }
   cur.hidden = !c;
@@ -1082,8 +1122,9 @@ function renderReview(p) {
     const body = `${whyWrong}<p class="rev-explain">${esc(c.explanation || '')}</p>`;
     const autoScrollBtn = `<button class="mini primary" style="margin-top:8px" data-act="review" data-target="auto_scroll" title="Simulate scroll down, stitch, and solve">⚡ Auto-Scroll & Solve</button>`;
     const retryBtn = isGemini ? '' : `<button class="mini danger" style="margin-top:8px" data-act="review" data-target="retry_gemini" title="Verify or re-solve with Gemini 3.8 Flash">🔍 Verify / Retry (Gemini)</button>`;
+    const braveBtn = `<button class="mini" style="margin-top:8px;background:#ea580c;color:#fff" data-act="review" data-target="brave_search" title="Copy question & choices to clipboard and search in Brave using AI mode">🦁 Brave AI Search</button>`;
     setHTML(cur, `<div class="row"><b>${head}</b><span class="dim small">${esc(c.at || '')}${c.seconds ? ` · ${c.seconds} s` : ''}</span></div>` +
-      `<div class="rev-q">${esc(c.question)}</div>${exhibitHtml}${contentHtml}${body}<div style="display:flex;gap:8px">${autoScrollBtn}${retryBtn}</div>`);
+      `<div class="rev-q">${esc(c.question)}</div>${exhibitHtml}${contentHtml}${body}<div style="display:flex;gap:8px;flex-wrap:wrap">${autoScrollBtn}${retryBtn}${braveBtn}</div>`);
   }
   setHTML($('revHistory'), (r.history || []).map((h) => `<div class="item"><span>${h.n}. ${esc(h.topic || h.question)}</span>` +
     `<span style="color:${h.gemini ? 'var(--cyan)' : 'var(--green)'}">${h.gemini ? '✨' : '✓'}</span></div>`).join('') || '<div class="empty">nothing yet</div>');
@@ -1121,6 +1162,22 @@ document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]');
   if (b) {
     e.stopPropagation();
+    if (b.dataset.act === 'review' && b.dataset.target === 'brave_search') {
+      const c = lastReviewState && lastReviewState.current;
+      if (c) {
+        const text = formatVerificationText(c);
+        if (text && navigator.clipboard) {
+          navigator.clipboard.writeText(text).catch(() => {});
+        }
+        const q = buildBraveAiQuery(c);
+        if (q) {
+          window.open('https://search.brave.com/search?q=' + encodeURIComponent(q), '_blank');
+        }
+        toast('Copied to clipboard & opened Brave AI');
+        post('/api/action', { action: 'review', target: 'brave_search', client_handled: true });
+        return;
+      }
+    }
     if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
     const r = await post('/api/action', { action: b.dataset.act, target: b.dataset.target || '' });
     if (r.why) toast(r.why);

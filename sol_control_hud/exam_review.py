@@ -539,6 +539,65 @@ def append_gemini_retry(item: dict, notes_dir: Path | None = None, now: datetime
     return path
 
 
+def format_verification_text(item: dict) -> str:
+    """Formats full question details for copying to clipboard to verify in AI/search."""
+    parts = []
+    q = (item.get("question") or "").strip()
+    if q:
+        parts.append(f"Question:\n{q}")
+
+    exhibit = (item.get("exhibit_text") or "").strip()
+    if exhibit:
+        parts.append(f"Exhibit / Context:\n{exhibit}")
+
+    q_type = item.get("question_type", "multiple_choice")
+    if q_type == "matching" and item.get("matching_pairs"):
+        pairs = "\n".join(f"- {p.get('source')} ➔ {p.get('target')}" for p in item["matching_pairs"])
+        parts.append(f"Matching Pairs:\n{pairs}")
+    elif q_type == "fill_in_the_blank" and item.get("blank_answers"):
+        blanks = "\n".join(item["blank_answers"])
+        parts.append(f"Command / Value:\n{blanks}")
+    elif q_type == "ordering" and item.get("ordered_sequence"):
+        seq = "\n".join(item["ordered_sequence"])
+        parts.append(f"Ordered Sequence:\n{seq}")
+    else:
+        choices = item.get("choices") or []
+        if choices:
+            ch_lines = "\n".join(f"{c['label']}. {c['text']}" for c in choices)
+            parts.append(f"Choices:\n{ch_lines}")
+
+    ans = item.get("answer") or item.get("correct")
+    if ans:
+        parts.append(f"Suggested Answer:\n{ans}")
+
+    topic = item.get("topic")
+    if topic:
+        parts.append(f"Topic: {topic}")
+
+    explanation = item.get("explanation")
+    if explanation:
+        parts.append(f"Explanation:\n{explanation}")
+
+    return "\n\n".join(parts)
+
+
+def build_brave_ai_query(item: dict) -> str:
+    """Builds a query string ending in '??' to activate Brave Search's AI answer mode."""
+    q = (item.get("question") or "").strip()
+    choices = item.get("choices") or []
+    if choices:
+        choices_str = " ".join(f"{c['label']}) {c['text']}" for c in choices)
+        combined = f"{q} {choices_str}".strip()
+    else:
+        ans = item.get("answer") or item.get("correct") or ""
+        combined = f"{q} {ans}".strip() if ans else q
+
+    if len(combined) > 350:
+        combined = combined[:350].rsplit(" ", 1)[0]
+
+    return f"{combined} ??"
+
+
 class ReviewWatcher:
     """The watch loop and its state. Thread-safe: the dashboard, the ticker and the tray read `state()`."""
 

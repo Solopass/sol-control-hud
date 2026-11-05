@@ -515,5 +515,75 @@ def test_retry_gemini_preserves_stitched_after_solve(tmp_path, monkeypatch):
     assert captured[0] == stitched
 
 
+def test_format_verification_text_and_brave_query():
+    item_mc = {
+        "question": "Which layer of the OSI model does IP operate at?",
+        "question_type": "multiple_choice",
+        "choices": [
+            {"label": "A", "text": "Data Link"},
+            {"label": "B", "text": "Network"},
+            {"label": "C", "text": "Transport"},
+            {"label": "D", "text": "Session"},
+        ],
+        "answer": "B. Network",
+        "topic": "OSI Model",
+        "explanation": "IP is a Layer 3 network protocol.",
+    }
+    text = er.format_verification_text(item_mc)
+    assert "Question:\nWhich layer of the OSI model does IP operate at?" in text
+    assert "A. Data Link" in text
+    assert "B. Network" in text
+    assert "Suggested Answer:\nB. Network" in text
+    assert "Topic: OSI Model" in text
+    assert "Explanation:\nIP is a Layer 3 network protocol." in text
+
+    query = er.build_brave_ai_query(item_mc)
+    assert query.endswith("??")
+    assert "Which layer of the OSI model" in query
+    assert "A) Data Link" in query
+
+    # Non-MC formats: matching & fill-in-blank
+    item_matching = {
+        "question": "Match the protocols to their port numbers.",
+        "question_type": "matching",
+        "matching_pairs": [
+            {"source": "HTTP", "target": "80"},
+            {"source": "HTTPS", "target": "443"},
+        ],
+        "answer": "HTTP ➔ 80; HTTPS ➔ 443",
+    }
+    matching_text = er.format_verification_text(item_matching)
+    assert "- HTTP ➔ 80" in matching_text
+    assert "- HTTPS ➔ 443" in matching_text
+
+    item_blank = {
+        "question": "Enter the command to display routing table.",
+        "question_type": "fill_in_the_blank",
+        "blank_answers": ["show ip route"],
+        "answer": "show ip route",
+    }
+    blank_text = er.format_verification_text(item_blank)
+    assert "Command / Value:\nshow ip route" in blank_text
+
+
+def test_hub_review_action_brave_search(tmp_path, monkeypatch):
+    from sol_control_hud import hub
+
+    opened_urls = []
+    monkeypatch.setattr("webbrowser.open_new_tab", lambda url: opened_urls.append(url))
+
+    w, client = make(tmp_path, [graded()])
+    assert w._process(b"initial_png", force=True) is True
+    monkeypatch.setattr("sol_control_hud.exam_review.watcher", lambda: w)
+
+    # Calling review_action directly
+    res = hub.Hub.review_action(None, "brave_search")
+    assert res["ok"] is True
+    assert "https://search.brave.com/search?q=" in opened_urls[0]
+    assert "%3F%3F" in opened_urls[0] or "??" in opened_urls[0]
+
+
+
+
 
 

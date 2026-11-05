@@ -41,6 +41,7 @@ class ExamHudWindow:
         self.snip_btn: tk.Button | None = None
         self.auto_scroll_btn: tk.Button | None = None
         self.copy_btn: tk.Button | None = None
+        self.brave_btn: tk.Button | None = None
         self.txt: tk.Text | None = None
         self._visible = False
         self._last_item: dict | None = None
@@ -207,6 +208,22 @@ class ExamHudWindow:
         )
         self.auto_scroll_btn.pack(side=tk.LEFT, padx=(0, 8))
 
+        self.brave_btn = tk.Button(
+            btn_frame,
+            text="🦁 Brave AI",
+            command=self._on_click_brave,
+            bg="#ea580c",
+            fg="#ffffff",
+            activebackground="#c2410c",
+            activeforeground="#ffffff",
+            bd=0,
+            padx=8,
+            pady=4,
+            font=("Segoe UI", 9, "bold"),
+            cursor="hand2",
+        )
+        self.brave_btn.pack(side=tk.LEFT, padx=(0, 8))
+
         self.copy_btn = tk.Button(
             btn_frame,
             text="📋 Copy Command",
@@ -234,6 +251,7 @@ class ExamHudWindow:
         # Bindings
         self.win.bind("<Escape>", lambda e: self.hide())
         self.win.bind("<Control-r>", lambda e: self._on_click_retry())
+        self.win.bind("<Control-b>", lambda e: self._on_click_brave())
         self.win.bind("<Alt-Down>", lambda e: self._on_click_auto_scroll())
         self.win.bind("<Control-Down>", lambda e: self._on_click_auto_scroll())
         self.win.protocol("WM_DELETE_WINDOW", self.hide)
@@ -302,6 +320,10 @@ class ExamHudWindow:
 
         if self.snip_btn:
             self.snip_btn.config(text="📜 Snip Scroll")
+
+        if self.brave_btn:
+            has_q = bool(item and (item.get("question") or item.get("answer")))
+            self.brave_btn.config(state=tk.NORMAL if has_q else tk.DISABLED)
 
         # Show Copy Command button for fill_in_the_blank, otherwise hide it
         if self.copy_btn:
@@ -396,6 +418,31 @@ class ExamHudWindow:
                     self.win.after(1500, lambda: self.copy_btn.config(text="📋 Copy Command") if self.copy_btn else None)
             except Exception:
                 pass
+
+    def _on_click_brave(self) -> None:
+        if not self._last_item or not self.win:
+            return
+        from .. import exam_review
+        import urllib.parse
+        import webbrowser
+
+        text = exam_review.format_verification_text(self._last_item)
+        query = exam_review.build_brave_ai_query(self._last_item)
+        if text:
+            try:
+                self.win.clipboard_clear()
+                self.win.clipboard_append(text)
+            except Exception:
+                pass
+        if query:
+            url = f"https://search.brave.com/search?q={urllib.parse.quote_plus(query)}"
+            try:
+                webbrowser.open_new_tab(url)
+            except Exception:
+                pass
+        if self.brave_btn:
+            self.brave_btn.config(text="✓ Copied & Opened!")
+            self.win.after(2000, lambda: self.brave_btn.config(text="🦁 Brave AI") if self.brave_btn else None)
 
     def _on_click_retry(self) -> None:
         if self.on_retry_gemini:
