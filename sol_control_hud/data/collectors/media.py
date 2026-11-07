@@ -13,6 +13,11 @@ import time
 from ...swallow import note as _swallowed
 
 SCRIPT_PATH = Path(__file__).resolve().parent / "media_session.ps1"
+# The same reader as a small Go binary (D:\Workspace\sol-net, cmd/sol-media; 2026-11-07): same flags and output,
+# ~19 MB instead of a ~127 MB PowerShell host. Used when it exists; the .ps1 stays as the fallback.
+EXE_PATH = Path(os.environ.get("SOL_MEDIA_EXE", r"D:\Workspace\sol-net\bin\sol-media.exe"))
+EXE_QUICK_FAIL_S = 10.0    # the exe ended this soon without printing a line: a failed start (blocked, broken)
+EXE_MAX_QUICK_FAILS = 3    # after this many in a row, use the .ps1 until the HUD restarts
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
@@ -67,12 +72,44 @@ def parse_line(line: str) -> MediaInfo:
 class MediaCollector:
     """Polls Windows Media Control sessions in a background worker thread."""
 
-    def __init__(self, interval: float = 3.5):
+    def __init__(self, interval: float = 3.5, exe_path: Path | None = None, script_path: Path | None = None):
         self.interval = interval
+        self.exe_path = EXE_PATH if exe_path is None else exe_path
+        self.script_path = SCRIPT_PATH if script_path is None else script_path
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._latest = MediaInfo()
+        self._exe_fails = 0
+
+    def using_exe(self) -> bool:
+        return self._exe_fails < EXE_MAX_QUICK_FAILS and self.exe_path.exists()
+
+    def command(self, every: float | None = None) -> list[str] | None:
+        """The reader to run: the Go exe while it works, else the .ps1; None when neither exists."""
+        if self.using_exe():
+            cmd = [str(self.exe_path)]
+        elif self.script_path.exists():
+            cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(self.script_path)]
+        else:
+            return None
+        if every is not None:
+            cmd += ["-Every", str(every), "-ParentPid", str(os.getpid())]
+        return cmd
+
+    def note_exit(self, was_exe: bool, ran_s: float, lines: int) -> None:
+        """After a reader ends: count quick failures of the exe; one good run resets the count."""
+        if not was_exe:
+            return
+        if lines == 0 and ran_s < EXE_QUICK_FAIL_S:
+            self._exe_fails += 1
+            if self._exe_fails == EXE_MAX_QUICK_FAILS:
+                try:   # swallow.note records the exception being handled, so give it one: logged once, now on the .ps1
+                    raise RuntimeError(f"{self.exe_path.name} failed to start {EXE_MAX_QUICK_FAILS}x; using the .ps1")
+                except RuntimeError:
+                    _swallowed("media.MediaCollector.exe_fallback")
+        else:
+            self._exe_fails = 0
 
     def start(self) -> None:
         if self._thread is None:
@@ -88,14 +125,13 @@ class MediaCollector:
             return self._latest
 
     def poll_once(self) -> MediaInfo:
-        """One sample from a fresh PowerShell (tests / one-off use; the collector keeps one process running)."""
-        if not SCRIPT_PATH.exists():
+        """One sample from a fresh reader (tests / one-off use; the collector keeps one process running)."""
+        cmd = self.command()
+        if cmd is None:
             return MediaInfo()
         try:
-            res = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SCRIPT_PATH)],
-                capture_output=True, text=True, timeout=5, creationflags=NO_WINDOW,
-            )
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                 timeout=5, creationflags=NO_WINDOW)
             if res.returncode == 0 and res.stdout.strip():
                 return self._store(parse_line(res.stdout.strip()))
         except Exception:
@@ -110,23 +146,29 @@ class MediaCollector:
     def _run(self) -> None:
         # One long-running reader: it prints a line every `interval` s. Before 09-26 a new PowerShell started every
         # 3.5 s (~1000 processes an hour). If it dies, start it again after a pause.
-        while not self._stop.is_set() and SCRIPT_PATH.exists():
+        while not self._stop.is_set():
+            was_exe = self.using_exe()
+            cmd = self.command(self.interval)
+            if cmd is None:
+                return
+            started, lines = time.monotonic(), 0
             try:
                 self._proc = subprocess.Popen(
-                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SCRIPT_PATH),
-                     "-Every", str(self.interval), "-ParentPid", str(os.getpid())],
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
                     text=True, encoding="utf-8", errors="replace", creationflags=NO_WINDOW)
                 for line in self._proc.stdout:
                     if self._stop.is_set():
                         break
                     if line.strip():
+                        lines += 1
                         self._store(parse_line(line.strip()))
             except Exception:
                 _swallowed("media.MediaCollector._run")
             finally:
                 self._kill()
-            self._stop.wait(15.0)
+            self.note_exit(was_exe, time.monotonic() - started, lines)
+            # a failed exe start is retried soon (it falls back to the .ps1 after a few); a reader that ran: 15 s
+            self._stop.wait(2.0 if was_exe and lines == 0 else 15.0)
 
     def _kill(self) -> None:
         p = getattr(self, "_proc", None)
