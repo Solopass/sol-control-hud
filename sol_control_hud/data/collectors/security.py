@@ -1,5 +1,6 @@
 """Cyber Security & Canary Watchdog collector for SOL HUD.
-Talks to sol-deck (:5000) authenticated with X-Deck-PIN, and manages
+Talks to sol-deck (:5000) over loopback (sol-deck trusts SOL itself, so no PIN
+is needed or stored here), and manages
 the sol-deck background service lifecycle on SOL PC.
 """
 from __future__ import annotations
@@ -11,7 +12,6 @@ import httpx
 import psutil
 
 DECK_URL = "http://127.0.0.1:5000"
-DECK_PIN = "4821"
 DECK_DIR = Path("D:/Workspace/sol-deck")
 RUN_DECK_PS1 = DECK_DIR / "run-deck.ps1"
 
@@ -21,7 +21,7 @@ _HTTP: httpx.Client | None = None
 def _client() -> httpx.Client:
     global _HTTP
     if _HTTP is None:
-        _HTTP = httpx.Client(headers={"X-Deck-PIN": DECK_PIN})
+        _HTTP = httpx.Client()
     return _HTTP
 
 
