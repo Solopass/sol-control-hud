@@ -15,7 +15,8 @@ How, with no password and no new process:
 - Devices: the Windows ARP table (GetIpNetTable, no process started), names from Pi-hole reverse DNS, plus the names
   sol-deck's watchdog already gave in its known_devices.json (read only). Seen devices are remembered in
   data/lan-devices.json; a MAC never seen before is a "new device" for a day.
-Stats that need Pi-hole's API (queries today, pause blocking) wait for an app password in a .env (plan P1 part 2).
+- Stats (queries today, % blocked, pause/resume blocking) come through sol-deck (127.0.0.1:5000), which already
+  holds the Pi-hole app password in its own .env, so the HUD stores no Pi-hole secret. Once a minute at most.
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ import socket
 import struct
 import threading
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +40,8 @@ PIHOLE_HOSTS = tuple(h.strip() for h in os.environ.get("SOL_PIHOLE_HOSTS", "192.
 SUBNET_PREFIX = os.environ.get("SOL_LAN_PREFIX", "192.168.0.")
 UP_EVERY, UPSTREAM_EVERY, BLOCK_EVERY = 30.0, 300.0, 600.0
 UPSTREAM_NAME, BLOCKED_NAME = "example.com", "doubleclick.net"
+DECK_URL = os.environ.get("SOL_DECK_URL", "http://127.0.0.1:5000")
+STATS_EVERY = 60.0
 SLOW_MS = 150.0
 DEVICES_FILE = DATA_DIR / "lan-devices.json"
 DECK_DEVICES = Path(r"D:\Workspace\sol-deck\data\known_devices.json")
@@ -153,11 +157,83 @@ def os_resolve(name: str) -> tuple[bool, list[str]]:
         return False, []
 
 
-class PiholeMonitor:
-    """Probes each Pi-hole address on its own schedule; `status()` only reads what the probes found."""
+def _deck_json(path: str, body: dict | None = None, timeout: float = 4.0) -> dict | None:
+    """GET (or POST `body`) sol-deck over loopback, which needs no PIN. None = sol-deck unreachable."""
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(DECK_URL + path, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8", "replace"))
+        except Exception:
+            _swallowed("network._deck_json.http_error")
+            return {"ok": False, "error": f"HTTP {e.code}"}
+    except Exception:
+        _swallowed("network._deck_json")
+        return None
 
-    def __init__(self, hosts=PIHOLE_HOSTS, info=pihole_info, query=dns_query, resolve=os_resolve, clock=time.time):
+
+def deck_pihole_stats() -> dict | None:
+    return _deck_json("/api/pihole/stats")
+
+
+def stats_from_deck(d: dict | None) -> dict:
+    """sol-deck's /api/pihole/stats -> the card's numbers. state: ok | no-password | no-deck | error."""
+    if d is None:
+        return {"state": "no-deck", "why": "sol-deck isn't running"}
+    if not d.get("ok"):
+        err = str(d.get("error") or "unknown error")
+        if "PIHOLE_APP_PASSWORD" in err:
+            return {"state": "no-password", "why": "needs a Pi-hole app password in sol-deck's .env"}
+        return {"state": "error", "why": err[:120]}
+    s = d.get("summary") or {}
+    q = s.get("queries") or {}
+    pct = q.get("percent_blocked")
+    return {
+        "state": "ok",
+        "blocking": d.get("blocking"),
+        "timer": int(d.get("timer") or 0),
+        "queries": q.get("total"),
+        "blocked": q.get("blocked"),
+        "percent": round(pct, 1) if isinstance(pct, (int, float)) else None,
+        "domains": (s.get("gravity") or {}).get("domains_being_blocked"),
+        "clients": (s.get("clients") or {}).get("active"),
+        "top_blocked": [x.get("domain") for x in (d.get("top_blocked") or []) if isinstance(x, dict) and x.get("domain")][:5],
+    }
+
+
+def pihole_pause(seconds: int = 300) -> dict:
+    """Pause Pi-hole blocking for `seconds` (through sol-deck)."""
+    r = _deck_json("/api/pihole/toggle", {"action": "snooze", "duration": int(seconds)})
+    if r is None:
+        return {"ok": False, "why": "sol-deck isn't running"}
+    if r.get("ok"):
+        _PIHOLE.refresh_stats()
+        return {"ok": True, "why": f"Pi-hole blocking paused for {int(seconds) // 60} min"}
+    return {"ok": False, "why": stats_from_deck(r).get("why") or "Pi-hole refused"}
+
+
+def pihole_resume() -> dict:
+    """Turn Pi-hole blocking back on now (through sol-deck)."""
+    r = _deck_json("/api/pihole/toggle", {"action": "enable"})
+    if r is None:
+        return {"ok": False, "why": "sol-deck isn't running"}
+    if r.get("ok"):
+        _PIHOLE.refresh_stats()
+        return {"ok": True, "why": "Pi-hole blocking is back on"}
+    return {"ok": False, "why": stats_from_deck(r).get("why") or "Pi-hole refused"}
+
+
+class PiholeMonitor:
+    """Probes each Pi-hole address on its own schedule; `status()` only reads what the probes found.
+    `stats` (sol-deck's Pi-hole numbers) is off unless given, so tests never make real HTTP calls."""
+
+    def __init__(self, hosts=PIHOLE_HOSTS, info=pihole_info, query=dns_query, resolve=os_resolve, clock=time.time,
+                 stats=None):
         self.hosts, self._info, self._query, self._resolve, self._clock = tuple(hosts), info, query, resolve, clock
+        self._stats_fn, self._stats, self._stats_at = stats, {"state": "off"}, NEVER
         self._lock = threading.Lock()
         self._hosts = {h: {"ip": h, "up": None, "dns": None, "ms": None, "direct": None, "checked": 0.0, "_at": NEVER}
                        for h in self.hosts}
@@ -175,6 +251,10 @@ class PiholeMonitor:
                           checked=now, _at=now)
         if not any(st["up"] for st in self._hosts.values()):
             return
+        if self._stats_fn is not None and now - self._stats_at >= STATS_EVERY:
+            st = stats_from_deck(self._stats_fn())
+            with self._lock:
+                self._stats, self._stats_at = st, now
         if now - self._pc["_upstream_at"] >= UPSTREAM_EVERY:
             ok, ips = self._resolve(UPSTREAM_NAME)
             with self._lock:
@@ -188,7 +268,15 @@ class PiholeMonitor:
         with self._lock:
             hosts = [{k: v for k, v in st.items() if not k.startswith("_")} for st in self._hosts.values()]
             pc = {k: v for k, v in self._pc.items() if not k.startswith("_")}
-        return summarize(hosts, pc)
+            stats = dict(self._stats)
+        out = summarize(hosts, pc)
+        out["stats"] = stats
+        return out
+
+    def refresh_stats(self) -> None:
+        """Fetch the stats on the next probe (after a pause/resume)."""
+        with self._lock:
+            self._stats_at = NEVER
 
 
 def summarize(hosts: list[dict], pc: dict | None = None) -> dict:
@@ -366,7 +454,7 @@ class LanInventory:
 
 
 # ---------------------------------------------------------------------------------------------------- one shared state
-_PIHOLE = PiholeMonitor()
+_PIHOLE = PiholeMonitor(stats=deck_pihole_stats)
 _LAN: LanInventory | None = None
 _last: dict = {}
 _last_at = 0.0

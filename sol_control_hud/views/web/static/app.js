@@ -834,6 +834,23 @@ function renderNetwork(p) {
   const pc = ph.pc || {};
   setHTML($('netPc'), `${yn(pc.blocking, 'blocking', 'not blocking')} · ${yn(pc.upstream, 'upstream ok', 'upstream fails')}`);
   const note = $('netNote'); note.hidden = !ph.note; note.textContent = ph.note || '';
+  // Stats and pause/resume come through sol-deck, which holds the Pi-hole app password.
+  const st = ph.stats || {}, statsEl = $('netStats'), acts = $('netStatsActs');
+  if (statsEl && acts) {
+    if (st.state === 'ok') {
+      const n = (v) => (v == null ? '–' : Number(v).toLocaleString());
+      const paused = st.blocking === false;
+      setHTML(statsEl, `${n(st.queries)} queries · ${st.percent ?? '–'}% blocked`
+        + (paused ? ` · <span style="color:var(--amber)">paused${st.timer ? `, back in ${Math.ceil(st.timer / 60)} min` : ''}</span>` : ''));
+      $('netPauseBtn').hidden = paused;
+      $('netResumeBtn').hidden = !paused;
+      $('netTop').textContent = (st.top_blocked || []).length ? `top blocked: ${st.top_blocked.slice(0, 3).join(', ')}` : '';
+      acts.hidden = false;
+    } else {
+      statsEl.innerHTML = `<span class="dim">${esc(st.why || '–')}</span>`;
+      acts.hidden = true;
+    }
+  }
   const devs = lan.devices || [];
   $('netCount').textContent = devs.length ? `${lan.online || 0} online · ${devs.length} known${lan.new ? ` · ${lan.new} new` : ''}` : '';
   setHTML($('netDevs'), devs.map((d) => {
@@ -842,6 +859,29 @@ function renderNetwork(p) {
     const tip = `${d.mac} · first seen ${d.first_seen}${d.private ? ' · private (randomised) MAC: may change' : ''}`;
     return `<span class="ip ${c}">${esc(d.ip)}</span><span class="${c}" title="${esc(tip)}">${d.new ? 'NEW · ' : ''}${esc(d.name || (d.private ? 'phone/tablet (private MAC)' : 'unnamed'))}</span><span class="dim ${c}">${seen}</span>`;
   }).join('') || '<span class="dim">scanning…</span>');
+}
+
+// The iPad deck's own report (sol-deck's diag.js -> /api/clientlog): pairing, input
+// lag p50/p95, transport, errors. Empty when sol-deck sends none.
+function deckHealthHtml(client) {
+  const parts = [];
+  parts.push(client.paired
+    ? '<span style="color:var(--ok)">🔑 paired</span>'
+    : '<span style="color:var(--warn)">not paired</span>');
+  const h = client.health;
+  if (h) {
+    if (h.p50_ms != null && h.p95_ms != null) {
+      const slow = h.p95_ms > 250;
+      parts.push(`<span style="color:var(${slow ? '--warn' : '--ok'})">lag ${Math.round(h.p50_ms)}/${Math.round(h.p95_ms)} ms</span>`);
+    }
+    if (h.transport) parts.push(esc(h.transport));
+    const errs = (h.errors || 0) + (h.stream_errors || 0);
+    if (errs) parts.push(`<span style="color:var(--warn)">${errs} error${errs === 1 ? '' : 's'}</span>`);
+    if (h.ws_drops) parts.push(`<span style="color:var(--warn)">${h.ws_drops} socket drop${h.ws_drops === 1 ? '' : 's'}</span>`);
+    const age = h.age_sec < 90 ? `${h.age_sec}s` : h.age_sec < 5400 ? `${Math.round(h.age_sec / 60)}m` : `${Math.round(h.age_sec / 3600)}h`;
+    parts.push(`report ${age} ago`);
+  }
+  return ` <span class="dim">· ${parts.join(' · ')}</span>`;
 }
 
 function renderSecurity(p) {
@@ -900,10 +940,11 @@ function renderSecurity(p) {
     deckTitle.innerHTML = `SOL Deck Service (:5000): <strong style="color:var(--ok)">ONLINE</strong> <span class="dim">(PID ${proc.pid || '–'} · ${ramStr} RAM · up ${uptimeStr})</span>`;
   }
   if (ipadStatus) {
+    const health = deckHealthHtml(client);
     if (client.active) {
-      ipadStatus.innerHTML = `📱 <strong style="color:var(--ok)">${esc(client.name || 'iPad mini')} (${esc(client.ip || '192.168.0.25')}):</strong> <span style="color:var(--ok)">${esc(client.status_text || 'Connected')}</span> <span class="dim">· ${client.request_count || 0} reqs</span>`;
+      ipadStatus.innerHTML = `📱 <strong style="color:var(--ok)">${esc(client.name || 'iPad mini')} (${esc(client.ip || '192.168.0.124')}):</strong> <span style="color:var(--ok)">${esc(client.status_text || 'Connected')}</span> <span class="dim">· ${client.request_count || 0} reqs</span>${health}`;
     } else if (client.ip) {
-      ipadStatus.innerHTML = `📱 <span class="dim">${esc(client.name || 'iPad mini')} (${esc(client.ip)}):</span> <span style="color:var(--warn)">${esc(client.status_text || 'Standby')}</span>`;
+      ipadStatus.innerHTML = `📱 <span class="dim">${esc(client.name || 'iPad mini')} (${esc(client.ip)}):</span> <span style="color:var(--warn)">${esc(client.status_text || 'Standby')}</span>${health}`;
     } else {
       ipadStatus.innerHTML = `📱 <span class="dim">iPad mini: Waiting for client connection...</span>`;
     }

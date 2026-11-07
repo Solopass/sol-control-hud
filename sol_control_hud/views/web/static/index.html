@@ -470,6 +470,14 @@
     <div id="netHosts"></div>
     <div class="row"><span>This PC: blocking · upstream</span><span id="netPc">–</span></div>
     <div class="net-note dim" id="netNote" hidden></div>
+    <div class="row"><span>Today (via sol-deck)</span><span id="netStats">–</span></div>
+    <div class="row" id="netStatsActs" hidden>
+      <span class="dim" id="netTop"></span>
+      <span>
+        <button class="mini ghost" id="netPauseBtn" data-act="pihole_pause" title="Pause ad blocking on the whole network for 5 minutes">⏸ Pause 5 min</button>
+        <button class="mini ghost" id="netResumeBtn" data-act="pihole_resume" title="Turn ad blocking back on now" hidden>▶ Resume</button>
+      </span>
+    </div>
     <h3 class="net-sub">Devices <span class="dim" id="netCount"></span></h3>
     <div class="net-devs" id="netDevs"></div>
   </article>

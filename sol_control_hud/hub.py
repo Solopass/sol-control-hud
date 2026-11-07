@@ -333,6 +333,11 @@ class Hub:
                 return {"ok": True, "why": why}
             except models_ctl.ModelError as e:
                 return {"ok": False, "why": str(e)}
+        if action in ("pihole_pause", "pihole_resume"):
+            from .data.collectors import network
+            res = network.pihole_pause(300) if action == "pihole_pause" else network.pihole_resume()
+            log(f"network: {action} -> {res.get('why')}")
+            return res
         if action in ("security_toggle", "security_test", "security_ack", "deck_start", "deck_stop", "deck_restart"):
             from .data.collectors import security
             if action == "security_toggle":

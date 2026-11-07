@@ -160,7 +160,7 @@ def get_security_status(timeout: float = 1.5) -> dict:
             if isinstance(proc, dict) and proc_status.get("running"):
                 proc["running"] = True
             client = data.get("client") or {
-                "ip": "192.168.0.25",
+                "ip": "192.168.0.124",
                 "name": "iPad mini 1",
                 "active": False,
                 "status_text": "No recent requests",
@@ -181,7 +181,7 @@ def get_security_status(timeout: float = 1.5) -> dict:
             "status": "error",
             "error": f"sol-deck responded with HTTP {r.status_code}",
             "process": proc_status,
-            "client": {"ip": "192.168.0.25", "name": "iPad mini 1", "active": False, "status_text": f"HTTP {r.status_code}"},
+            "client": {"ip": "192.168.0.124", "name": "iPad mini 1", "active": False, "status_text": f"HTTP {r.status_code}"},
             "summary": {"status": "error", "canary_active": False},
         }
     except Exception as e:
@@ -190,7 +190,7 @@ def get_security_status(timeout: float = 1.5) -> dict:
             "status": "offline",
             "error": f"{type(e).__name__}: {e}",
             "process": proc_status,
-            "client": {"ip": "192.168.0.25", "name": "iPad mini 1", "active": False, "status_text": "Service Offline (:5000)"},
+            "client": {"ip": "192.168.0.124", "name": "iPad mini 1", "active": False, "status_text": "Service Offline (:5000)"},
             "summary": {"status": "offline", "canary_active": False},
         }
 

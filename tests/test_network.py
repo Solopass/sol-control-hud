@@ -242,3 +242,70 @@ def test_monitor_starts_once():
         n.threading.Thread = real
         n._thread = None
     assert started == [1]
+
+
+# ---- Pi-hole stats through sol-deck (2026-11-07)
+
+_DECK_OK = {"ok": True, "online": True, "blocking": True, "timer": 0,
+            "summary": {"queries": {"total": 12345, "blocked": 2100, "percent_blocked": 17.0123},
+                        "gravity": {"domains_being_blocked": 150000}, "clients": {"active": 9}},
+            "top_blocked": [{"domain": "ads.example"}, {"domain": "track.example"}, {"bad": 1}]}
+
+
+def test_stats_from_deck_shapes():
+    s = n.stats_from_deck(_DECK_OK)
+    assert s["state"] == "ok" and s["queries"] == 12345 and s["percent"] == 17.0 and s["domains"] == 150000
+    assert s["clients"] == 9 and s["top_blocked"] == ["ads.example", "track.example"] and s["blocking"] is True
+    assert n.stats_from_deck(None)["state"] == "no-deck"
+    assert n.stats_from_deck({"ok": False, "error": "PIHOLE_APP_PASSWORD not configured in .env"})["state"] == "no-password"
+    assert n.stats_from_deck({"ok": False, "error": "boom"}) == {"state": "error", "why": "boom"}
+
+
+def test_monitor_fetches_stats_once_a_minute_and_only_when_up():
+    t = [1000.0]
+    calls = []
+    up = [True]
+    m = n.PiholeMonitor(hosts=["h1"], info=lambda h: ((True, 4.0) if up[0] else (None, None)),
+                        query=lambda *a, **k: (True, 0, [], 1.0),
+                        resolve=lambda name: (True, ["0.0.0.0"] if name == n.BLOCKED_NAME else ["1.2.3.4"]),
+                        clock=lambda: t[0], stats=lambda: calls.append(1) or _DECK_OK)
+    m.probe()
+    assert m.status()["stats"]["queries"] == 12345 and len(calls) == 1
+    t[0] += n.UP_EVERY
+    m.probe()
+    assert len(calls) == 1                       # 30 s later: not due yet
+    t[0] += n.STATS_EVERY
+    m.probe()
+    assert len(calls) == 2
+    m.refresh_stats()
+    t[0] += n.UP_EVERY
+    m.probe()
+    assert len(calls) == 3                       # after a pause/resume: fetched on the next probe
+    up[0] = False
+    t[0] += n.STATS_EVERY + n.UP_EVERY
+    m.probe()
+    assert len(calls) == 3                       # Pi-hole down: don't bother sol-deck
+
+
+def test_monitor_stats_off_by_default():
+    m = n.PiholeMonitor(hosts=["h1"], info=lambda h: (True, 4.0), query=lambda *a, **k: (True, 0, [], 1.0),
+                        resolve=lambda name: (True, ["1.2.3.4"]), clock=lambda: 1.0)
+    m.probe()
+    assert m.status()["stats"] == {"state": "off"}
+
+
+def test_pause_and_resume_go_through_sol_deck(monkeypatch):
+    sent = []
+
+    def fake(path, body=None, timeout=4.0):
+        sent.append((path, body))
+        return {"ok": True}
+    monkeypatch.setattr(n, "_deck_json", fake)
+    assert n.pihole_pause(300) == {"ok": True, "why": "Pi-hole blocking paused for 5 min"}
+    assert n.pihole_resume()["ok"] is True
+    assert sent == [("/api/pihole/toggle", {"action": "snooze", "duration": 300}),
+                    ("/api/pihole/toggle", {"action": "enable"})]
+    monkeypatch.setattr(n, "_deck_json", lambda *a, **k: None)
+    assert n.pihole_pause() == {"ok": False, "why": "sol-deck isn't running"}
+    monkeypatch.setattr(n, "_deck_json", lambda *a, **k: {"ok": False, "error": "PIHOLE_APP_PASSWORD not configured in .env"})
+    assert "app password" in n.pihole_resume()["why"]
