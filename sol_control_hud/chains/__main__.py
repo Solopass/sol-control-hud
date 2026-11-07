@@ -5,7 +5,7 @@
   python -m sol_control_hud.chains resume <run_id>   # continue a stopped run from its last finished step
   python -m sol_control_hud.chains cancel <run_id>   # stop a run after its current step (from any window)
   python -m sol_control_hud.chains chain <note.md> [--new]  # run/resume a chain note (1Notebook/Chains) now
-  python -m sol_control_hud.chains daemon          # the chain runner (triggers, lanes); kept alive by sol-llm-watch.ps1
+  python -m sol_control_hud.chains daemon          # the chain runner (triggers, lanes); kept alive by the watcher (sol-watch.exe, rollback sol-llm-watch.ps1)
   python -m sol_control_hud.chains forge "<what the chain should do>" --title "<name>" [--model sol-smart]   # draft a chain
   python -m sol_control_hud.chains check <workflow.yaml | chain.md>   # validate without running
   python -m sol_control_hud.chains runs            # recent runs

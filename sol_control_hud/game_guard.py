@@ -1,6 +1,6 @@
 """The game guard, from the dashboard: why the local AI is off, and the two things you want to do about it.
 
-Why: `tools\\sol-llm-watch.ps1` turns the AI off when it thinks a game started. It is right about games and wrong
+Why: the local-AI watcher (sol-watch.exe since 2026-11-07, ported from `tools\\sol-llm-watch.ps1`) turns the AI off when it thinks a game started. It is right about games and wrong
 about a surprising number of other things - Notepad (09-25), Edge at 54 % (09-25), the Epic launcher (09-25),
 claude at 31-38 % (09-27, three times), steamwebhelper at 43-64 % and Antigravity at 31-32 % (10-07/08, seven
 times in two days). Every one of those was fixed by hand-editing `configs\\local-ai.json`, while the dashboard sat

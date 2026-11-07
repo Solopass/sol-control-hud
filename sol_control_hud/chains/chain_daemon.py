@@ -1,6 +1,6 @@
 """The chain runner: starts chain notes by themselves (OBVLT plans/LOCAL_AI_AUTOMATION_PLAN.md phase 3).
 
-    python -m sol_control_hud.chains daemon          # started and kept alive by D:\\OBVLT\\tools\\sol-llm-watch.ps1
+    python -m sol_control_hud.chains daemon          # started and kept alive by the watcher (sol-net bin\\sol-watch.exe; rollback D:\\OBVLT\\tools\\sol-llm-watch.ps1)
 
 Every 10 s it reads the properties of 1Notebook\\Chains\\*.md and:
 - `status: queued` -> runs the chain (resumes its last stopped run if you fixed it; see chain_note.plan_run);

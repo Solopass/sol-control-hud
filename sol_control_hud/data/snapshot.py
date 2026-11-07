@@ -22,6 +22,7 @@ from ..away import screen as away_screen
 from .collectors import engines, gpu, system, vram
 from .collectors.adl import get_gpu_sensors
 from .collectors.media import get_media_info, start_media_collector, stop_media_collector
+from .collectors.network import last_status as network_last_status, start_network_monitor
 from ..chains.gpulock import is_held
 
 from .snapshot_model import (  # noqa: F401 - moved verbatim; old imports keep working
@@ -71,8 +72,37 @@ def probe_services(router_up: bool | None = None) -> dict[str, bool]:
     out = {name: (router_up if name == "Router" and router_up is not None else check_port(port))
            for name, port in CHECK_PORTS}
     out["Chains"] = chain_runner_alive()
+    out["Watcher"] = watcher_running()
     out["WSL"] = wsl_running()
     return out
+
+
+_watcher_seen: list = [0.0, False]   # (checked at, running): the scan reads command lines, so at most every 15 s
+
+
+def watcher_running(max_age: float = 15.0) -> bool:
+    """The local-AI watcher: the Go sol-watch.exe (since 2026-11-07) or its rollback, the sol-llm-watch.ps1 PowerShell.
+    Only PowerShell's command lines are read; a -Shadow/-Probe sol-watch is a test run, not the watcher."""
+    if time.time() - _watcher_seen[0] < max_age:
+        return _watcher_seen[1]
+    _watcher_seen[:] = [time.time(), _scan_for_watcher()]
+    return _watcher_seen[1]
+
+
+def _scan_for_watcher() -> bool:
+    for p in psutil.process_iter(["name"]):
+        name = (p.info.get("name") or "").lower()
+        if name not in ("sol-watch.exe", "powershell.exe", "pwsh.exe"):
+            continue
+        try:
+            cmd = " ".join(p.cmdline()).lower()
+        except (psutil.Error, OSError):
+            cmd = ""
+        if name == "sol-watch.exe" and "-shadow" not in cmd and "-probe" not in cmd:
+            return True
+        if name != "sol-watch.exe" and "sol-llm-watch.ps1" in cmd:
+            return True
+    return False
 
 
 def read_llm_state(path: Path = STATE_FILE) -> tuple[str, str | None, str | None]:
@@ -539,6 +569,7 @@ class TickerCollector:
         if hasattr(self._sampler, "start"):
             self._sampler.start()
         start_media_collector()
+        start_network_monitor()
         if self._thread is None:
             self._thread = threading.Thread(target=self._run, name="ticker-collector", daemon=True)
             self._thread.start()
@@ -753,6 +784,11 @@ class TickerCollector:
             media_title = media_artist = media_app = None
             media_playing = False
 
+        # 11b. Home network (its own thread probes; this only reads the last result)
+        net = network_last_status() or {}
+        net_alert = (net.get("pihole") or {}).get("alert") or ""
+        net_new_device = (net.get("lan") or {}).get("alert") or ""
+
         # 12. Self-Resource Overhead
         if self.monitor_self:
             if now - self._last_self_check >= 4.0 or self._last_self_check == 0.0:
@@ -864,6 +900,8 @@ class TickerCollector:
             media_app=media_app,
             media_playing=media_playing,
             services=services,
+            net_alert=net_alert,
+            net_new_device=net_new_device,
             sampled_at=time.time(),
             self_cpu=self._self_cpu,
             self_ram_mb=self._self_ram_mb,

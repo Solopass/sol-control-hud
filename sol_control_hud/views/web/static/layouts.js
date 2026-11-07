@@ -106,6 +106,8 @@ const CHIPS = {
   },
   'c-stab': (s) => { const n = (s.unexpected_reboots || 0) + (s.gpu_resets || 0);
     return `crashes <b style="color:${n ? 'var(--red)' : 'var(--green)'}">${n}</b> · backup ${s.backup_age_h != null ? `${Math.round(s.backup_age_h)} h` : '–'}`; },
+  'c-net': (s) => (s.net_alert ? `<b style="color:var(--red)">${esc(s.net_alert)}</b>`
+    : `Pi-hole <b style="color:var(--green)">ok</b>${s.net_new_device ? ` · <span style="color:var(--amber)">${esc(s.net_new_device)}</span>` : ''}`),
   'c-svc': (s) => Object.entries(s.services || {}).map(([k, v]) => `<span style="color:${v ? 'var(--green)' : 'var(--red)'}">●</span> ${esc(k)}`).join(' &nbsp;'),
   'c-health': () => `<b>${esc(lcard('healthPill')?.textContent || '…')}</b>`,
   'c-work': (s) => `note <b>${s.note_words ?? '–'}</b> words · ${s.git_dirty_count ?? '–'} repos changed`,

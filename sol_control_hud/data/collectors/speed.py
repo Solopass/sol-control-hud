@@ -3,7 +3,7 @@
 Why: on 2026-10-07 sol-fast answered at 23-28 tok/s instead of ~140 while the VRAM card said OK. Desktop apps held
 5.7 GB of the card, Windows kept 0.62 GB of the model in system RAM, and that was below the 1 GB "evicted" line, so
 nothing showed it. The router logs every answer's generation speed (llama.cpp `print_timing`), which is the number
-that matters; the watcher (OBVLT tools/sol-llm-watch.ps1) logs when it heals a spill or waits to.
+that matters; the watcher (sol-watch.exe; before 2026-11-07 OBVLT tools/sol-llm-watch.ps1) logs when it heals a spill or waits to.
 
 Nothing here talks to a model (never /slots: that counts as use and keeps it loaded).
 """

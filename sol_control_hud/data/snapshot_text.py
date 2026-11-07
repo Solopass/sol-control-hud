@@ -41,6 +41,10 @@ def attention(s: "Snapshot") -> list[tuple[str, str, str]]:
         out.append((RED, s.hud_alert, "SYS"))
     if s.ai_state == "offline" and s.ai_mode != "off":
         out.append((RED, "local AI router is down", "AI"))
+    if s.net_alert:                          # collectors/network.py: Pi-hole is this PC's only DNS
+        out.append((RED if "down" in s.net_alert else AMBER, s.net_alert, "NET"))
+    if s.net_new_device:
+        out.append((AMBER, s.net_new_device, "NET"))
     if s.vram_spill_impact == "slow":
         out.append((RED, f"model spilled out of VRAM: answers slow ({s.ai_tps:.0f} tok/s)" if s.ai_tps
                     else "model spilled out of VRAM: answers slow", "HW"))
@@ -536,7 +540,8 @@ def slide_level(slide: dict, s: Snapshot) -> str:
     if tag == "DISK":
         return "info" if any(c != TEXT for t, c in slide["segments"] if t not in ("Free ",) and c != MUTED) else "quiet"
     if tag == "SVC":
-        return "quiet" if all(s.services.get(n, False) for n in ("Router", "Embed", "HUD", "Chains")) else "info"
+        return "quiet" if all(s.services.get(n, True if n == "Watcher" else False)
+                              for n in ("Router", "Embed", "HUD", "Chains", "Watcher")) else "info"
     if tag == "SYS":
         old_backup = s.backup_age_h is None or s.backup_age_h >= 72
         return "info" if (s.unexpected_reboots + s.gpu_resets) or s.backup_stale or old_backup else "quiet"

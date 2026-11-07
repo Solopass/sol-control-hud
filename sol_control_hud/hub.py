@@ -39,7 +39,7 @@ from .swallow import note as _swallowed
 SETTINGS_FILE = DATA_DIR / "hub-settings.json"
 LOCK_FILE = DATA_DIR / "hub.lock"
 LOG_FILE = DATA_DIR / "hub.log"
-# "I'm running" marker for tools\sol-llm-watch.ps1: present + its pid gone = the app died -> the watcher restarts it.
+# "I'm running" marker for the watcher (sol-watch.exe; formerly tools\sol-llm-watch.ps1): present + its pid gone = the app died -> the watcher restarts it.
 # A clean exit (tray / ticker / dashboard Exit) removes it, so what you close stays closed.
 RUNNING_FILE = DATA_DIR / "app-running.json"
 MEDIA_CHECK_S = 300.0          # stuck media jobs (E3): the card's own file read, looked at by the hub every 5 min
@@ -849,6 +849,7 @@ class Hub:
                 "speed": c["speed"].get(), "heal": c["heal"].get(), "review": self._review_state(),
                 "ai_ops": c["ai_ops"].get() if "ai_ops" in c else {},
                 "security": c["security"].get() if "security" in c else {},
+                "network": c["network"].get() if "network" in c else {},
                 "layout": {"active": self._layouts["active"], "rev": self._layouts["rev"]}}
 
     @staticmethod
@@ -907,6 +908,9 @@ class Hub:
         self.collectors["ai_usage"] = Cached(ai_usage.get_ai_usage, 10)
         from .data.collectors import security
         self.collectors["security"] = Cached(security.get_security_status, 2)
+        from .data.collectors import network          # Pi-hole + LAN devices: its own thread probes, this only reads
+        network.start_network_monitor()
+        self.collectors["network"] = Cached(network.last_status, 2)
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -1506,7 +1510,7 @@ class Hub:
         """A model that spilled into system RAM never gets back on its own: reload it (heal.py, VRAM plan step 4).
         Desk only - in Away a job owns the GPU, and `off` means nothing should load.
 
-        Off by default since 2026-10-07: OBVLT's tools/sol-llm-watch.ps1 now heals spills itself (and also runs while
+        Off by default since 2026-10-07: the local-AI watcher (sol-watch.exe, formerly OBVLT's tools/sol-llm-watch.ps1) now heals spills itself (and also runs while
         the HUD doesn't), waiting while a chain, a queue job or a chat uses the model. Two healers reacting to one spill
         could reload twice. The HUD still shows the spill (VRAM card, alert); `"hud_heal": true` in hub-settings.json
         turns this one back on."""

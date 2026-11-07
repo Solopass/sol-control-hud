@@ -213,6 +213,7 @@ function render(p) {
 
   renderDisks(s);
   renderSecurity(p);
+  renderNetwork(p);
 
   // stability
   const sys = slide(p, 'SYS'); setHTML($('sysSeg'), sys ? segHtml(sys.segments) : '');
@@ -226,7 +227,7 @@ function render(p) {
     `${esc(w.state || '?')}${w.failed?.length ? ` <span style="color:var(--red)">· ${w.failed.length} failed unit(s)</span>` : ''}`);
 
   // services
-  const ports = { Router: ':11440', Embed: ':11443', HUD: ':7900', Chains: 'runner', WSL: 'running' };   // WSL off is normal: its services start on demand
+  const ports = { Router: ':11440', Embed: ':11443', HUD: ':7900', Chains: 'runner', Watcher: 'sol-watch', WSL: 'running' };   // WSL off is normal: its services start on demand
   // the router's model process: which chip it's on (the AI should only ever be on the AMD card)
   const llama = ((p.gpu || {}).processes || []).filter((x) => /llama-server/i.test(x.name) && x.dedicated_gb + x.shared_gb >= 0.5);
   const aiChip = llama.map((x) => chipOf(p, x.pid)).find(Boolean);
@@ -317,7 +318,7 @@ function renderVram(p) {
   if (v.suggest_free?.length && verdict !== 'OK') notes.push(`free up: ${v.suggest_free.map((t) => `${t.label} ${t.gb} GB`).join(', ')}`);
   $('vramNote').textContent = notes.join(' · ');
 
-  const h = p.heal || {};                       // the watcher's spill auto-heal (OBVLT tools/sol-llm-watch.ps1)
+  const h = p.heal || {};                       // the watcher's spill auto-heal (sol-watch.exe; formerly OBVLT tools/sol-llm-watch.ps1)
   const hr = $('vramHeadroom');
   if (hr) {
     if (v.others_gb != null) {
@@ -809,6 +810,38 @@ function renderFeed(items) {
     return `<li class="${fresh ? 'new' : ''}"><time>${esc(when(it.time))}</time><span style="color:${col(it.color)}">${esc(it.text)}</span></li>`;
   }).join('') || '<li class="dim">nothing yet</li>');
   firstFeed = false;
+}
+
+// Network · Pi-hole (collectors/network.py: probed every 30 s in its own thread, no password needed)
+const NET_STATE = {
+  ok: ['OK', 'ok'], slow: ['SLOW', 'warn'], degraded: ['ONE IP DOWN', 'warn'], 'dns-off': ['DNS OFF', 'bad'],
+  'no-upstream': ['NO UPSTREAM', 'bad'], 'not-blocking': ['NOT BLOCKING', 'warn'], down: ['DOWN', 'bad'], unknown: ['…', 'dim'],
+};
+function renderNetwork(p) {
+  if (typeof cardShown === 'function' && !cardShown('c-net')) return;
+  const net = p.network || {}, ph = net.pihole || {}, lan = net.lan || {};
+  const [label, cls] = NET_STATE[ph.state] || NET_STATE.unknown;
+  const pill = $('netPill'); if (!pill) return;
+  pill.textContent = label; pill.className = `pill ${cls}`; pill.title = ph.alert || '';
+  const yn = (v, yes, no) => (v == null ? '<span class="dim">–</span>' : v ? `<span style="color:var(--green)">${yes}</span>` : `<span style="color:var(--red)">${no}</span>`);
+  setHTML($('netHosts'), (ph.hosts || []).map((h) => {
+    const st = h.up == null ? '<span class="dim">checking…</span>'
+      : !h.up ? '<span style="color:var(--red)">no answer</span>'
+      : !h.dns ? '<span style="color:var(--red)">DNS service off</span>'
+      : `<span style="color:${h.ms > 150 ? 'var(--amber)' : 'var(--green)'}">up · ${h.ms} ms</span>`;
+    return `<div class="row"><span>${esc(h.ip)}</span><span>${st}</span></div>`;
+  }).join('') || '<div class="row dim">no Pi-hole configured</div>');
+  const pc = ph.pc || {};
+  setHTML($('netPc'), `${yn(pc.blocking, 'blocking', 'not blocking')} · ${yn(pc.upstream, 'upstream ok', 'upstream fails')}`);
+  const note = $('netNote'); note.hidden = !ph.note; note.textContent = ph.note || '';
+  const devs = lan.devices || [];
+  $('netCount').textContent = devs.length ? `${lan.online || 0} online · ${devs.length} known${lan.new ? ` · ${lan.new} new` : ''}` : '';
+  setHTML($('netDevs'), devs.map((d) => {
+    const c = d.new ? 'new' : d.online ? '' : 'off';
+    const seen = d.online ? 'online' : `seen ${esc(when(d.last_seen))}`;
+    const tip = `${d.mac} · first seen ${d.first_seen}${d.private ? ' · private (randomised) MAC: may change' : ''}`;
+    return `<span class="ip ${c}">${esc(d.ip)}</span><span class="${c}" title="${esc(tip)}">${d.new ? 'NEW · ' : ''}${esc(d.name || (d.private ? 'phone/tablet (private MAC)' : 'unnamed'))}</span><span class="dim ${c}">${seen}</span>`;
+  }).join('') || '<span class="dim">scanning…</span>');
 }
 
 function renderSecurity(p) {

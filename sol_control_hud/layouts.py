@@ -48,6 +48,7 @@ WIDGETS: dict[str, tuple[str, dict[str, list[int]], str]] = {
     "c-security": ("Cyber Security & Canary", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-stab": ("Stability & backups", {"XS": [1, 1], "M": [1, 1]}, "M"),
     "c-svc": ("Services", {"XS": [1, 1], "M": [1, 1]}, "M"),
+    "c-net": ("Network · Pi-hole", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "L"),
     "c-health": ("HUD health", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-work": ("Workspace", {"XS": [1, 1], "M": [1, 1]}, "M"),
     "c-notes": ("Obsidian Notes", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),

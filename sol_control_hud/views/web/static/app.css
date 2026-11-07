@@ -1227,3 +1227,11 @@ main.grid.masonry > .card { margin-bottom:16px; }
   .crow .meta, .crow .acts { grid-column:1 / -1; }
   .crow .acts { justify-content:flex-start; }
 }
+
+/* Network · Pi-hole card (collectors/network.py) */
+#c-net .net-note { font-size:11px; margin:6px 0 2px; line-height:1.35; }
+#c-net .net-sub { font-size:11px; letter-spacing:.08em; text-transform:uppercase; margin:10px 0 4px; color:var(--dim); font-weight:600; }
+#c-net .net-devs { display:grid; grid-template-columns:auto 1fr auto; gap:2px 10px; font-size:12px; max-height:180px; overflow:auto; }
+#c-net .net-devs .ip { font-variant-numeric:tabular-nums; color:var(--dim); }
+#c-net .net-devs .off { opacity:.45; }
+#c-net .net-devs .new { color:var(--amber); font-weight:600; }

@@ -4,7 +4,7 @@ OBVLT plans/AWAY_SCREEN_PLAN.md. Started by D:\\OBVLT\\tools\\sol-llm.ps1 when A
 
     pythonw -m sol_control_hud.away.screen
 
-Talks to the watcher (tools\\sol-llm-watch.ps1) through files in D:\\AI\\Cache\\llm:
+Talks to the watcher (sol-net bin\\sol-watch.exe since 2026-11-07, a port of tools\\sol-llm-watch.ps1) through files in D:\\AI\\Cache\\llm:
 - away-screen.json  heartbeat every 2 s ({pid, updated, phase, guarding}). While it's fresh and `guarding`, the watcher
                     ignores ordinary input; otherwise it falls back to "any input = you're back".
 - away-back.flag    written when you press Enter / Space x5 during Away. Since 2026-09-26 (your choice) that only means

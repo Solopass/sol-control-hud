@@ -36,9 +36,10 @@ def test_wsl_services_are_never_probed(monkeypatch):
     monkeypatch.setattr(td, "check_port", lambda port, **kw: probed.append(port) or True)
     monkeypatch.setattr(td, "chain_runner_alive", lambda: True)
     monkeypatch.setattr(td, "wsl_running", lambda: False)
+    monkeypatch.setattr(td, "watcher_running", lambda: True)
     services = td.probe_services()
     assert sorted(probed) == [7900, 11440, 11443]            # media-api 8080 / speedman 8081 / voice 8765 / omni 8082: no
-    assert services == {"Router": True, "Embed": True, "HUD": True, "Chains": True, "WSL": False}
+    assert services == {"Router": True, "Embed": True, "HUD": True, "Chains": True, "Watcher": True, "WSL": False}
     row = format_multiline_rows(Snapshot(services=services))[3]
     assert [(k, v) for k, v, _ in row["items"]][-1] == ("WSL", "off")
 

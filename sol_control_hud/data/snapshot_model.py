@@ -156,6 +156,10 @@ class Snapshot:
     media_app: str | None = None
     media_playing: bool = False
 
+    # Home network (collectors/network.py): ticker attention lines, "" when all is well
+    net_alert: str = ""                        # Pi-hole down / not blocking / upstream failing
+    net_new_device: str = ""                   # a device seen for the first time in the last day
+
     # Services
     services: dict[str, bool] = field(default_factory=dict)
     sampled_at: float = 0.0
