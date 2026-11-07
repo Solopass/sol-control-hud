@@ -824,6 +824,22 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             self._apply_geometry()
             self._render()
 
+    def _media_keys_items(self) -> list:
+        from ..data.collectors import media
+        try:
+            return media.media_keys_menu(media.get_media_info(), media.get_media_target())
+        except Exception:
+            _swallowed("ticker._media_keys_items")
+            return [("(media keys unavailable)", None)]
+
+    def set_media_keys_target(self, target: str) -> None:
+        """Where the media keys go from now on (sol-media reads it on every key press)."""
+        from ..data.collectors import media
+        try:
+            media.set_media_target(target)
+        except OSError:
+            _swallowed("ticker.set_media_keys_target")
+
     def _show_context_menu(self, event) -> None:
         t = self.get_theme()
         menu = tk.Menu(self.root, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
@@ -885,6 +901,17 @@ class TickerApp(TickerLayoutMixin, TickerRenderMixin):
             command=lambda: self.switch_ai_model("unload"),
         )
         menu.add_cascade(label="Local AI Model 🧠", menu=ai_model_menu)
+
+        # Media Keys submenu: where play/pause/next/previous go (sol-media's key router, data/collectors/media.py)
+        keys_menu = tk.Menu(menu, tearoff=0, bg=t["card"], fg=t["text_main"], activebackground=t["border"])
+        for label, items in self._media_keys_items():
+            if label is None:
+                keys_menu.add_separator()
+            elif items is None:
+                keys_menu.add_command(label=label, state=tk.DISABLED)
+            else:
+                keys_menu.add_command(label=label, command=lambda v=items: self.set_media_keys_target(v))
+        menu.add_cascade(label="Media Keys 🎵", menu=keys_menu)
 
         # Run Chain submenu
         chains = get_available_chains()

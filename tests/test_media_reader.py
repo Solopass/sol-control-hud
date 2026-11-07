@@ -73,3 +73,73 @@ def test_go_output_parses_like_ps1_output():
     assert info.playing and info.title == "Song ✓" and info.clean_app == "Spotify"
     assert parse_line('{"status":"none"}').status == "none"
     assert parse_line('{"app":"vlc.exe","title":null,"artist":null,"status":"Paused"}').title is None
+
+
+# ---- the media-key router (2026-11-07) ----
+
+YT = "Brave._crx_" + media.YOUTUBE_APP_ID
+
+
+def test_long_running_exe_routes_keys_ps1_does_not(tmp_path):
+    c, _, _ = _files(tmp_path)
+    cmd = c.command(3.5)
+    assert "-Keys" in cmd and cmd[cmd.index("-Target") + 1] == str(media.TARGET_FILE)
+    assert "-Keys" not in c.command()                       # one-shot polls never grab the keys
+    no_exe = tmp_path / "no-exe"
+    no_exe.mkdir()
+    c2, _, _ = _files(no_exe, exe=False)
+    assert "-Keys" not in c2.command(3.5)                   # the .ps1 can't route keys
+
+
+def test_router_fields_parse():
+    info = parse_line('{"status":"Paused","app":"Spotify.exe","keys":"on","target":"youtube",'
+                      '"last_key":"08:40:03 play/pause -> Spotify.exe",'
+                      '"sessions":[{"app":"Spotify.exe","title":"A","status":"Paused"},{"bad":1}]}')
+    assert info.keys == "on" and info.target == "youtube" and info.last_key.endswith("Spotify.exe")
+    assert info.sessions == ({"app": "Spotify.exe", "title": "A", "status": "Paused"},)
+    assert parse_line('{"status":"none"}').keys == ""        # the .ps1: no router
+
+
+def test_target_file_round_trip(tmp_path):
+    p = tmp_path / "t.json"
+    assert media.get_media_target(p) == "youtube"           # default
+    media.set_media_target("app:Spotify.exe", p)
+    assert media.get_media_target(p) == "app:Spotify.exe"
+    p.write_text("{broken")
+    assert media.get_media_target(p) == "youtube"
+
+
+def test_session_label():
+    assert media.session_label(YT) == "YouTube app (Brave)"
+    assert media.session_label("Spotify.exe") == "Spotify"
+
+
+def _labels(rows):
+    return [r[0] for r in rows]
+
+
+def test_menu_default_and_sessions():
+    info = media.MediaInfo(keys="on", sessions=(
+        {"app": YT, "title": "Some video", "status": "Paused"},
+        {"app": "Spotify.exe", "title": "Song", "status": "Playing"},
+        {"app": "Spotify.exe", "title": "Song", "status": "Playing"},
+    ))
+    rows = media.media_keys_menu(info, "youtube")
+    assert rows[0] == ("✓ YouTube app (Brave)  ·  default", "youtube")
+    assert rows[1][1] == "auto" and not rows[1][0].startswith("✓")
+    picks = [r for r in rows if r[1] and r[1].startswith("app:")]
+    assert picks == [("   Spotify · Song  (Playing)", "app:Spotify.exe")]   # YouTube not repeated, duplicates merged
+    assert not any("⚠" in (r[0] or "") for r in rows)
+
+
+def test_menu_marks_a_picked_app_even_when_it_is_gone():
+    rows = media.media_keys_menu(media.MediaInfo(keys="on"), "app:Discord")
+    assert ("✓ Discord  (not running: keys go to Automatic)", "app:Discord") in rows
+    assert not rows[0][0].startswith("✓")
+
+
+def test_menu_says_when_keys_are_taken_or_router_off():
+    assert "⚠ Another program holds the media keys" in _labels(media.media_keys_menu(media.MediaInfo(keys="taken"), "youtube"))
+    assert "Router off: keys work the Windows way" in _labels(media.media_keys_menu(media.MediaInfo(), "youtube"))
+    last = media.media_keys_menu(media.MediaInfo(keys="on", last_key="08:40 play/pause -> x"), "auto")
+    assert ("Last: 08:40 play/pause -> x", None) in last
