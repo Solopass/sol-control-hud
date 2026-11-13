@@ -199,3 +199,73 @@ def test_overhaul_cards_and_apis(app_hub):
     s_res = c.get("/api/search?q=test&k=2").json()
     assert s_res["ok"] is True
     assert "hits" in s_res
+
+
+def _pg(c, **body):
+    return c.post("/api/playground", json=body, headers={"x-sol-control": "1"}).json()
+
+
+def test_playground_cloud_model_never_gets_local_context(app_hub, monkeypatch):
+    from sol_control_hud import gemini_solver
+    from sol_control_hud.chains import index_tools
+    h, c = app_hub
+    searched, sent = [], []
+    monkeypatch.setattr(index_tools, "search", lambda *a, **k: searched.append(a) or [])
+    monkeypatch.setattr(gemini_solver, "get_api_key", lambda *a, **k: "fake")
+    monkeypatch.setattr(gemini_solver, "solve", raising=False, value=lambda prompt, **k: sent.append(prompt) or {"text": "hi", "chars": 2})
+    r = _pg(c, model="gemini-3.8-flash", prompt="my private question", use_context=True)
+    assert r["ok"] is True and r["text"] == "hi"
+    assert searched == []
+    assert sent == ["my private question"]
+    assert r["context_skipped"] is True and "cloud" in r["context_note"]
+    assert r["citations"] == []
+
+
+class _FakeResp:
+    def __init__(self, payload):
+        self._b = json.dumps(payload).encode()
+
+    def read(self):
+        return self._b
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def _fake_router(monkeypatch, seen):
+    import urllib.request
+
+    def fake_urlopen(req, timeout=None):
+        seen.append(json.loads(req.data.decode()))
+        return _FakeResp({"choices": [{"message": {"content": "ok"}}], "usage": {"completion_tokens": 1}})
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+
+def test_playground_local_model_adds_context(app_hub, monkeypatch):
+    from sol_control_hud.chains import index_tools
+    h, c = app_hub
+    seen = []
+    _fake_router(monkeypatch, seen)
+    monkeypatch.setattr(index_tools, "search", lambda q, k=3, **kw: [{"path": "D:/n/a.md", "start": 1, "end": 4, "snippet": "SNIP"}])
+    r = _pg(c, model="sol-fast", prompt="q", use_context=True)
+    assert r["ok"] is True and r["context_skipped"] is False and r["context_note"] == ""
+    assert "SNIP" in seen[0]["messages"][-1]["content"]
+    assert r["citations"][0]["path"] == "D:/n/a.md"
+
+
+def test_playground_search_failure_answers_without_context(app_hub, monkeypatch):
+    from sol_control_hud.chains import index_tools
+    h, c = app_hub
+    seen = []
+    _fake_router(monkeypatch, seen)
+
+    def boom(*a, **k):
+        raise index_tools.IndexError_("no index")
+    monkeypatch.setattr(index_tools, "search", boom)
+    r = _pg(c, model="sol-fast", prompt="q", use_context=True)
+    assert r["ok"] is True and r["text"] == "ok"
+    assert seen[0]["messages"][-1]["content"] == "q"
+    assert "index" in r["context_note"] and r["citations"] == []

@@ -2894,6 +2894,21 @@ function initPlayground() {
   if (sendBtn) {
     sendBtn.onclick = sendPlaygroundPrompt;
   }
+
+  const modelEl = $('pgModel');
+  if (modelEl) {
+    modelEl.addEventListener('change', syncPlaygroundContext);
+    syncPlaygroundContext();
+  }
+}
+
+// Cloud (gemini) models never get local context: lock the checkbox and say why.
+function syncPlaygroundContext() {
+  const cloud = String($('pgModel')?.value || '').toLowerCase().startsWith('gemini');
+  const box = $('pgUseContext');
+  const hint = $('pgContextHint');
+  if (box) box.disabled = cloud;
+  if (hint) hint.hidden = !cloud;
 }
 
 async function sendPlaygroundPrompt() {
@@ -2931,6 +2946,7 @@ async function sendPlaygroundPrompt() {
         thoughtText.textContent = res.thought;
         thoughtWrap.hidden = false;
       }
+      if (res.context_note && statusEl) statusEl.textContent += ` · ${res.context_note}`;
       if (citeBox && res.citations && res.citations.length) {
         citeBox.innerHTML = res.citations.map((c) =>
           `<span class="pg-citation-chip" title="${esc(c.path)}:${esc(c.lines)}&#10;${esc(c.snippet)}">📍 ${esc(c.path.split(/[\\/]/).pop())}:${esc(c.lines)}</span>`

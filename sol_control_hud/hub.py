@@ -49,6 +49,11 @@ WEB_ACTIVE_S = 30.0          # a dashboard request within this long counts as "s
 GUARD_IDLE_S = 300.0         # stop the web-only VRAM guard thread after this long without a dashboard request
 
 
+def _is_cloud_model(model: str) -> bool:
+    """Cloud models (Gemini) run on Google's servers; nothing private may be added to their prompts."""
+    return str(model).strip().lower().startswith("gemini")
+
+
 def log(msg: str) -> None:
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -1415,7 +1420,14 @@ class Hub:
 
             context_str = ""
             citations = []
-            if use_context:
+            context_note = ""
+            context_skipped = False
+            if use_context and _is_cloud_model(model):
+                # Private local notes must never leave the PC: no search, no context for cloud models.
+                context_skipped = True
+                context_note = "Local context isn't sent to cloud models."
+            elif use_context:
+                import sqlite3
                 from .chains import index_tools
                 try:
                     hits = index_tools.search(prompt, k=3)
@@ -1425,13 +1437,14 @@ class Hub:
                             citations.append({"path": h["path"], "lines": f"{h['start']}-{h['end']}", "snippet": h["snippet"]})
                             context_parts.append(f"File: {h['path']} (lines {h['start']}-{h['end']})\nSnippet: {h['snippet']}")
                         context_str = "\n\nRelevant Local Context:\n" + "\n---\n".join(context_parts)
-                except Exception:
-                    pass
+                except (index_tools.IndexError_, OSError, sqlite3.Error):
+                    _swallowed("hub.playground_run")
+                    context_note = "Local index wasn't available; answered without context."
 
             augmented_prompt = prompt + (f"\n\n[Context from local codebase/notes]:\n{context_str}" if context_str else "")
 
             t0 = time.monotonic()
-            if model.startswith("gemini"):
+            if _is_cloud_model(model):
                 from . import gemini_solver
                 try:
                     res = gemini_solver.solve(augmented_prompt, api_key=gemini_solver.get_api_key(), model=model)
@@ -1444,6 +1457,8 @@ class Hub:
                         "tok_s": round(res.get("chars", len(res.get("text", ""))) / 4.0 / max(dt, 0.001), 1),
                         "thought": res.get("thought", ""),
                         "citations": citations,
+                        "context_skipped": context_skipped,
+                        "context_note": context_note,
                     }
                 except Exception as e:
                     return {"ok": False, "why": f"Gemini error: {e}"}
@@ -1482,6 +1497,8 @@ class Hub:
                         "tok_s": round(out_tokens / max(dt, 0.001), 1),
                         "usage": usage,
                         "citations": citations,
+                        "context_skipped": context_skipped,
+                        "context_note": context_note,
                     }
                 except Exception as e:
                     return {"ok": False, "why": f"Router error: {e}"}
