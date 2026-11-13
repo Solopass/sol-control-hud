@@ -1367,6 +1367,19 @@ class Hub:
                 "menu": [{"label": m[0], "target": m[1]} for m in menu],
             }
 
+        @app.get("/api/search")
+        def search_index(q: str = "", project: str = "", k: int = 8, mode: str = "") -> dict:
+            from .chains import index_tools
+            query = q.strip()
+            if not query:
+                return {"ok": True, "query": "", "hits": []}
+            try:
+                force_kw = mode == "keyword"
+                hits = index_tools.search(query, project=project.strip() or None, k=k, force_keyword=force_kw)
+                return {"ok": True, "query": query, "hits": hits, "count": len(hits)}
+            except Exception as e:
+                return {"ok": False, "why": str(e), "hits": []}
+
         @app.post("/api/playground")
         def playground_run(body: dict = Body(default={})) -> dict:
             import urllib.request
@@ -1374,14 +1387,32 @@ class Hub:
             model = str(b.get("model", "sol-fast")).strip()
             prompt = str(b.get("prompt", "")).strip()
             system = str(b.get("system", "")).strip()
+            use_context = bool(b.get("use_context", False))
             if not prompt:
                 return {"ok": False, "why": "Prompt cannot be empty"}
+
+            context_str = ""
+            citations = []
+            if use_context:
+                from .chains import index_tools
+                try:
+                    hits = index_tools.search(prompt, k=3)
+                    if hits:
+                        context_parts = []
+                        for h in hits:
+                            citations.append({"path": h["path"], "lines": f"{h['start']}-{h['end']}", "snippet": h["snippet"]})
+                            context_parts.append(f"File: {h['path']} (lines {h['start']}-{h['end']})\nSnippet: {h['snippet']}")
+                        context_str = "\n\nRelevant Local Context:\n" + "\n---\n".join(context_parts)
+                except Exception:
+                    pass
+
+            augmented_prompt = prompt + (f"\n\n[Context from local codebase/notes]:\n{context_str}" if context_str else "")
 
             t0 = time.monotonic()
             if model.startswith("gemini"):
                 from . import gemini_solver
                 try:
-                    res = gemini_solver.solve(prompt, api_key=gemini_solver.get_api_key(), model=model)
+                    res = gemini_solver.solve(augmented_prompt, api_key=gemini_solver.get_api_key(), model=model)
                     dt = time.monotonic() - t0
                     return {
                         "ok": True,
@@ -1390,6 +1421,7 @@ class Hub:
                         "elapsed_s": round(dt, 2),
                         "tok_s": round(res.get("chars", len(res.get("text", ""))) / 4.0 / max(dt, 0.001), 1),
                         "thought": res.get("thought", ""),
+                        "citations": citations,
                     }
                 except Exception as e:
                     return {"ok": False, "why": f"Gemini error: {e}"}
@@ -1398,7 +1430,7 @@ class Hub:
                 messages = []
                 if system:
                     messages.append({"role": "system", "content": system})
-                messages.append({"role": "user", "content": prompt})
+                messages.append({"role": "user", "content": augmented_prompt})
 
                 payload = {
                     "model": model,
@@ -1427,6 +1459,7 @@ class Hub:
                         "elapsed_s": round(dt, 2),
                         "tok_s": round(out_tokens / max(dt, 0.001), 1),
                         "usage": usage,
+                        "citations": citations,
                     }
                 except Exception as e:
                     return {"ok": False, "why": f"Router error: {e}"}

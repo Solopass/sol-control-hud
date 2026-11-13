@@ -194,3 +194,8 @@ def test_overhaul_cards_and_apis(app_hub):
     kill_sys = c.post("/api/action", json={"action": "kill_process", "target": "4"}, headers={"x-sol-control": "1"}).json()
     assert kill_sys["ok"] is False
     assert "cannot kill system or HUD process" in kill_sys["why"]
+
+    # Verify search API
+    s_res = c.get("/api/search?q=test&k=2").json()
+    assert s_res["ok"] is True
+    assert "hits" in s_res

@@ -2817,6 +2817,7 @@ async function sendPlaygroundPrompt() {
   const prompt = promptEl?.value?.trim();
   if (!prompt) return;
   const model = $('pgModel')?.value || 'sol-fast';
+  const useContext = Boolean($('pgUseContext')?.checked);
   const sendBtn = $('pgSend');
   const statusEl = $('pgStatus');
   const box = $('pgOutputBox');
@@ -2825,15 +2826,17 @@ async function sendPlaygroundPrompt() {
   const thoughtText = $('pgThoughtText');
   const metaModel = $('pgMetaModel');
   const metaSpeed = $('pgMetaSpeed');
+  const citeBox = $('pgCitations');
 
   if (sendBtn) sendBtn.disabled = true;
   if (statusEl) statusEl.textContent = 'generating…';
   if (box) box.hidden = false;
   if (respEl) respEl.textContent = 'Thinking…';
   if (thoughtWrap) thoughtWrap.hidden = true;
+  if (citeBox) citeBox.hidden = true;
 
   try {
-    const res = await post('/api/playground', { model, prompt });
+    const res = await post('/api/playground', { model, prompt, use_context: useContext });
     if (sendBtn) sendBtn.disabled = false;
     if (res?.ok) {
       if (statusEl) statusEl.textContent = `done in ${res.elapsed_s}s`;
@@ -2843,6 +2846,12 @@ async function sendPlaygroundPrompt() {
       if (res.thought && thoughtWrap && thoughtText) {
         thoughtText.textContent = res.thought;
         thoughtWrap.hidden = false;
+      }
+      if (citeBox && res.citations && res.citations.length) {
+        citeBox.innerHTML = res.citations.map((c) =>
+          `<span class="pg-citation-chip" title="${esc(c.path)}:${esc(c.lines)}&#10;${esc(c.snippet)}">📍 ${esc(c.path.split(/[\\/]/).pop())}:${esc(c.lines)}</span>`
+        ).join('');
+        citeBox.hidden = false;
       }
     } else {
       if (statusEl) statusEl.textContent = 'error';
@@ -3023,6 +3032,67 @@ document.addEventListener('click', async (e) => {
   }
 });
 
+// ---------- Quick Search integration in Quickbar (#qbFilter)
+function initQuickSearch() {
+  const input = $('qbFilter');
+  const resultsBox = $('qbSearchResults');
+  if (!input || !resultsBox) return;
+
+  let searchDebounce = null;
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(searchDebounce);
+    if (!q || q.length < 2) {
+      resultsBox.hidden = true;
+      return;
+    }
+    searchDebounce = setTimeout(async () => {
+      try {
+        const d = await (await fetch(`/api/search?q=${encodeURIComponent(q)}&k=6`)).json();
+        if (!d.ok || !d.hits || !d.hits.length) {
+          resultsBox.hidden = true;
+          return;
+        }
+        resultsBox.innerHTML = d.hits.map((h) => {
+          const fname = h.path.split(/[\\/]/).pop();
+          return `<div class="qb-search-item" data-path="${esc(h.path)}" data-line="${h.start}">` +
+            `<div class="qb-search-item-path">📄 ${esc(fname)} <span class="dim">:${h.start}-${h.end}</span></div>` +
+            `<div class="qb-search-item-snippet">${esc(h.snippet)}</div>` +
+            `<div class="qb-search-meta"><span class="dim">${esc(h.path)}</span><span>${h.score ? Math.round(h.score * 100) / 100 : ''}</span></div>` +
+            `</div>`;
+        }).join('');
+        resultsBox.hidden = false;
+      } catch (e) {
+        resultsBox.hidden = true;
+      }
+    }, 250);
+  });
+
+  resultsBox.addEventListener('click', async (e) => {
+    const item = e.target.closest('.qb-search-item');
+    if (!item) return;
+    const p = item.dataset.path;
+    resultsBox.hidden = true;
+    if (p.endsWith('.md')) {
+      const parts = p.split(/[\\/]/);
+      const idx = parts.findIndex(x => x.toLowerCase().includes('vault') || x === 'OBVLT');
+      const vault = idx !== -1 ? parts[idx] : 'OBVLT';
+      const rel = idx !== -1 ? parts.slice(idx + 1).join('/') : p;
+      await post('/api/open-note', { vault, file: rel });
+      toast(`Opened in Obsidian: ${parts.pop()}`);
+    } else {
+      toast(`Path: ${p}`);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.qb-search-wrap')) {
+      resultsBox.hidden = true;
+    }
+  });
+}
+
 (async function start() {
   try {
     const meta = await (await fetch('/api/meta', { cache: 'no-store' })).json();
@@ -3042,6 +3112,7 @@ document.addEventListener('click', async (e) => {
   initPlayground();
   initProcs();
   initMediaControls();
+  initQuickSearch();
   loadProcs();
   loadMediaSession();
   setInterval(() => { if (!document.hidden) loadOvernight(); }, 4000);

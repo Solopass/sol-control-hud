@@ -63,7 +63,8 @@
   </div>
   <div class="qb-right">
     <div class="qb-search-wrap">
-      <input type="search" id="qbFilter" class="qb-search" placeholder="Filter cards… (/)" autocomplete="off" aria-label="Filter cards">
+      <input type="search" id="qbFilter" class="qb-search" placeholder="Search codebase & notes or filter (/)..." autocomplete="off" aria-label="Search codebase and filter cards">
+      <div class="qb-search-results" id="qbSearchResults" hidden></div>
     </div>
     <button class="qb-btn ghost" id="qbCompactBtn" title="Toggle compact XS strip view across visible cards">▤ Compact</button>
     <button class="qb-btn ghost" id="qbScratchBtn" title="Quick scratchpad / new note">📝 Scratch</button>
@@ -153,12 +154,19 @@
         <textarea id="pgPrompt" rows="2" placeholder="Ask local AI or Gemini anything... (Ctrl+Enter to send)"></textarea>
         <button id="pgSend" class="go">Send</button>
       </div>
+      <div class="pg-options-row">
+        <label class="pg-check-label" title="Automatically query local sol-search index for matching code & notes context">
+          <input type="checkbox" id="pgUseContext" checked>
+          <span>Include local codebase/notes context</span>
+        </label>
+      </div>
       <div class="pg-output-box" id="pgOutputBox" hidden>
         <div class="pg-output-meta">
           <span id="pgMetaModel" class="pill mini-pill">sol-fast</span>
           <span id="pgMetaSpeed" class="dim small">– tok/s</span>
           <button class="mini ghost" id="pgCopyBtn" title="Copy response to clipboard">📋 Copy</button>
         </div>
+        <div id="pgCitations" class="pg-citations" hidden></div>
         <details id="pgThoughtWrap" class="pg-thought-wrap" hidden>
           <summary>Reasoning / Chain-of-Thought</summary>
           <div id="pgThoughtText" class="pg-thought-text"></div>

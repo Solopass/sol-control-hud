@@ -312,7 +312,7 @@ def cmd_show(args) -> int:
 
 def cmd_search(args) -> int:
     try:
-        hits = index_tools.search(args.query, project=args.project, k=args.k)
+        hits = index_tools.search(args.query, project=args.project, k=args.k, force_keyword=getattr(args, "keyword", False))
     except (index_tools.IndexError_, OSError) as e:
         print(f"sol-search: {e}")
         return 1
@@ -385,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     se.add_argument("query")
     se.add_argument("--in", dest="project", help="only paths with this folder name in them (e.g. gatkam)")
     se.add_argument("-k", type=int, default=8)
+    se.add_argument("-kw", "--keyword", action="store_true", help="force fast FTS5 keyword-only search without embedder")
     se.set_defaults(fn=cmd_search)
     ix = sub.add_parser("index", help="build or refresh the search index now")
     ix.set_defaults(fn=cmd_index)

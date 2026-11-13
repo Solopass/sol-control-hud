@@ -187,7 +187,7 @@ def _unit(vec: list[float]) -> bytes:
     return array("f", (x / n for x in vec)).tobytes()
 
 
-def _embed_one(client: httpx.Client, text: str) -> bytes:
+def _embed_one(client: httpx.Client, text: str, max_retries: int = 5) -> bytes:
     """One input per request: the embedder's physical batch is 512 tokens, so a dense chunk (code is ~2.5 chars/token) can
     overflow it and get a 500. Retry with the tail cut off; a vector of the first part is still a fine address."""
     err = None
@@ -204,7 +204,7 @@ def _embed_one(client: httpx.Client, text: str) -> bytes:
             return _unit(r.json()["data"][0]["embedding"])
         except (httpx.TransportError, ConnectionError) as e:
             dropped += 1
-            if dropped > len(CONNECT_WAITS):
+            if dropped > max_retries or dropped > len(CONNECT_WAITS):
                 raise IndexError_(f"embedder at {EMBED_URL} failed: {e}") from e
             time.sleep(CONNECT_WAITS[dropped - 1])
         except (httpx.HTTPError, ValueError, KeyError, IndexError) as e:
@@ -212,17 +212,18 @@ def _embed_one(client: httpx.Client, text: str) -> bytes:
     raise IndexError_(f"embedder at {EMBED_URL} rejected a chunk even when cut short: {err}")
 
 
-def embed(texts: list[str], prefix: str = "search_document: ", client: httpx.Client | None = None) -> list[bytes]:
+def embed(texts: list[str], prefix: str = "search_document: ", client: httpx.Client | None = None,
+          retries_on_connect: int = 5) -> list[bytes]:
     """Unit-length float32 blobs, one per text (4 requests at a time: the embedder has 4 slots).
     nomic expects a task prefix on every input."""
     own = client is None
-    client = client or httpx.Client(timeout=120)
+    client = client or httpx.Client(timeout=2.0)
     try:
         jobs = [prefix + t[:EMBED_MAX_CHARS] for t in texts]
         if len(jobs) < 2:
-            return [_embed_one(client, j) for j in jobs]
+            return [_embed_one(client, j, max_retries=retries_on_connect) for j in jobs]
         with ThreadPoolExecutor(max_workers=4) as pool:
-            return list(pool.map(lambda j: _embed_one(client, j), jobs))
+            return list(pool.map(lambda j: _embed_one(client, j, max_retries=retries_on_connect), jobs))
     finally:
         if own:
             client.close()
@@ -439,47 +440,70 @@ def _snippet(text: str, terms: list[str]) -> str:
 
 
 def search(query: str, project: str | None = None, k: int = 8, db: Path | str | None = None,
-           semantic_weight: float = 1.0, keyword_weight: float = 0.3, per_file: int = 2) -> list[dict]:
-    """-> [{path, start, end, score, snippet}] best first."""
+           semantic_weight: float = 1.0, keyword_weight: float = 0.3, per_file: int = 2,
+           force_keyword: bool = False) -> list[dict]:
+    """-> [{path, start, end, score, snippet, mode}] best first."""
     db = Path(db or DB_PATH)
     if not db.exists():
         raise IndexError_(f"no index at {db}; build it with: python -m sol_control_hud.chains index")
     data = _load(db)
     if not data["ids"]:
         return []
-    q = embed([query], prefix="search_query: ")[0]
+
+    q = None
+    search_mode = "hybrid"
+    if not force_keyword:
+        try:
+            q = embed([query], prefix="search_query: ", retries_on_connect=0)[0]
+        except Exception:
+            q = None
+            search_mode = "keyword_fallback"
+
     ids, paths = data["ids"], data["paths"]
-    if np is not None:
-        scores = (data["matrix"] @ np.frombuffer(q, dtype=np.float32)).astype(float)
-        if project:  # filter before picking the pool, or a small project's hits could fall outside it
-            scores = np.where(np.fromiter((_in_project(paths[c], project) for c in ids), bool, len(ids)), scores, -9.0)
-    else:
-        qv = array("f", q)
-        scores = [sum(a * b for a, b in zip(row, qv)) for row in data["matrix"]]
-        if project:
-            scores = [s if _in_project(paths[c], project) else -9.0 for s, c in zip(scores, ids)]
+    scores = None
+    if q is not None:
+        if np is not None:
+            scores = (data["matrix"] @ np.frombuffer(q, dtype=np.float32)).astype(float)
+            if project:  # filter before picking the pool, or a small project's hits could fall outside it
+                scores = np.where(np.fromiter((_in_project(paths[c], project) for c in ids), bool, len(ids)), scores, -9.0)
+        else:
+            qv = array("f", q)
+            scores = [sum(a * b for a, b in zip(row, qv)) for row in data["matrix"]]
+            if project:
+                scores = [s if _in_project(paths[c], project) else -9.0 for s, c in zip(scores, ids)]
+
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=60)
     try:
         terms = _terms(query)
         kw = _keyword_scores(con, terms)
         pos = {cid: i for i, cid in enumerate(ids)}
         blended = {}
-        n = len(ids)
-        pool = max(k * 20, 100)
-        if np is not None and n > pool:
-            top = np.argpartition(-scores, pool - 1)[:pool]
+
+        if scores is not None:
+            n = len(ids)
+            pool = max(k * 20, 100)
+            if np is not None and n > pool:
+                top = np.argpartition(-scores, pool - 1)[:pool]
+            else:
+                top = range(n)
+            for i in top:
+                blended[ids[i]] = semantic_weight * float(scores[i])
+            for cid, s in kw.items():
+                if cid in pos:
+                    blended.setdefault(cid, semantic_weight * float(scores[pos[cid]]))
+            for cid in blended:
+                blended[cid] += keyword_weight * kw.get(cid, 0.0)
         else:
-            top = range(n)
-        for i in top:
-            blended[ids[i]] = semantic_weight * float(scores[i])
-        for cid, s in kw.items():
-            if cid in pos:
-                blended.setdefault(cid, semantic_weight * float(scores[pos[cid]]))
-        for cid in blended:
-            blended[cid] += keyword_weight * kw.get(cid, 0.0)
+            # Pure keyword search
+            search_mode = "keyword_only" if force_keyword else "keyword_fallback"
+            for cid, s in kw.items():
+                blended[cid] = float(s)
+
         hits, per = [], Counter()
         for cid, sc in sorted(blended.items(), key=lambda kv: -kv[1]):
-            p = paths[cid]
+            p = paths.get(cid)
+            if not p:
+                continue
             if project and not _in_project(p, project):
                 continue
             if per[p] >= per_file:
@@ -487,7 +511,14 @@ def search(query: str, project: str | None = None, k: int = 8, db: Path | str | 
             per[p] += 1
             row = con.execute("SELECT start_line, end_line, text FROM chunks WHERE id=?", (cid,)).fetchone()
             if row:
-                hits.append({"path": p, "start": row[0], "end": row[1], "score": sc, "snippet": _snippet(row[2], terms)})
+                hits.append({
+                    "path": p,
+                    "start": row[0],
+                    "end": row[1],
+                    "score": sc,
+                    "snippet": _snippet(row[2], terms),
+                    "mode": search_mode,
+                })
             if len(hits) >= k:
                 break
         return hits
