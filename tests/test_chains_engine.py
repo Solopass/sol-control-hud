@@ -588,5 +588,43 @@ def test_scan_stale_notes_and_archive_note(area):
     assert manifest.exists() and "old_review.md" in manifest.read_text(encoding="utf-8")
 
 
+def test_sync_tasks_creates_and_deduplicates(tmp_path):
+    tasks_file = tmp_path / "Tasks.md"
+    policy = ft.Policy(read_roots=[str(tmp_path)], write_roots=[str(tmp_path)])
+
+    tasks_input = [
+        {"task": "Submit chemistry lab report", "due": "2026-11-15", "loop": "school"},
+        {"task": "Fix subprocess timeout in media-api", "due": None, "source": "Weekly digest"},
+        "Buy cat food",
+    ]
+
+    res = ft.sync_tasks({"file": str(tasks_file), "tasks": tasks_input}, policy=policy)
+    assert res["ok"] is True
+    assert res["added"] == 3
+    assert res["total_open"] == 3
+
+    content = tasks_file.read_text(encoding="utf-8")
+    assert "- [ ] Submit chemistry lab report (due: 2026-11-15, loop: school)" in content
+    assert "- [ ] Fix subprocess timeout in media-api (from: Weekly digest)" in content
+    assert "- [ ] Buy cat food" in content
+
+    # Run again with duplicates and one new task
+    tasks_input_2 = [
+        {"task": "Submit chemistry lab report", "due": "2026-11-15"},
+        "buy cat food",  # case-insensitive duplicate
+        {"task": "Review PR on Solopass/gatkam", "due": "tomorrow"},
+    ]
+    res2 = ft.sync_tasks({"file": str(tasks_file), "tasks": tasks_input_2}, policy=policy)
+    assert res2["ok"] is True
+    assert res2["added"] == 1
+    assert res2["total_open"] == 4
+
+    content2 = tasks_file.read_text(encoding="utf-8")
+    assert content2.count("chemistry lab report") == 1
+    assert content2.count("cat food") == 1
+    assert "- [ ] Review PR on Solopass/gatkam" in content2
+
+
+
 
 

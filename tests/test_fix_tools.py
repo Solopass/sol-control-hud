@@ -2,6 +2,7 @@
 the main checkout is unchanged [R1]. Windows-only pieces (junctions) run on this PC."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -523,3 +524,62 @@ def test_an_interrupted_fix_lane_asks_the_runner_to_retry(env, monkeypatch):
         fx.fix_attempts({"queue": str(q), "max_tasks": 1}, None, propose=interrupted)
     assert "[attempts: 0/2]" in q.read_text()                     # the attempt was given back
     assert "interrupted" in saved["text"]                         # and the report still says what happened
+
+
+def test_task_files_falls_back_to_search_when_no_direct_name_match(env, monkeypatch):
+    main, repos, tmp = env
+    wt = tmp / "wt"
+    shutil.copytree(main, wt)
+    # mod.py is tracked in wt
+    # Task names a concept, not the file name "mod.py"
+    task = "fix arithmetic addition in calculate"
+
+    # Mock index_tools.search
+    from sol_control_hud.chains import index_tools
+    monkeypatch.setattr(index_tools, "search", lambda q, project=None, k=3: [
+        type("Hit", (), {"path": "proj/pkg/mod.py", "score": 0.95})()
+    ])
+
+    files = fx.task_files(wt, task, repo_key="proj")
+    assert "pkg/mod.py" in files
+    assert "def add(a, b):" in files["pkg/mod.py"]
+
+
+def test_queue_status_and_add_and_reset_queue_task(tmp_path, monkeypatch):
+    q = tmp_path / "Fix queue.md"
+    q.write_text("""---
+type: fix-queue
+---
+## Open
+- [ ] [attempts: 1/2] media-api: timeout fix in chunk_service.py
+
+## Green
+- [x] speedman: handle missing file -> branch ai/20261028-handle-missing-120000
+
+## Unresolved
+- edit-api: add feature [failed: no-match]
+""", encoding="utf-8")
+
+    st = fx.queue_status(q)
+    assert st["total_open"] == 1
+    assert len(st["open"]) == 1
+    assert st["open"][0]["repo"] == "media-api"
+    assert len(st["green"]) == 1
+    assert st["green"][0]["branch"] == "ai/20261028-handle-missing-120000"
+    assert len(st["unresolved"]) == 1
+    assert st["unresolved"][0]["reason"] == "no-match"
+
+    # Add task
+    monkeypatch.setattr(fx, "load_repos", lambda: {"media-api": {}, "speedman": {}})
+    ok = fx.add_queue_task("media-api", "add timeout to second call", q)
+    assert ok is True
+    st2 = fx.queue_status(q)
+    assert st2["total_open"] == 2
+    assert st2["open"][0]["task"] == "add timeout to second call"
+
+    # Reset unresolved task
+    ok_reset = fx.reset_queue_task("edit-api", "add feature", q)
+    assert ok_reset is True
+    st3 = fx.queue_status(q)
+    assert st3["total_open"] == 3
+    assert len(st3["unresolved"]) == 0

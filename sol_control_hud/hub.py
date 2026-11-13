@@ -1380,6 +1380,28 @@ class Hub:
             except Exception as e:
                 return {"ok": False, "why": str(e), "hits": []}
 
+        @app.get("/api/fix-queue")
+        def get_fix_queue() -> dict:
+            from .chains import fix_tools
+            return fix_tools.queue_status()
+
+        @app.post("/api/fix-queue")
+        def modify_fix_queue(body: dict = Body(default={})) -> dict:
+            from .chains import fix_tools
+            action = str(body.get("action") or "add")
+            repo = str(body.get("repo") or "").strip()
+            task = str(body.get("task") or "").strip()
+            if action == "add":
+                try:
+                    ok = fix_tools.add_queue_task(repo, task)
+                    return {"ok": ok, "why": "added task" if ok else "failed to add task"}
+                except fix_tools.Rejected as e:
+                    return {"ok": False, "why": str(e)}
+            if action == "reset":
+                ok = fix_tools.reset_queue_task(repo, task)
+                return {"ok": ok, "why": "reset task" if ok else "failed to reset task"}
+            return {"ok": False, "why": f"unknown action: {action}"}
+
         @app.post("/api/playground")
         def playground_run(body: dict = Body(default={})) -> dict:
             import urllib.request

@@ -16,6 +16,7 @@ Rules (checked on the real path: `..`, symlinks and junctions are resolved first
 from __future__ import annotations
 
 import fnmatch
+import json
 import os
 import re
 import subprocess
@@ -411,6 +412,97 @@ def archive_note(args: dict, ctx=None, policy: Policy | None = None) -> dict:
     return {"archived": str(target), "source": str(src), "month": month}
 
 
+def sync_tasks(args: dict, ctx=None, policy: Policy | None = None) -> dict:
+    """Sync a list of tasks into 1Notebook/Tasks.md, deduplicating against existing open tasks."""
+    raw_tasks = args.get("tasks")
+    if isinstance(raw_tasks, dict):
+        raw_tasks = raw_tasks.get("tasks") or []
+    elif isinstance(raw_tasks, str):
+        try:
+            parsed = json.loads(raw_tasks)
+            raw_tasks = parsed.get("tasks") if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [raw_tasks])
+        except (ValueError, TypeError):
+            raw_tasks = [raw_tasks]
+    elif not isinstance(raw_tasks, list):
+        raw_tasks = []
+
+    target_file = Path(args.get("file") or r"D:\OBVLT\1Notebook\Tasks.md")
+    p = check_write(target_file, policy)
+
+    existing_text = ""
+    if p.exists():
+        try:
+            existing_text = p.read_text(encoding="utf-8")
+        except OSError:
+            pass
+
+    existing_open = []
+    for line in existing_text.splitlines():
+        if line.strip().startswith("- [ ]"):
+            cleaned = re.sub(r"^- \[ \]\s*", "", line.strip()).lower()
+            cleaned = re.sub(r"\s*\(.*?\)\s*$", "", cleaned).strip()
+            if cleaned:
+                existing_open.append(cleaned)
+
+    added = []
+    lines_to_add = []
+    for item in raw_tasks:
+        if isinstance(item, dict):
+            task_str = str(item.get("task") or "").strip()
+            due = str(item.get("due") or "").strip()
+            loop = str(item.get("loop") or "").strip()
+            src = str(item.get("source") or "").strip()
+            meta = []
+            if due and due.lower() not in ("none", "null", ""):
+                meta.append(f"due: {due}")
+            if loop and loop.lower() not in ("none", "null", ""):
+                meta.append(f"loop: {loop}")
+            if src and src.lower() not in ("none", "null", ""):
+                meta.append(f"from: {src}")
+            suffix = f" ({', '.join(meta)})" if meta else ""
+        else:
+            task_str = str(item).strip()
+            suffix = ""
+
+        if not task_str:
+            continue
+
+        clean_task = task_str.lower()
+        if any(clean_task == ex or (len(clean_task) > 10 and clean_task in ex) for ex in existing_open):
+            continue
+
+        line = f"- [ ] {task_str}{suffix}"
+        lines_to_add.append(line)
+        added.append(task_str)
+        existing_open.append(clean_task)
+
+    if lines_to_add:
+        if not existing_text.strip():
+            new_text = "# Tasks\n\n## Open\n" + "\n".join(lines_to_add) + "\n\n## Completed\n"
+        else:
+            lines = existing_text.split("\n")
+            open_idx = -1
+            for idx, ln in enumerate(lines):
+                if ln.strip().lower() == "## open":
+                    open_idx = idx
+                    break
+            if open_idx != -1:
+                lines[open_idx + 1:open_idx + 1] = lines_to_add
+                new_text = "\n".join(lines)
+            else:
+                new_text = existing_text.rstrip() + "\n\n## Open\n" + "\n".join(lines_to_add) + "\n"
+
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(new_text, encoding="utf-8")
+        os.replace(tmp, p)
+
+    total_open = len(existing_open)
+    if ctx is not None:
+        ctx.note(f"synced tasks: {len(added)} added, {total_open} total open")
+    return {"ok": True, "added": len(added), "total_open": total_open, "tasks": added}
+
+
 TOOLS = {"list_files": list_files, "read_text": read_text, "save_note": save_note, "git_changes": git_changes,
-         "scan_stale_notes": scan_stale_notes, "archive_note": archive_note}
+         "scan_stale_notes": scan_stale_notes, "archive_note": archive_note, "sync_tasks": sync_tasks}
 

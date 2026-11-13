@@ -283,6 +283,24 @@
     </div>
     <h3 class="chainhead">All chains <input type="search" id="chainFilter" class="mini-search" placeholder="filter chains…" aria-label="Filter chains"></h3>
     <div class="chainlist" id="chainList"><div class="empty">loading…</div></div>
+    <div class="fix-queue-strip" id="chainFixQueue">
+      <div class="row header-row" style="margin-top:12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="margin:0;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--dim);">Fix Queue <span class="pill" id="fixQueuePill">0 open</span></h3>
+        <button class="mini ghost" id="btnToggleAddFix" title="Add a task to Fix queue.md">+ Add Fix Task</button>
+      </div>
+      <div class="add-fix-form" id="addFixForm" hidden style="margin-bottom:8px;">
+        <div class="row" style="display:flex;gap:6px;">
+          <select id="fixRepoSelect" class="mini-select">
+            <option value="media-api">media-api</option>
+            <option value="speedman">speedman</option>
+            <option value="edit-api">edit-api</option>
+          </select>
+          <input type="text" id="fixTaskInput" class="mini-search grow" placeholder="e.g. in app/services/chunk_service.py add timeout=600 to subprocess.run">
+          <button class="mini go" id="btnSubmitFixTask">Add</button>
+        </div>
+      </div>
+      <div class="list" id="fixQueueList"><div class="empty dim">No open fix tasks</div></div>
+    </div>
   </article>
 
   <article class="card wide" id="c-overnight" data-open="RUN">

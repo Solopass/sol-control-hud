@@ -568,11 +568,13 @@ def gitleaks_clean(wt: Path) -> bool:
     return r.returncode == 0
 
 
-def task_files(wt: Path, task: str, limit: int = 3, max_chars: int = 12000) -> dict[str, str]:
-    """The tracked source files whose names appear in the task text (that's all the model gets to see)."""
+def task_files(wt: Path, task: str, limit: int = 3, max_chars: int = 12000, repo_key: str | None = None) -> dict[str, str]:
+    """The tracked source files whose names appear in the task text (that's all the model gets to see).
+    If no files match directly by name in the task text, falls back to sol-search (index_tools.search)."""
     low = task.lower()
     out: dict[str, str] = {}
-    for rel in git(wt, "ls-files").stdout.splitlines():
+    tracked = git(wt, "ls-files").stdout.splitlines()
+    for rel in tracked:
         if Path(rel).name.lower() in low and denied_by_name(rel) is None:
             try:
                 out[rel] = (wt / rel).read_text(encoding="utf-8")[:max_chars]
@@ -580,6 +582,25 @@ def task_files(wt: Path, task: str, limit: int = 3, max_chars: int = 12000) -> d
                 continue
         if len(out) >= limit:
             break
+    if not out and repo_key:
+        try:
+            from . import index_tools
+            hits = index_tools.search(task, project=repo_key, k=limit)
+            tracked_set = set(tracked)
+            for hit in hits:
+                rel = hit.path.replace("\\", "/")
+                # hit.path may be project-relative or repo-relative
+                if rel.startswith(f"{repo_key}/"):
+                    rel = rel[len(repo_key) + 1:]
+                if rel in tracked_set and rel not in out and denied_by_name(rel) is None:
+                    try:
+                        out[rel] = (wt / rel).read_text(encoding="utf-8")[:max_chars]
+                    except (OSError, UnicodeDecodeError):
+                        continue
+                if len(out) >= limit:
+                    break
+        except Exception:
+            pass
     return out
 
 
@@ -606,7 +627,7 @@ def _attempt(repo_key: str, cfg: dict, task: str, propose, abort, note) -> dict:
             src = Path(main) / link                         # gitignored folders the tests need (node_modules, models/)
             if re.fullmatch(r"[A-Za-z0-9_.-]+", link) and src.is_dir():
                 subprocess.run(["cmd", "/c", "mklink", "/J", str(wt / link), str(src)], capture_output=True, creationflags=NO_WINDOW)
-        files = task_files(wt, task)
+        files = task_files(wt, task, repo_key=repo_key)
         if not files:
             return {"status": "failed", "reason": "no-match", "detail": "the task names no tracked source file"}
         note(f"{repo_key}: baseline tests")
@@ -685,6 +706,8 @@ def run_attempt(repo_key: str, task: str, propose, abort=lambda: False, note=lam
 
 # ------------------------------------------------------------------ the queue (Fix queue.md)
 TASK_RE = re.compile(r"^- \[ \] \[attempts: (\d+)/(\d+)\] ([a-z0-9._-]+): (.+?)\s*$")
+GREEN_RE = re.compile(r"^- \[x\] ([a-z0-9._-]+): (.+?) -> branch (\S+)\s*$")
+UNRESOLVED_RE = re.compile(r"^- ([a-z0-9._-]+): (.+?) \[failed: (.+?)\]\s*$")
 
 
 def parse_queue(text: str) -> list[dict]:
@@ -751,6 +774,97 @@ def settle(path: Path, task: dict, res: dict) -> None:
                                                          f"{task['repo']}: {task['task']}"))
     elif task["attempts"] >= task["max"]:
         edit_queue(path, lambda t: _replace_line(t, ln, None, f"- {task['repo']}: {task['task']} [failed: {res['reason']}]"))
+
+
+def queue_status(path: Path = QUEUE_FILE) -> dict:
+    open_tasks = []
+    green_tasks = []
+    unresolved_tasks = []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {"open": [], "green": [], "unresolved": [], "total_open": 0}
+
+    for i, ln in enumerate(text.splitlines()):
+        stripped = ln.strip()
+        m_open = TASK_RE.match(stripped)
+        if m_open:
+            open_tasks.append({
+                "line_no": i, "line": ln, "attempts": int(m_open.group(1)),
+                "max": int(m_open.group(2)), "repo": m_open.group(3),
+                "task": m_open.group(4)
+            })
+            continue
+        m_green = GREEN_RE.match(stripped)
+        if m_green:
+            green_tasks.append({
+                "line_no": i, "line": ln, "repo": m_green.group(1),
+                "task": m_green.group(2), "branch": m_green.group(3)
+            })
+            continue
+        m_unres = UNRESOLVED_RE.match(stripped)
+        if m_unres:
+            unresolved_tasks.append({
+                "line_no": i, "line": ln, "repo": m_unres.group(1),
+                "task": m_unres.group(2), "reason": m_unres.group(3)
+            })
+    return {
+        "open": open_tasks,
+        "green": green_tasks,
+        "unresolved": unresolved_tasks,
+        "total_open": len(open_tasks),
+    }
+
+
+def add_queue_task(repo: str, task: str, path: Path = QUEUE_FILE) -> bool:
+    repo = repo.strip().lower()
+    task = task.strip()
+    if not repo or not task:
+        return False
+    repos = load_repos()
+    if repo not in repos:
+        raise Rejected("denied", f"repo {repo!r} is not on the fix allowlist")
+
+    new_line = f"- [ ] [attempts: 0/2] {repo}: {task}"
+
+    def mutate(text: str) -> str:
+        lines = text.split("\n")
+        open_idx = -1
+        for idx, line in enumerate(lines):
+            if line.strip().lower() == "## open":
+                open_idx = idx
+                break
+        if open_idx != -1:
+            lines.insert(open_idx + 1, new_line)
+        else:
+            lines.extend(["", "## Open", new_line])
+        return "\n".join(lines)
+
+    return edit_queue(path, mutate)
+
+
+def reset_queue_task(repo: str, task: str, path: Path = QUEUE_FILE) -> bool:
+    repo = repo.strip().lower()
+    task = task.strip()
+
+    def mutate(text: str) -> str:
+        lines = text.split("\n")
+        new_lines = []
+        replaced = False
+        for ln in lines:
+            m_unres = UNRESOLVED_RE.match(ln.strip())
+            m_open = TASK_RE.match(ln.strip())
+            if m_unres and m_unres.group(1) == repo and m_unres.group(2) == task:
+                new_lines.append(f"- [ ] [attempts: 0/2] {repo}: {task}")
+                replaced = True
+            elif m_open and m_open.group(3) == repo and m_open.group(4) == task:
+                new_lines.append(f"- [ ] [attempts: 0/2] {repo}: {task}")
+                replaced = True
+            else:
+                new_lines.append(ln)
+        return "\n".join(new_lines) if replaced else text
+
+    return edit_queue(path, mutate)
 
 
 # ------------------------------------------------------------------ startup scrub, abort flag, the chain tool
