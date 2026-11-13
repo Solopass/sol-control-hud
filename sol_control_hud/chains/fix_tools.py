@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -27,6 +28,7 @@ from pathlib import Path
 
 import jsonschema
 
+from .. import swallow
 from . import file_tools
 from .file_tools import NO_WINDOW
 
@@ -568,9 +570,21 @@ def gitleaks_clean(wt: Path) -> bool:
     return r.returncode == 0
 
 
-def task_files(wt: Path, task: str, limit: int = 3, max_chars: int = 12000, repo_key: str | None = None) -> dict[str, str]:
+def _rel_to_main(path: str, main: str) -> str | None:
+    """An absolute index path -> its '/'-separated path relative to the main checkout (case-insensitive), or None if outside."""
+    root = os.path.normcase(os.path.normpath(main)).replace("\\", "/").rstrip("/")
+    full = os.path.normcase(os.path.normpath(path)).replace("\\", "/")
+    if not full.startswith(root + "/"):
+        return None
+    return os.path.normpath(path).replace("\\", "/")[len(root) + 1:]
+
+
+def task_files(wt: Path, task: str, limit: int = 3, max_chars: int = 12000, repo_key: str | None = None,
+               main: str | None = None, note=None) -> dict[str, str]:
     """The tracked source files whose names appear in the task text (that's all the model gets to see).
-    If no files match directly by name in the task text, falls back to sol-search (index_tools.search)."""
+    If no files match directly by name, falls back to sol-search (index_tools.search) when `repo_key` and the repo's
+    main checkout path `main` are given (the index holds absolute paths of the main checkout; files are read from `wt`).
+    `note(msg)` is told which files sol-search picked."""
     low = task.lower()
     out: dict[str, str] = {}
     tracked = git(wt, "ls-files").stdout.splitlines()
@@ -582,25 +596,26 @@ def task_files(wt: Path, task: str, limit: int = 3, max_chars: int = 12000, repo
                 continue
         if len(out) >= limit:
             break
-    if not out and repo_key:
+    if not out and repo_key and main:
+        from . import index_tools
         try:
-            from . import index_tools
-            hits = index_tools.search(task, project=repo_key, k=limit)
-            tracked_set = set(tracked)
-            for hit in hits:
-                rel = hit.path.replace("\\", "/")
-                # hit.path may be project-relative or repo-relative
-                if rel.startswith(f"{repo_key}/"):
-                    rel = rel[len(repo_key) + 1:]
-                if rel in tracked_set and rel not in out and denied_by_name(rel) is None:
-                    try:
-                        out[rel] = (wt / rel).read_text(encoding="utf-8")[:max_chars]
-                    except (OSError, UnicodeDecodeError):
-                        continue
-                if len(out) >= limit:
-                    break
-        except Exception:
-            pass
+            hits =index_tools.search(task, project=repo_key, k=limit)
+        except (index_tools.IndexError_, OSError, sqlite3.Error):
+            swallow.note("fix_tools.task_files")        # no index (or an unreadable one) just means no fallback hits
+            return out
+        tracked_set = set(tracked)
+        for hit in hits:
+            rel = _rel_to_main(hit["path"], main)
+            if rel is None or rel not in tracked_set or rel in out or denied_by_name(rel) is not None:
+                continue
+            try:
+                out[rel] = (wt / rel).read_text(encoding="utf-8")[:max_chars]
+            except (OSError, UnicodeDecodeError):
+                continue
+            if len(out) >= limit:
+                break
+        if out and note:
+            note(f"{repo_key}: no file named in the task; sol-search picked {', '.join(out)}")
     return out
 
 
@@ -627,7 +642,7 @@ def _attempt(repo_key: str, cfg: dict, task: str, propose, abort, note) -> dict:
             src = Path(main) / link                         # gitignored folders the tests need (node_modules, models/)
             if re.fullmatch(r"[A-Za-z0-9_.-]+", link) and src.is_dir():
                 subprocess.run(["cmd", "/c", "mklink", "/J", str(wt / link), str(src)], capture_output=True, creationflags=NO_WINDOW)
-        files = task_files(wt, task, repo_key=repo_key)
+        files = task_files(wt, task, repo_key=repo_key, main=main, note=note)
         if not files:
             return {"status": "failed", "reason": "no-match", "detail": "the task names no tracked source file"}
         note(f"{repo_key}: baseline tests")

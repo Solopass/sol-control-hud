@@ -526,23 +526,63 @@ def test_an_interrupted_fix_lane_asks_the_runner_to_retry(env, monkeypatch):
     assert "interrupted" in saved["text"]                         # and the report still says what happened
 
 
-def test_task_files_falls_back_to_search_when_no_direct_name_match(env, monkeypatch):
+def _wt_copy(env):
     main, repos, tmp = env
-    wt = tmp / "wt"
+    wt = tmp / "wtcopy"
     shutil.copytree(main, wt)
-    # mod.py is tracked in wt
-    # Task names a concept, not the file name "mod.py"
-    task = "fix arithmetic addition in calculate"
+    (wt / ".env").write_text("SECRET=1\n")
+    run_git(wt, "add", "-f", ".env")                      # tracked but denied by name
+    (wt / "pkg" / "mod.py").write_text("def add(a, b):\n    return a - b  # worktree copy\n")
+    return main, wt
 
-    # Mock index_tools.search
+
+def _hit(path):
+    return {"path": str(path), "start": 1, "end": 5, "score": 0.9, "snippet": "x", "mode": "hybrid"}
+
+
+def test_task_files_falls_back_to_search_when_no_direct_name_match(env, monkeypatch):
+    main, wt = _wt_copy(env)
+    from sol_control_hud.chains import index_tools
+    calls, notes = [], []
+    monkeypatch.setattr(index_tools, "search", lambda q, project=None, k=3: calls.append((q, project, k)) or [
+        _hit(str(main).upper() + "\\pkg\\mod.py")])      # absolute, repo folder in a different case
+    files = fx.task_files(wt, "fix arithmetic addition in calculate", repo_key="proj", main=str(main), note=notes.append)
+    assert list(files) == ["pkg/mod.py"]
+    assert "worktree copy" in files["pkg/mod.py"]               # read from the worktree, not main
+    assert calls == [("fix arithmetic addition in calculate", "proj", 3)]
+    assert len(notes) == 1 and "pkg/mod.py" in notes[0]
+
+
+def test_task_files_search_skips_outside_untracked_and_denied(env, monkeypatch, tmp_path):
+    main, wt = _wt_copy(env)
+    (wt / "scratch.py").write_text("x = 1\n")              # exists but untracked
     from sol_control_hud.chains import index_tools
     monkeypatch.setattr(index_tools, "search", lambda q, project=None, k=3: [
-        type("Hit", (), {"path": "proj/pkg/mod.py", "score": 0.95})()
+        _hit(tmp_path / "elsewhere" / "pkg" / "mod.py"),
+        _hit(main / "scratch.py"),
+        _hit(main / ".env"),
+        _hit(str(main) + "-other/pkg/mod.py"),                 # sibling folder sharing the prefix
     ])
+    assert fx.task_files(wt, "fix arithmetic", repo_key="proj", main=str(main)) == {}
 
-    files = fx.task_files(wt, task, repo_key="proj")
-    assert "pkg/mod.py" in files
-    assert "def add(a, b):" in files["pkg/mod.py"]
+
+def test_task_files_search_failure_means_no_fallback(env, monkeypatch):
+    main, wt = _wt_copy(env)
+    from sol_control_hud.chains import index_tools
+
+    def boom(q, project=None, k=3):
+        raise index_tools.IndexError_("no index at x")
+    monkeypatch.setattr(index_tools, "search", boom)
+    assert fx.task_files(wt, "fix arithmetic", repo_key="proj", main=str(main)) == {}
+
+
+def test_task_files_direct_name_match_wins_and_skips_search(env, monkeypatch):
+    main, wt = _wt_copy(env)
+    from sol_control_hud.chains import index_tools
+    called = []
+    monkeypatch.setattr(index_tools, "search", lambda *a, **k: called.append(1) or [])
+    files = fx.task_files(wt, "fix add in mod.py", repo_key="proj", main=str(main))
+    assert list(files) == ["pkg/mod.py"] and called == []
 
 
 def test_queue_status_and_add_and_reset_queue_task(tmp_path, monkeypatch):
