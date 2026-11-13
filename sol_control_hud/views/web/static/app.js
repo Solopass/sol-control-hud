@@ -293,6 +293,7 @@ function render(p) {
   const sys = slide(p, 'SYS'); setHTML($('sysSeg'), sys ? segHtml(sys.segments) : '');
   const crashes = s.unexpected_reboots + s.gpu_resets, cc = $('crashCount');
   cc.textContent = crashes ? `${crashes}: Away blocked` : '0: Away allowed'; cc.style.color = crashes ? 'var(--red)' : 'var(--green)';
+  if ($('ackCrashBtn')) $('ackCrashBtn').hidden = crashes === 0;
   const st = p.stability || {};
   $('ackUntil').textContent = st.since ? st.since.replace('T', ' ') : '–';
   $('ackNote').textContent = st.acknowledged || '';
