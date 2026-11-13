@@ -568,6 +568,85 @@ class Hub:
             if hasattr(self, "collectors") and "ports" in self.collectors:
                 self.collectors["ports"].value = None      # the card lists what's left on its next poll
             return r
+        if action == "media_target":
+            from .data.collectors import media
+            new_target = str(target or (body or {}).get("target", "")).strip()
+            if not new_target:
+                return {"ok": False, "why": "missing target"}
+            media.set_media_target(new_target)
+            log(f"media target -> {new_target}")
+            return {"ok": True, "target": new_target}
+        if action == "media_transport":
+            b = body or {}
+            op = str(target or b.get("op", "")).lower()
+            vk_map = {
+                "play": 0xB3,
+                "pause": 0xB3,
+                "play_pause": 0xB3,
+                "next": 0xB0,
+                "prev": 0xB1,
+                "stop": 0xB2,
+            }
+            vk = vk_map.get(op)
+            if not vk:
+                return {"ok": False, "why": f"unknown transport op {op!r}"}
+            try:
+                ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+                ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # KEYEVENTF_KEYUP = 2
+                log(f"media transport -> {op} (VK 0x{vk:02X})")
+                return {"ok": True, "op": op}
+            except Exception as e:
+                return {"ok": False, "why": str(e)}
+        if action == "kill_process":
+            import psutil
+            b = body or {}
+            try:
+                pid = int(target or b.get("pid", 0))
+            except (ValueError, TypeError):
+                return {"ok": False, "why": "invalid PID"}
+            if pid <= 4 or pid == os.getpid():
+                return {"ok": False, "why": "cannot kill system or HUD process"}
+            try:
+                p = psutil.Process(pid)
+                pname = p.name().lower()
+                protected = {
+                    "system", "idle", "registry", "smss.exe", "csrss.exe", "wininit.exe",
+                    "services.exe", "lsass.exe", "svchost.exe", "winlogon.exe", "explorer.exe",
+                    "sol-watch.exe", "sol-net.exe", "llama-server.exe", "pythonw.exe",
+                }
+                if pname in protected:
+                    return {"ok": False, "why": f"refusing to terminate protected process {pname}"}
+                p.terminate()
+                log(f"terminated process PID {pid} ({pname}) via Process Radar")
+                return {"ok": True, "pid": pid, "name": pname}
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                return {"ok": False, "why": str(e)}
+        if action == "svc_control":
+            b = body or {}
+            svc = str(target or b.get("service", "")).lower()
+            cmd = str(b.get("cmd", "restart")).lower()
+            if svc in ("router", "llama_router", "llama"):
+                from .data.collectors import engines
+                log(f"service control -> {svc} ({cmd})")
+                try:
+                    engines.llama_swap()  # queries / triggers health check
+                    return {"ok": True, "service": svc, "status": "active"}
+                except Exception as e:
+                    return {"ok": False, "why": str(e)}
+            elif svc in ("watcher", "sol_watch"):
+                import subprocess
+                subprocess.Popen(["powershell", "-NoProfile", "-Command", "Start-Process sol-watch.exe -WindowStyle Hidden"],
+                                 shell=False, creationflags=0x08000000 if os.name == "nt" else 0)
+                log("service control -> started sol-watch.exe")
+                return {"ok": True, "service": svc, "why": "started sol-watch.exe"}
+            elif svc in ("chains", "chains_runner"):
+                from . import control
+                try:
+                    c_list = control.list_chains()
+                    return {"ok": True, "service": svc, "chains_count": len(c_list)}
+                except Exception as e:
+                    return {"ok": False, "why": str(e)}
+            return {"ok": False, "why": f"unknown service {svc!r}"}
         if action == "review":                    # the Exam review card (exam_review.py)
             return self.review_action(target, body or {})
         return {"ok": False, "why": f"unknown action {action!r}"}
@@ -1213,25 +1292,144 @@ class Hub:
         @app.get("/api/top-processes")
         def top_processes() -> dict:
             import psutil
+            now = time.monotonic()
+            if not hasattr(self, "_proc_cpu_cache"):
+                self._proc_cpu_cache = {}  # pid -> (cpu_time, sampled_at)
+            
             procs = []
-            for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
+            new_cache = {}
+            chips = (self.collectors.get("gpu", None) and self.collectors["gpu"].get() or {}).get("pid_chips") or {}
+
+            for p in psutil.process_iter(["pid", "name", "memory_info", "cpu_times"]):
                 try:
                     pid = p.info.get("pid")
-                    if pid is None:
+                    if pid is None or pid == 0:
                         continue
                     mem_info = p.info.get("memory_info")
                     mem_mb = (mem_info.rss if mem_info else 0) / (1024 * 1024)
+                    
+                    cpu_times = p.info.get("cpu_times")
+                    total_time = (cpu_times.user + cpu_times.system) if cpu_times else 0.0
+                    new_cache[pid] = (total_time, now)
+
+                    cpu_pct = 0.0
+                    if pid in self._proc_cpu_cache:
+                        prev_time, prev_at = self._proc_cpu_cache[pid]
+                        dt = now - prev_at
+                        if dt > 0.1:
+                            cpu_pct = max(0.0, ((total_time - prev_time) / dt) * 100.0)
+
                     procs.append({
                         "pid": pid,
                         "name": p.info.get("name") or "",
-                        "cpu": p.info.get("cpu_percent") or 0.0,
+                        "cpu": round(cpu_pct, 1),
                         "mem_mb": round(mem_mb, 1),
+                        "chip": chips.get(pid),
                     })
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, AttributeError):
                     continue
-            top_cpu = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:5]
-            top_mem = sorted(procs, key=lambda x: x["mem_mb"], reverse=True)[:5]
-            return {"ok": True, "top_cpu": top_cpu, "top_mem": top_mem}
+
+            self._proc_cpu_cache = new_cache
+            top_cpu = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:6]
+            top_mem = sorted(procs, key=lambda x: x["mem_mb"], reverse=True)[:6]
+            gpu_procs = [p for p in procs if p.get("chip")]
+            top_gpu = sorted(gpu_procs, key=lambda x: (x["mem_mb"], x["cpu"]), reverse=True)[:6]
+
+            return {
+                "ok": True,
+                "top_cpu": top_cpu,
+                "top_mem": top_mem,
+                "top_gpu": top_gpu,
+            }
+
+        @app.get("/api/media-session")
+        def get_media_session() -> dict:
+            from .data.collectors import media
+            info = None
+            if hasattr(self, "collectors") and "media" in self.collectors:
+                info = getattr(self.collectors["media"], "_media", None)
+            if info is None:
+                info = media.MediaInfo()
+            target = media.get_media_target()
+            menu = media.media_keys_menu(info, target)
+            return {
+                "ok": True,
+                "status": info.status,
+                "title": info.title,
+                "artist": info.artist,
+                "app": info.app,
+                "clean_app": info.clean_app,
+                "playing": info.playing,
+                "keys": info.keys,
+                "target": target,
+                "last_key": info.last_key,
+                "sessions": list(info.sessions),
+                "menu": [{"label": m[0], "target": m[1]} for m in menu],
+            }
+
+        @app.post("/api/playground")
+        def playground_run(body: dict = Body(default={})) -> dict:
+            import urllib.request
+            b = body or {}
+            model = str(b.get("model", "sol-fast")).strip()
+            prompt = str(b.get("prompt", "")).strip()
+            system = str(b.get("system", "")).strip()
+            if not prompt:
+                return {"ok": False, "why": "Prompt cannot be empty"}
+
+            t0 = time.monotonic()
+            if model.startswith("gemini"):
+                from . import gemini_solver
+                try:
+                    res = gemini_solver.solve(prompt, api_key=gemini_solver.get_api_key(), model=model)
+                    dt = time.monotonic() - t0
+                    return {
+                        "ok": True,
+                        "model": model,
+                        "text": res.get("text", ""),
+                        "elapsed_s": round(dt, 2),
+                        "tok_s": round(res.get("chars", len(res.get("text", ""))) / 4.0 / max(dt, 0.001), 1),
+                        "thought": res.get("thought", ""),
+                    }
+                except Exception as e:
+                    return {"ok": False, "why": f"Gemini error: {e}"}
+            else:
+                # Local llama router
+                messages = []
+                if system:
+                    messages.append({"role": "system", "content": system})
+                messages.append({"role": "user", "content": prompt})
+
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": float(b.get("temperature", 0.7)),
+                    "max_tokens": int(b.get("max_tokens", 2048)),
+                }
+                req = urllib.request.Request(
+                    "http://127.0.0.1:11440/v1/chat/completions",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=60.0) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                    dt = time.monotonic() - t0
+                    choice = (data.get("choices") or [{}])[0]
+                    msg = choice.get("message") or {}
+                    usage = data.get("usage") or {}
+                    out_tokens = usage.get("completion_tokens") or (len(msg.get("content", "")) // 4)
+                    return {
+                        "ok": True,
+                        "model": model,
+                        "text": msg.get("content", ""),
+                        "thought": msg.get("reasoning_content", ""),
+                        "elapsed_s": round(dt, 2),
+                        "tok_s": round(out_tokens / max(dt, 0.001), 1),
+                        "usage": usage,
+                    }
+                except Exception as e:
+                    return {"ok": False, "why": f"Router error: {e}"}
 
         @app.get("/api/snapshot")
         def snapshot() -> dict:

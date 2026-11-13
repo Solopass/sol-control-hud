@@ -12,7 +12,7 @@ const LC = window.LayoutCore;    // the pure parts (layouts-core.js), tested wit
 
 // which loader feeds which card: a hidden card isn't polled, and is loaded at once when it comes back
 const LOADERS = { 'c-ports': 'loadPorts', 'c-notes': 'loadNotes', 'c-ai': 'loadGuard', 'c-gpu': 'loadDisplays', 'c-week': 'loadWeek',
-  'c-ai-usage': 'loadAiUsage',
+  'c-ai-usage': 'loadAiUsage', 'c-procs': 'loadProcs', 'c-media-ctl': 'loadMediaSession',
   'c-health': 'loadHealth', 'c-projects': 'loadProjects', 'c-media': 'loadMedia', 'c-chains': 'loadControl', 'c-ask': 'loadControl',
   'c-awayq': 'loadControl', 'c-overnight': 'loadOvernight' };
 
@@ -25,31 +25,41 @@ function gridCols() {
 function reg(id) { return (LAYOUT?.widgets || []).find((w) => w.id === id); }
 function activePreset() { return (LAYOUT?.presets || []).find((p) => p.name === LAYOUT.active) || LAYOUT?.presets?.[0]; }
 
+function withViewTransition(fn) {
+  if (typeof document.startViewTransition === 'function' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    document.startViewTransition(fn);
+  } else {
+    fn();
+  }
+}
+
 // ---------- applying a preset to the page
 function applyPreset(p) {
   if (!p) return;
-  const cols = gridCols(), comeBack = [];
-  for (const w of p.widgets) {
-    const el = lcard(w.id); const r = reg(w.id);
-    if (!el || !r) continue;
-    LGRID.appendChild(el);                                   // DOM order = preset order
-    const hide = !!w.hidden;
-    if (el.hidden && !hide) comeBack.push(w.id);
-    el.hidden = hide;
-    el.dataset.size = w.size.toLowerCase();
-    const sp = LC.spanFor(r.sizes, w.size, cols);
-    el.style.gridColumn = `span ${sp.cols}`;                 // inline: overrides the old .wide / .tall classes
-    ensureChip(el, r);
-    cardSizes.observe(el);
-  }
-  LGRID.classList.add('masonry', 'dense');
-  packCards();
-  document.body.classList.remove('layout-pending');
-  const loaders = new Set(comeBack.map((id) => LOADERS[id]).filter(Boolean));
-  for (const fn of loaders) { try { window[fn]?.(); } catch (e) { console.error(e); } }
-  if (typeof drawCharts === 'function') drawCharts();
-  if (typeof payload !== 'undefined' && payload) updateChips(payload);
-  renderLayoutButton();
+  withViewTransition(() => {
+    const cols = gridCols(), comeBack = [];
+    for (const w of p.widgets) {
+      const el = lcard(w.id); const r = reg(w.id);
+      if (!el || !r) continue;
+      LGRID.appendChild(el);                                   // DOM order = preset order
+      const hide = !!w.hidden;
+      if (el.hidden && !hide) comeBack.push(w.id);
+      el.hidden = hide;
+      el.dataset.size = w.size.toLowerCase();
+      const sp = LC.spanFor(r.sizes, w.size, cols);
+      el.style.gridColumn = `span ${sp.cols}`;                 // inline: overrides the old .wide / .tall classes
+      ensureChip(el, r);
+      cardSizes.observe(el);
+    }
+    LGRID.classList.add('masonry', 'dense');
+    packCards();
+    document.body.classList.remove('layout-pending');
+    const loaders = new Set(comeBack.map((id) => LOADERS[id]).filter(Boolean));
+    for (const fn of loaders) { try { window[fn]?.(); } catch (e) { console.error(e); } }
+    if (typeof drawCharts === 'function') drawCharts();
+    if (typeof payload !== 'undefined' && payload) updateChips(payload);
+    renderLayoutButton();
+  });
 }
 
 // ---------- masonry packing (10-19): a grid row was as tall as its tallest card, so short cards left empty space
@@ -70,10 +80,8 @@ function packCards() {
   }, 0);
 }
 const cardSizes = new ResizeObserver(packCards);
-// ResizeObserver only reports when the page is drawn (not in a hidden tab), so also re-pack after every live update
-// and after each card's own loader; packCards() is cheap and only writes spans that changed.
+// ResizeObserver reports when cards change size or when grid recalculates.
 addEventListener('hud:render', packCards);
-setInterval(packCards, 2000);
 
 // ---------- XS chips: one line per card, from the live data
 function ensureChip(el, r) {
@@ -84,34 +92,89 @@ function ensureChip(el, r) {
     el.prepend(chip);
   }
   const h2 = el.querySelector(':scope > h2');
-  if (h2 && !h2.querySelector('.card-fold-btn')) {
+  if (h2 && !h2.querySelector('.card-tools')) {
+    const tools = document.createElement('span');
+    tools.className = 'card-tools';
+
+    // Cycle size button (⤢)
+    const resizeBtn = document.createElement('button');
+    resizeBtn.type = 'button';
+    resizeBtn.className = 'card-tool-btn';
+    resizeBtn.title = 'Cycle card size';
+    resizeBtn.textContent = '⤢';
+    resizeBtn.onclick = (e) => {
+      e.stopPropagation();
+      cycleCardSize(el, r);
+    };
+
+    // Fold / collapse button (▴)
     const fold = document.createElement('button');
     fold.type = 'button';
-    fold.className = 'mini ghost card-fold-btn';
+    fold.className = 'card-tool-btn';
     fold.title = 'Collapse card to compact strip';
     fold.textContent = '▴';
     fold.onclick = (e) => {
       e.stopPropagation();
       toggleCardCollapse(el, r);
     };
-    h2.appendChild(fold);
+
+    // Pin to top button (📌)
+    const pinBtn = document.createElement('button');
+    pinBtn.type = 'button';
+    pinBtn.className = 'card-tool-btn';
+    pinBtn.title = 'Pin card to top';
+    pinBtn.textContent = '📌';
+    pinBtn.onclick = (e) => {
+      e.stopPropagation();
+      pinCardToTop(el);
+    };
+
+    tools.appendChild(resizeBtn);
+    tools.appendChild(fold);
+    tools.appendChild(pinBtn);
+    h2.appendChild(tools);
   }
+}
+function cycleCardSize(el, r) {
+  if (!el || EDIT || !r?.sizes) return;
+  const avail = Object.keys(r.sizes); // e.g. ["XS", "S", "M", "L", "XL"]
+  if (avail.length <= 1) return;
+  const cur = (el.dataset.size || 'm').toUpperCase();
+  const idx = avail.indexOf(cur);
+  const next = avail[(idx + 1) % avail.length];
+  withViewTransition(() => {
+    el.dataset.size = next.toLowerCase();
+    const sp = LC.spanFor(r.sizes, next, gridCols());
+    el.style.gridColumn = `span ${sp.cols}`;
+    if (next === 'XS' && typeof payload !== 'undefined' && payload) updateChips(payload);
+    packCards();
+  });
+}
+function pinCardToTop(el) {
+  if (!el || EDIT || !LGRID) return;
+  withViewTransition(() => {
+    LGRID.prepend(el);
+    packCards();
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
 }
 function toggleCardCollapse(el, r) {
   if (!el || EDIT) return;
-  if (el.dataset.size === 'xs' && el.dataset.prevSize) {
-    const restore = el.dataset.prevSize;
-    delete el.dataset.prevSize;
-    el.dataset.size = restore;
-    const sp = LC.spanFor(r.sizes, restore.toUpperCase(), gridCols());
-    el.style.gridColumn = `span ${sp.cols}`;
-  } else if (el.dataset.size !== 'xs') {
-    el.dataset.prevSize = el.dataset.size || (r.default || 'M').toLowerCase();
-    el.dataset.size = 'xs';
-    el.style.gridColumn = 'span 1';
-    if (typeof payload !== 'undefined' && payload) updateChips(payload);
-  }
-  packCards();
+  withViewTransition(() => {
+    if (el.dataset.size === 'xs' && el.dataset.prevSize) {
+      const restore = el.dataset.prevSize;
+      delete el.dataset.prevSize;
+      el.dataset.size = restore;
+      const sp = LC.spanFor(r.sizes, restore.toUpperCase(), gridCols());
+      el.style.gridColumn = `span ${sp.cols}`;
+    } else if (el.dataset.size !== 'xs') {
+      el.dataset.prevSize = el.dataset.size || (r.default || 'M').toLowerCase();
+      el.dataset.size = 'xs';
+      el.style.gridColumn = 'span 1';
+      if (typeof payload !== 'undefined' && payload) updateChips(payload);
+    }
+    packCards();
+  });
 }
 document.addEventListener('click', (e) => {
   const chip = e.target.closest('.card[data-size="xs"] > .xs-chip');
@@ -203,6 +266,18 @@ const CHIPS = {
   'c-ai-usage': () => {
     const w = lcard('aiUsageWeek')?.textContent?.trim() || 'Claude & Antigravity';
     return `<b>${esc(w)}</b>`;
+  },
+  'c-playground': () => {
+    const st = lcard('pgStatus')?.textContent?.trim() || 'ready';
+    return `<b style="color:var(--cyan)">Console</b> · ${esc(st)}`;
+  },
+  'c-procs': () => {
+    const sum = lcard('procSummary')?.textContent?.trim() || 'radar';
+    return `<b>Procs</b> · ${esc(sum)}`;
+  },
+  'c-media-ctl': () => {
+    const t = lcard('mediaDeckTitle')?.textContent?.trim() || 'no media';
+    return `<b>Audio</b> · ${esc(t)}`;
   },
 };
 function updateChips(p) {

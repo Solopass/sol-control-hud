@@ -167,3 +167,30 @@ def test_quickbar_and_doctor_api(app_hub):
     assert 'id="quickbar"' in page and 'id="qbPresets"' in page and 'id="qbCats"' in page and 'id="doctorModal"' in page
     doc = c.get("/api/doctor").json()
     assert doc["ok"] is True and isinstance(doc["checks"], list) and doc["checks"]
+
+
+def test_overhaul_cards_and_apis(app_hub):
+    h, c = app_hub
+    page = c.get("/").text
+    assert 'id="c-playground"' in page
+    assert 'id="c-procs"' in page
+    assert 'id="c-media-ctl"' in page
+
+    # Verify top-processes returns ok and expected lists
+    procs = c.get("/api/top-processes").json()
+    assert procs["ok"] is True
+    assert "top_cpu" in procs and "top_mem" in procs and "top_gpu" in procs
+
+    # Verify media-session API returns ok and menu
+    sess = c.get("/api/media-session").json()
+    assert sess["ok"] is True
+    assert "menu" in sess and "target" in sess
+
+    # Verify playground validation
+    pg_err = c.post("/api/playground", json={"prompt": ""}, headers={"x-sol-control": "1"}).json()
+    assert pg_err["ok"] is False
+
+    # Verify kill_process safety block
+    kill_sys = c.post("/api/action", json={"action": "kill_process", "target": "4"}, headers={"x-sol-control": "1"}).json()
+    assert kill_sys["ok"] is False
+    assert "cannot kill system or HUD process" in kill_sys["why"]

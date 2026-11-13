@@ -69,7 +69,22 @@ function applyTheme(name) {
 // ---------- charts (canvas, last hour)
 const SERIES_COLOR = { gpu: '--cyan', temp: '--amber', vram: '--cyan', ram: '--green', cpu: '--cyan', down: '--cyan', up: '--amber' };
 function css(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+const chartVisibility = new WeakMap();
+const chartObserver = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    chartVisibility.set(entry.target, entry.isIntersecting);
+  }
+}, { rootMargin: '100px 0px' });
+
 function drawChart(cv) {
+  if (!chartVisibility.has(cv)) {
+    chartObserver.observe(cv);
+    chartVisibility.set(cv, true);
+    initChartCrosshair(cv);
+  }
+  if (!chartVisibility.get(cv)) return; // off-screen optimization
+
   const names = cv.dataset.series.split(','), maxes = cv.dataset.max.split(',');
   const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
   if (!w || !h) return;
@@ -101,7 +116,59 @@ function drawChart(cv) {
       g.fillStyle = grad; g.fill();
     }
   });
+
+  // Render crosshair if cursor is hovering
+  if (cv._hoverX != null && cv._hoverX >= 0 && cv._hoverX <= w) {
+    g.strokeStyle = css('--cyan');
+    g.lineWidth = 1;
+    g.setLineDash([2, 2]);
+    g.beginPath();
+    g.moveTo(cv._hoverX, 0);
+    g.lineTo(cv._hoverX, h);
+    g.stroke();
+    g.setLineDash([]);
+  }
+
   g.fillStyle = css('--dim'); g.font = '10px Segoe UI'; g.fillText({ '1h': '60 min', '24h': '24 h', '7d': '7 days' }[range], 4, h - 4); g.fillText('now', w - 22, h - 4);
+}
+
+function initChartCrosshair(cv) {
+  let tip = null;
+  cv.addEventListener('mousemove', (e) => {
+    const rect = cv.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    cv._hoverX = x;
+    const w = cv.clientWidth, span = SPAN[range], now = Date.now() / 1000, t0 = now - span, ts = hist.t;
+    if (ts.length < 2 || w <= 0) return;
+    const targetT = t0 + (x / w) * span;
+    let closestIdx = 0, minDiff = Infinity;
+    for (let i = 0; i < ts.length; i++) {
+      const diff = Math.abs(ts[i] - targetT);
+      if (diff < minDiff) { minDiff = diff; closestIdx = i; }
+    }
+    const names = cv.dataset.series.split(',');
+    const lines = names.map((n) => {
+      const val = hist[n]?.[closestIdx];
+      const unit = n.includes('kb') || n === 'down' || n === 'up' ? ' KB/s' : n.includes('temp') ? '°C' : (n === 'ram' || n === 'vram') ? ' GB' : '%';
+      return `${n}: <b>${val != null ? (typeof val === 'number' ? val.toFixed(1) : val) : '–'}${unit}</b>`;
+    });
+    const timeStr = new Date(ts[closestIdx] * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    if (!tip) {
+      tip = document.createElement('div');
+      tip.className = 'chart-tip';
+      cv.parentElement.appendChild(tip);
+    }
+    tip.style.left = `${x}px`;
+    tip.style.top = `${e.clientY - rect.top}px`;
+    tip.innerHTML = `<span class="dim">${timeStr}</span> · ${lines.join(' · ')}`;
+    tip.hidden = false;
+    drawChart(cv);
+  });
+  cv.addEventListener('mouseleave', () => {
+    cv._hoverX = null;
+    if (tip) tip.hidden = true;
+    drawChart(cv);
+  });
 }
 let drawQueued = false;
 function drawCharts() {
@@ -240,7 +307,11 @@ function render(p) {
   const aiChip = llama.map((x) => chipOf(p, x.pid)).find(Boolean);
   setHTML($('svcList'), Object.keys(ports).map((n) => {
     const up = s.services?.[n];
-    return `<div class="${up ? 'up' : n === 'WSL' ? '' : 'down'}"><i></i>${n}<small>${up ? ports[n] : n === 'WSL' ? 'off' : 'down'}${n === 'Router' && up ? chipTag(aiChip, true) : ''}</small></div>`;
+    const canAct = ['Router', 'Watcher', 'Chains'].includes(n);
+    const actBtn = canAct
+      ? `<button class="mini ghost svc-tile-btn" data-svc-name="${esc(n.toLowerCase())}" title="${up ? `Restart / trigger ${n}` : `Start ${n}`}">${up ? '⟳' : '▶'}</button>`
+      : '';
+    return `<div class="${up ? 'up' : n === 'WSL' ? '' : 'down'}"><i></i><span>${n}</span><small>${up ? ports[n] : n === 'WSL' ? 'off' : 'down'}${n === 'Router' && up ? chipTag(aiChip, true) : ''}</small>${actBtn}</div>`;
   }).join(''));
 
   // workspace
@@ -257,8 +328,46 @@ function render(p) {
   $('mediaText').textContent = s.media_title ? `${s.media_title}${s.media_artist ? ' — ' + s.media_artist : ''}${playing ? '' : ' (paused)'}` : '';
 
   renderFeed(p.activity || []);
+  renderQuickbarBadges(p);
   addPoint(p.point); drawCharts();
   dispatchEvent(new CustomEvent('hud:render', { detail: p }));   // layouts.js: XS chips, follow a layout switch
+}
+
+function renderQuickbarBadges(p) {
+  const s = p?.snapshot || {};
+  const alerts = p?.attention || [];
+  const hasAlert = (tag) => alerts.some(a => a[2] === tag);
+
+  // Map category to state
+  const cats = {
+    hardware: { active: (s.gpu_load > 30 || s.cpu_percent > 40), alert: (s.vram_spill_impact === 'slow' || s.gpu_temp > 85) },
+    ai: { active: Boolean(s.ai_generating || s.ai_mode === 'away'), alert: Boolean(s.ai_mode === 'off' && s.ai_reason) },
+    system: { active: Boolean(s.ram_percent > 80), alert: Boolean((s.unexpected_reboots || 0) > 0 || hasAlert('SYS')) },
+    workspace: { active: Boolean((s.git_dirty_repos || []).length > 0), alert: false },
+    network: { active: false, alert: Boolean(s.net_alert) },
+  };
+
+  document.querySelectorAll('#qbCats .qb-cat-pill').forEach((pill) => {
+    const cat = pill.dataset.cat;
+    const st = cats[cat];
+    if (!st) return;
+    let badge = pill.querySelector('.qb-cat-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'qb-cat-badge';
+      pill.appendChild(badge);
+    }
+    if (st.alert) {
+      badge.className = 'qb-cat-badge alert';
+      badge.title = 'Attention required';
+    } else if (st.active) {
+      badge.className = 'qb-cat-badge';
+      badge.title = 'Active processing';
+    } else {
+      badge.className = 'qb-cat-badge idle';
+      badge.title = 'Idle';
+    }
+  });
 }
 
 function renderAlerts(list) {
@@ -2663,6 +2772,257 @@ async function loadOvernight() {
   }
 }
 
+// ---------- Quick AI Console (#c-playground)
+function initPlayground() {
+  const sendBtn = $('pgSend');
+  const promptEl = $('pgPrompt');
+  const clearBtn = $('pgClear');
+  const copyBtn = $('pgCopyBtn');
+
+  if (clearBtn) {
+    clearBtn.onclick = () => {
+      if (promptEl) promptEl.value = '';
+      const box = $('pgOutputBox');
+      if (box) box.hidden = true;
+      const st = $('pgStatus');
+      if (st) st.textContent = 'ready';
+    };
+  }
+
+  if (copyBtn) {
+    copyBtn.onclick = () => {
+      const text = $('pgResponseText')?.textContent || '';
+      if (text && navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => toast('Copied response'));
+      }
+    };
+  }
+
+  if (promptEl) {
+    promptEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        sendPlaygroundPrompt();
+      }
+    });
+  }
+
+  if (sendBtn) {
+    sendBtn.onclick = sendPlaygroundPrompt;
+  }
+}
+
+async function sendPlaygroundPrompt() {
+  const promptEl = $('pgPrompt');
+  const prompt = promptEl?.value?.trim();
+  if (!prompt) return;
+  const model = $('pgModel')?.value || 'sol-fast';
+  const sendBtn = $('pgSend');
+  const statusEl = $('pgStatus');
+  const box = $('pgOutputBox');
+  const respEl = $('pgResponseText');
+  const thoughtWrap = $('pgThoughtWrap');
+  const thoughtText = $('pgThoughtText');
+  const metaModel = $('pgMetaModel');
+  const metaSpeed = $('pgMetaSpeed');
+
+  if (sendBtn) sendBtn.disabled = true;
+  if (statusEl) statusEl.textContent = 'generating…';
+  if (box) box.hidden = false;
+  if (respEl) respEl.textContent = 'Thinking…';
+  if (thoughtWrap) thoughtWrap.hidden = true;
+
+  try {
+    const res = await post('/api/playground', { model, prompt });
+    if (sendBtn) sendBtn.disabled = false;
+    if (res?.ok) {
+      if (statusEl) statusEl.textContent = `done in ${res.elapsed_s}s`;
+      if (metaModel) metaModel.textContent = res.model;
+      if (metaSpeed) metaSpeed.textContent = `${res.tok_s || '–'} tok/s (${res.elapsed_s}s)`;
+      if (respEl) respEl.textContent = res.text || '(empty response)';
+      if (res.thought && thoughtWrap && thoughtText) {
+        thoughtText.textContent = res.thought;
+        thoughtWrap.hidden = false;
+      }
+    } else {
+      if (statusEl) statusEl.textContent = 'error';
+      if (respEl) respEl.textContent = `Error: ${res?.why || 'Unknown error'}`;
+    }
+  } catch (err) {
+    if (sendBtn) sendBtn.disabled = false;
+    if (statusEl) statusEl.textContent = 'network error';
+    if (respEl) respEl.textContent = `Error: ${err}`;
+  }
+}
+
+// ---------- Process Radar (#c-procs)
+let procSortMode = 'cpu';
+
+async function loadProcs() {
+  if (document.hidden) return;
+  if (typeof cardShown === 'function' && !cardShown('c-procs')) return;
+  try {
+    const d = await (await fetch('/api/top-processes', { cache: 'no-store' })).json();
+    if (!d.ok) return;
+    renderProcTable(d);
+  } catch (e) { /* ignore */ }
+}
+
+function renderProcTable(data) {
+  const tbody = $('procRows');
+  if (!tbody) return;
+  const list = procSortMode === 'mem' ? data.top_mem : procSortMode === 'gpu' ? data.top_gpu : data.top_cpu;
+  if (!list || !list.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No processes recorded</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map((p) => {
+    const chip = p.chip ? `<span class="dim" style="font-size:10px">${esc(p.chip)}</span>` : '<span class="dim">–</span>';
+    return `<tr>` +
+      `<td class="dim">${p.pid}</td>` +
+      `<td class="proc-name-cell" title="${esc(p.name)}"><b>${esc(p.name)}</b></td>` +
+      `<td class="num" style="color:${p.cpu > 25 ? 'var(--amber)' : 'inherit'}">${p.cpu}%</td>` +
+      `<td class="num">${Math.round(p.mem_mb)} MB</td>` +
+      `<td>${chip}</td>` +
+      `<td class="act"><button class="mini danger ghost" data-kill-pid="${p.pid}" data-proc-name="${esc(p.name)}" title="End task">✕</button></td>` +
+      `</tr>`;
+  }).join('');
+}
+
+function initProcs() {
+  const table = $('procTable');
+  if (table && !table._inited) {
+    table._inited = true;
+    table.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-kill-pid]');
+      if (!btn) return;
+      const pid = parseInt(btn.dataset.killPid, 10);
+      const name = btn.dataset.procName || 'process';
+      if (!confirm(`End process ${name} (PID ${pid})?`)) return;
+      const r = await post('/api/action', { action: 'kill_process', target: String(pid) });
+      if (r?.ok) {
+        toast(`Ended ${name}`);
+        loadProcs();
+      } else {
+        toast(r?.why || 'Could not end process');
+      }
+    });
+  }
+
+  ['procSortCpu', 'procSortMem', 'procSortGpu'].forEach((id) => {
+    const btn = $(id);
+    if (!btn) return;
+    btn.onclick = () => {
+      ['procSortCpu', 'procSortMem', 'procSortGpu'].forEach((bId) => {
+        const b = $(bId);
+        if (b) {
+          b.classList.remove('active');
+          b.classList.add('ghost');
+        }
+      });
+      btn.classList.add('active');
+      btn.classList.remove('ghost');
+      procSortMode = btn.dataset.sort;
+      loadProcs();
+    };
+  });
+
+  const refreshBtn = $('procRefresh');
+  if (refreshBtn) refreshBtn.onclick = loadProcs;
+}
+
+// ---------- Media & Audio Deck (#c-media-ctl)
+async function loadMediaSession() {
+  if (document.hidden) return;
+  if (typeof cardShown === 'function' && !cardShown('c-media-ctl')) return;
+  try {
+    const d = await (await fetch('/api/media-session', { cache: 'no-store' })).json();
+    if (!d.ok) return;
+    renderMediaDeck(d);
+  } catch (e) { /* ignore */ }
+}
+
+function renderMediaDeck(d) {
+  const titleEl = $('mediaDeckTitle');
+  const artistEl = $('mediaDeckArtist');
+  const statusEl = $('mediaDeckStatus');
+  const appEl = $('mediaDeckApp');
+  const playBtn = $('mediaBtnPlayPause');
+  const artIcon = $('mediaArtIcon');
+
+  if (titleEl) titleEl.textContent = d.title || (d.playing ? 'Active Media' : 'No active media');
+  if (artistEl) artistEl.textContent = d.artist || (d.clean_app ? `via ${d.clean_app}` : '–');
+  if (statusEl) statusEl.textContent = `${d.status || 'idle'}${d.clean_app ? ` · ${d.clean_app}` : ''}`;
+  if (appEl) appEl.textContent = d.clean_app || 'GSMTC';
+
+  if (playBtn) {
+    playBtn.textContent = d.playing ? '⏸' : '▶';
+    playBtn.title = d.playing ? 'Pause Playback' : 'Resume Playback';
+  }
+  if (artIcon) {
+    artIcon.textContent = d.clean_app === 'Spotify' ? '🟢' : d.clean_app === 'Brave' || d.clean_app === 'Chrome' ? '🌐' : '🎵';
+  }
+
+  const sel = $('mediaTargetSelect');
+  if (sel && d.menu && document.activeElement !== sel) {
+    sel.innerHTML = d.menu.map((m) => {
+      if (m.target == null) return '';
+      const cleanLabel = (m.label || '').replace(/^[✓\s]+/, '').trim();
+      return `<option value="${esc(m.target)}"${m.target === d.target ? ' selected' : ''}>${esc(cleanLabel)}</option>`;
+    }).join('');
+  }
+
+  const strip = $('mediaSessionsStrip');
+  if (strip && d.sessions) {
+    strip.innerHTML = d.sessions.map((s) => {
+      const isCur = s.title === d.title;
+      return `<span class="media-sess-chip${isCur ? ' active' : ''}" title="${esc(s.app)}">${esc(s.app.split('.').pop() || s.app)}: ${esc((s.title || s.status).slice(0, 30))}</span>`;
+    }).join('');
+  }
+}
+
+function initMediaControls() {
+  const prevBtn = $('mediaBtnPrev');
+  const playBtn = $('mediaBtnPlayPause');
+  const nextBtn = $('mediaBtnNext');
+  const refreshBtn = $('mediaCtlRefresh');
+  const targetSel = $('mediaTargetSelect');
+
+  if (prevBtn) prevBtn.onclick = () => postMediaTransport('prev');
+  if (playBtn) playBtn.onclick = () => postMediaTransport('play_pause');
+  if (nextBtn) nextBtn.onclick = () => postMediaTransport('next');
+  if (refreshBtn) refreshBtn.onclick = loadMediaSession;
+
+  if (targetSel) {
+    targetSel.onchange = async () => {
+      const r = await post('/api/action', { action: 'media_target', target: targetSel.value });
+      if (r?.target) toast(`Media keys routed to: ${r.target}`);
+      loadMediaSession();
+    };
+  }
+}
+
+async function postMediaTransport(op) {
+  const r = await post('/api/action', { action: 'media_transport', target: op });
+  if (r?.ok) {
+    setTimeout(loadMediaSession, 400);
+  } else if (r?.why) {
+    toast(r.why);
+  }
+}
+
+// Global click handler delegation for service tiles
+document.addEventListener('click', async (e) => {
+  const svcBtn = e.target.closest('[data-svc-name]');
+  if (svcBtn) {
+    e.stopPropagation();
+    const svc = svcBtn.dataset.svcName;
+    const r = await post('/api/action', { action: 'svc_control', target: svc });
+    if (r?.ok) toast(`Service action triggered: ${svc}`);
+    else toast(r?.why || 'Failed to trigger service');
+  }
+});
+
 (async function start() {
   try {
     const meta = await (await fetch('/api/meta', { cache: 'no-store' })).json();
@@ -2679,6 +3039,12 @@ async function loadOvernight() {
   await initVaults();
   loadNotes();
   loadOvernight();
+  initPlayground();
+  initProcs();
+  initMediaControls();
+  loadProcs();
+  loadMediaSession();
   setInterval(() => { if (!document.hidden) loadOvernight(); }, 4000);
+  setInterval(() => { if (!document.hidden) { loadProcs(); loadMediaSession(); } }, 4000);
   if (!document.hidden) connect();
 })();

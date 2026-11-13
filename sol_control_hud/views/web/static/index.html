@@ -135,6 +135,39 @@
     <div class="note" id="aiSlow" hidden></div>
   </article>
 
+  <article class="card wide" id="c-playground" data-open="AI">
+    <h2>
+      <span>⚡ Quick AI Console <span class="dim" id="pgStatus">ready</span></span>
+      <div class="notes-controls">
+        <select id="pgModel" class="mini-select">
+          <option value="sol-fast" selected>⚡ sol-fast (12B)</option>
+          <option value="sol-smart">🧠 sol-smart (20B reasoning)</option>
+          <option value="sol-long">📜 sol-long (65k context)</option>
+          <option value="gemini-3.8-flash">✨ Gemini 3.8 Flash</option>
+        </select>
+        <button class="mini ghost" id="pgClear" title="Clear console">Clear</button>
+      </div>
+    </h2>
+    <div class="pg-body">
+      <div class="pg-input-row">
+        <textarea id="pgPrompt" rows="2" placeholder="Ask local AI or Gemini anything... (Ctrl+Enter to send)"></textarea>
+        <button id="pgSend" class="go">Send</button>
+      </div>
+      <div class="pg-output-box" id="pgOutputBox" hidden>
+        <div class="pg-output-meta">
+          <span id="pgMetaModel" class="pill mini-pill">sol-fast</span>
+          <span id="pgMetaSpeed" class="dim small">– tok/s</span>
+          <button class="mini ghost" id="pgCopyBtn" title="Copy response to clipboard">📋 Copy</button>
+        </div>
+        <details id="pgThoughtWrap" class="pg-thought-wrap" hidden>
+          <summary>Reasoning / Chain-of-Thought</summary>
+          <div id="pgThoughtText" class="pg-thought-text"></div>
+        </details>
+        <div id="pgResponseText" class="pg-response-text"></div>
+      </div>
+    </div>
+  </article>
+
   <article class="card wide" id="c-ai-thinking" data-open="AI">
     <h2>
       <span>Live AI Thinking <span class="dim" id="thinkModelBadge">–</span></span>
@@ -408,6 +441,64 @@
     <div class="legend"><span style="--c:var(--green)">RAM GB</span></div>
     <canvas class="chart short" id="chNet" data-series="down,up" data-max="auto"></canvas>
     <div class="legend"><span style="--c:var(--cyan)">down KB/s</span><span style="--c:var(--amber)">up KB/s</span></div>
+  </article>
+
+  <article class="card wide" id="c-procs">
+    <h2>
+      <span>📊 Process Radar <span class="dim" id="procSummary">top resource users</span></span>
+      <div class="notes-controls">
+        <button class="mini active" id="procSortCpu" data-sort="cpu">CPU%</button>
+        <button class="mini ghost" id="procSortMem" data-sort="mem">RAM</button>
+        <button class="mini ghost" id="procSortGpu" data-sort="gpu">GPU</button>
+        <button class="mini ghost" id="procRefresh" title="Refresh processes now">⟳</button>
+      </div>
+    </h2>
+    <div class="proc-table-wrap">
+      <table class="proc-table" id="procTable">
+        <thead>
+          <tr>
+            <th>PID</th>
+            <th>Name</th>
+            <th class="num">CPU</th>
+            <th class="num">RAM</th>
+            <th>GPU</th>
+            <th class="act">Action</th>
+          </tr>
+        </thead>
+        <tbody id="procRows">
+          <tr><td colspan="6" class="empty">loading processes…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="card wide" id="c-media-ctl">
+    <h2>
+      <span>🎧 Media &amp; Audio Deck <span class="dim" id="mediaDeckApp">GSMTC</span></span>
+      <div class="notes-controls">
+        <select id="mediaTargetSelect" class="mini-select" title="Route media transport keys">
+          <option value="youtube">YouTube app (Brave)</option>
+          <option value="auto">Automatic (active)</option>
+        </select>
+        <button class="mini ghost" id="mediaCtlRefresh" title="Poll media session">⟳</button>
+      </div>
+    </h2>
+    <div class="media-deck-body">
+      <div class="media-now-playing">
+        <div class="media-art-placeholder" id="mediaArtIcon">🎵</div>
+        <div class="media-track-info">
+          <div class="media-track-title" id="mediaDeckTitle">No active media</div>
+          <div class="media-track-artist dim" id="mediaDeckArtist">–</div>
+          <div class="media-track-app small dim" id="mediaDeckStatus">idle</div>
+        </div>
+      </div>
+      <div class="media-controls-row">
+        <button class="media-btn" id="mediaBtnPrev" title="Previous Track (VK_MEDIA_PREV_TRACK)">⏮</button>
+        <button class="media-btn play-pause-btn" id="mediaBtnPlayPause" title="Play / Pause (VK_MEDIA_PLAY_PAUSE)">▶</button>
+        <button class="media-btn" id="mediaBtnNext" title="Next Track (VK_MEDIA_NEXT_TRACK)">⏭</button>
+      </div>
+      <div class="media-sessions-strip" id="mediaSessionsStrip"></div>
+    </div>
   </article>
 
   <article class="card" id="c-disks" data-open="DISK">

@@ -54,6 +54,9 @@ WIDGETS: dict[str, tuple[str, dict[str, list[int]], str]] = {
     "c-notes": ("Obsidian Notes", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-week": ("This week", {"XS": [1, 1], "S": [1, 1], "M": [1, 1]}, "M"),
     "c-ai-usage": ("AI Usage", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "L"),
+    "c-playground": ("Quick AI Console", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
+    "c-procs": ("Process Radar", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
+    "c-media-ctl": ("Media & Audio Deck", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-activity": ("Activity", {"XS": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
 }
 TICKER_SLIDES = ("HW", "AI", "RUN", "SVC", "DISK", "SYS", "NOTE", "GIT", "NET", "MEDIA", "APPS")
@@ -72,10 +75,10 @@ def _preset(name: str, icon: str, cards: list[tuple[str, str]] | None, auto_when
 def default_presets() -> list[dict]:
     return [
         _preset("Everyday", "◧", None),
-        _preset("Gaming", "🎮", [("c-gpu", "XS"), ("c-vram", "XS"), ("c-svc", "XS"), ("c-health", "XS")], auto_when="game"),
-        _preset("AI work", "🧠", [("c-ai", "L"), ("c-ai-thinking", "L"), ("c-vram", "L"), ("c-chains", "XL"), ("c-ask", "L"), ("c-awayq", "M"),
+        _preset("Gaming", "🎮", [("c-gpu", "XS"), ("c-vram", "XS"), ("c-svc", "XS"), ("c-health", "XS"), ("c-procs", "S")], auto_when="game"),
+        _preset("AI work", "🧠", [("c-ai", "L"), ("c-ai-thinking", "L"), ("c-playground", "L"), ("c-vram", "L"), ("c-chains", "XL"), ("c-ask", "L"), ("c-awayq", "M"),
                                  ("c-activity", "L")], ticker=["HW", "AI", "RUN", "SVC"]),
-        _preset("Dev", "‹/›", [("c-projects", "XL"), ("c-ports", "L"), ("c-work", "M"), ("c-media", "L"), ("c-notes", "M"),
+        _preset("Dev", "‹/›", [("c-projects", "XL"), ("c-ports", "L"), ("c-procs", "M"), ("c-work", "M"), ("c-media", "L"), ("c-notes", "M"),
                               ("c-gpu", "S")], ticker=["HW", "GIT", "APPS", "NOTE", "SVC"]),
         _preset("Overnight", "🌙", [("c-overnight", "L"), ("c-awayq", "L"), ("c-chains", "L"), ("c-stab", "M"), ("c-health", "M"), ("c-week", "M")],
                 auto_when="away", ticker=["AI", "RUN", "SYS", "DISK"]),
@@ -150,6 +153,11 @@ def merge(data: dict) -> dict:
                 if "c-ai-thinking" not in known_shown:
                     for w in cp["widgets"]:
                         if w["id"] == "c-ai-thinking":
+                            w["hidden"] = False
+                            w["size"] = "L"
+                if "c-playground" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-playground":
                             w["hidden"] = False
                             w["size"] = "L"
             presets.append(cp)
