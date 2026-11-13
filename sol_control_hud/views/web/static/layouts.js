@@ -544,6 +544,7 @@ function renderLayoutMenu() {
     + '<button class="litem" data-lact="edit">✎ Edit this layout</button>'
     + '<button class="litem" data-lact="saveas">＋ Save as new preset…</button>'
     + '<button class="litem" data-lact="manage">⚙ Manage presets…</button>'
+    + '<button class="litem" data-lact="reset_defaults" title="Reset all presets to curated defaults">↺ Reset to curated presets</button>'
     + `<label class="litem lauto"><input type="checkbox" class="switch" id="layoutAuto"${LAYOUT?.auto ? ' checked' : ''}> Auto-switch for games and Away</label>`);
 }
 function openLayoutMenu() {
@@ -570,6 +571,14 @@ layoutMenu.addEventListener('click', async (e) => {
     if (r?.ok) await activateLayout(name); else toast(r?.why || 'that did not work');
   }
   if (act === 'manage') { closeLayoutMenu(); openManage(); }
+  if (act === 'reset_defaults') {
+    closeLayoutMenu();
+    if (confirm('Reset all presets to the curated defaults (Gaming, AI work, Dev, Overnight, Everyday, Minimal)?')) {
+      const r = await layoutPost({ action: 'reset_defaults' });
+      if (r?.presets) toast('Reset to curated presets');
+      else toast(r?.why || 'Could not reset presets');
+    }
+  }
 });
 layoutMenu.addEventListener('change', async (e) => {
   if (e.target.id === 'layoutAuto') { const r = await layoutPost({ action: 'auto', on: e.target.checked }); toast(r?.why || ''); }
@@ -807,6 +816,7 @@ manage.className = 'modal'; manage.hidden = true;
 manage.innerHTML = '<div class="sheet lmanage"><header><h2>Layout presets</h2>'
   + '<div class="lmheader-btns"><button class="mini ghost" id="lmExport" title="Copy all presets to clipboard as JSON">Export JSON</button>'
   + '<button class="mini ghost" id="lmImport" title="Import presets from JSON">Import JSON</button>'
+  + '<button class="mini ghost" id="lmResetAll" title="Reset all presets to curated defaults">↺ Reset Curated Defaults</button>'
   + '<button class="mini ghost" data-lclose>✕</button></div></header><div id="lmanageList"></div>'
   + '<div class="note">The first nine are Alt+1…Alt+9. Starter presets can be reset to how they shipped.</div></div>';
 document.body.appendChild(manage);
@@ -848,6 +858,14 @@ manage.addEventListener('click', async (e) => {
       else { toast(r?.why || 'Import failed'); }
     } catch (err) {
       toast(`Invalid JSON: ${err.message}`);
+    }
+    return;
+  }
+  if (e.target.id === 'lmResetAll' || e.target.closest('#lmResetAll')) {
+    if (confirm('Reset all presets to the curated defaults (Gaming, AI work, Dev, Overnight, Everyday, Minimal)?')) {
+      const r = await layoutPost({ action: 'reset_defaults' });
+      if (r?.presets) { toast('Reset to curated presets'); renderManage(); }
+      else { toast(r?.why || 'Could not reset presets'); }
     }
     return;
   }

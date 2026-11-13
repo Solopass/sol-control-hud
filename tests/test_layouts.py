@@ -78,7 +78,11 @@ def test_actions():
     g = next(p for p in d["presets"] if p["name"] == "Gaming")
     g["widgets"][0]["size"] = "M"
     d, _ = L.apply_action(d, {"action": "reset", "name": "Gaming"})
-    assert next(p for p in d["presets"] if p["name"] == "Gaming")["widgets"][0]["size"] == "XS"
+    assert next(p for p in d["presets"] if p["name"] == "Gaming")["widgets"][0]["size"] == "S"
+    d["presets"] = []
+    d, why = L.apply_action(d, {"action": "reset_defaults"})
+    assert len(d["presets"]) == len(L.default_presets())
+    assert why == "reset all presets to curated defaults"
     d, _ = L.apply_action(d, {"action": "auto", "on": False})
     assert d["auto"] is False
     for bad in ({"action": "activate", "name": "Nope"}, {"action": "reset", "name": "Mine"}, {"action": "explode"}):
@@ -109,11 +113,11 @@ def test_ticker_slides_follow_the_preset_and_come_back():
     d = L.default_data()
     mine = {t: t in ("HW", "NET", "MEDIA") for t in L.TICKER_SLIDES}
     slides, base = L.ticker_changes(d, "AI work", mine)
-    assert {t for t, on in slides.items() if on} == {"HW", "AI", "RUN", "SVC"} and base == ["HW", "NET", "MEDIA"]
+    assert {t for t, on in slides.items() if on} == {"HW", "AI", "RUN", "NOTE"} and base == ["HW", "NET", "MEDIA"]
     d["ticker_base"] = base
     slides, base = L.ticker_changes(d, "Everyday", {t: True for t in L.TICKER_SLIDES})
     assert {t for t, on in slides.items() if on} == {"HW", "NET", "MEDIA"} and base is None        # yours, back
-    assert L.ticker_changes(L.default_data(), "Gaming", mine) == (None, None)       # no slides of its own: untouched
+    assert L.ticker_changes(L.default_data(), "Everyday", mine) == (None, None)      # no slides of its own: untouched
 
 
 def test_condition_from_the_snapshot():

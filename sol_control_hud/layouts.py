@@ -75,14 +75,51 @@ def _preset(name: str, icon: str, cards: list[tuple[str, str]] | None, auto_when
 def default_presets() -> list[dict]:
     return [
         _preset("Everyday", "◧", None),
-        _preset("Gaming", "🎮", [("c-gpu", "XS"), ("c-vram", "XS"), ("c-svc", "XS"), ("c-health", "XS"), ("c-procs", "S")], auto_when="game"),
-        _preset("AI work", "🧠", [("c-ai", "L"), ("c-ai-thinking", "L"), ("c-playground", "L"), ("c-vram", "L"), ("c-chains", "XL"), ("c-ask", "L"), ("c-awayq", "M"),
-                                 ("c-activity", "L")], ticker=["HW", "AI", "RUN", "SVC"]),
-        _preset("Dev", "‹/›", [("c-projects", "XL"), ("c-ports", "L"), ("c-procs", "M"), ("c-work", "M"), ("c-media", "L"), ("c-notes", "M"),
-                              ("c-gpu", "S")], ticker=["HW", "GIT", "APPS", "NOTE", "SVC"]),
-        _preset("Overnight", "🌙", [("c-overnight", "L"), ("c-awayq", "L"), ("c-chains", "L"), ("c-stab", "M"), ("c-health", "M"), ("c-week", "M")],
-                auto_when="away", ticker=["AI", "RUN", "SYS", "DISK"]),
-        _preset("Minimal", "·", [("c-gpu", "XS"), ("c-vram", "XS"), ("c-ai", "XS"), ("c-disks", "XS")], ticker=["HW", "AI"]),
+        _preset("Gaming", "🎮", [
+            ("c-gpu", "S"),
+            ("c-vram", "S"),
+            ("c-media-ctl", "S"),
+            ("c-procs", "M"),
+            ("c-health", "XS"),
+            ("c-svc", "XS"),
+        ], auto_when="game", ticker=["HW", "MEDIA", "SYS"]),
+        _preset("AI work", "🧠", [
+            ("c-playground", "XL"),
+            ("c-ai-thinking", "XL"),
+            ("c-ai", "L"),
+            ("c-vram", "L"),
+            ("c-chains", "XL"),
+            ("c-ask", "L"),
+            ("c-awayq", "M"),
+            ("c-ai-usage", "L"),
+            ("c-activity", "L"),
+        ], ticker=["HW", "AI", "RUN", "NOTE"]),
+        _preset("Dev", "‹/›", [
+            ("c-projects", "XL"),
+            ("c-ports", "L"),
+            ("c-procs", "L"),
+            ("c-work", "M"),
+            ("c-notes", "L"),
+            ("c-media", "L"),
+            ("c-gpu", "M"),
+            ("c-net", "M"),
+        ], ticker=["HW", "GIT", "APPS", "NOTE", "NET"]),
+        _preset("Overnight", "🌙", [
+            ("c-overnight", "XL"),
+            ("c-awayq", "L"),
+            ("c-chains", "L"),
+            ("c-stab", "M"),
+            ("c-disks", "M"),
+            ("c-security", "L"),
+            ("c-health", "M"),
+            ("c-week", "M"),
+        ], auto_when="away", ticker=["AI", "RUN", "DISK", "SYS"]),
+        _preset("Minimal", "·", [
+            ("c-gpu", "XS"),
+            ("c-vram", "XS"),
+            ("c-ai", "XS"),
+            ("c-disks", "XS"),
+        ], ticker=["HW", "AI"]),
     ]
 
 
@@ -154,10 +191,51 @@ def merge(data: dict) -> dict:
                     for w in cp["widgets"]:
                         if w["id"] == "c-ai-thinking":
                             w["hidden"] = False
-                            w["size"] = "L"
+                            w["size"] = "XL"
                 if "c-playground" not in known_shown:
                     for w in cp["widgets"]:
                         if w["id"] == "c-playground":
+                            w["hidden"] = False
+                            w["size"] = "XL"
+                if "c-ai-usage" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-ai-usage":
+                            w["hidden"] = False
+                            w["size"] = "L"
+            elif cp["name"] == "Gaming":
+                known_shown = {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict) and not w.get("hidden")}
+                if "c-media-ctl" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-media-ctl":
+                            w["hidden"] = False
+                            w["size"] = "S"
+                if "c-procs" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-procs":
+                            w["hidden"] = False
+                            w["size"] = "M"
+            elif cp["name"] == "Dev":
+                known_shown = {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict) and not w.get("hidden")}
+                if "c-procs" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-procs":
+                            w["hidden"] = False
+                            w["size"] = "L"
+            elif cp["name"] == "Overnight":
+                known_shown = {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict) and not w.get("hidden")}
+                if "c-overnight" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-overnight":
+                            w["hidden"] = False
+                            w["size"] = "XL"
+                if "c-disks" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-disks":
+                            w["hidden"] = False
+                            w["size"] = "M"
+                if "c-security" not in known_shown:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-security":
                             w["hidden"] = False
                             w["size"] = "L"
             presets.append(cp)
@@ -263,6 +341,11 @@ def apply_action(data: dict, body: dict) -> tuple[dict, str]:
             raise Bad(f"{name!r} isn't a starter preset")
         data["presets"][names.index(name)] = starter
         return data, f"reset {name}"
+    if act == "reset_defaults":                          # reset all presets to curated factory presets
+        data["presets"] = default_presets()
+        if data["active"] not in [p["name"] for p in data["presets"]]:
+            data["active"] = data["presets"][0]["name"]
+        return data, "reset all presets to curated defaults"
     if act == "auto":
         data["auto"] = bool(body.get("on"))
         return data, f"auto-switch {'on' if data['auto'] else 'off'}"
