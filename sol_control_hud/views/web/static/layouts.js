@@ -25,12 +25,22 @@ function gridCols() {
 function reg(id) { return (LAYOUT?.widgets || []).find((w) => w.id === id); }
 function activePreset() { return (LAYOUT?.presets || []).find((p) => p.name === LAYOUT.active) || LAYOUT?.presets?.[0]; }
 
+// A hidden tab can't animate (the browser aborts the transition), so it just applies the change. A running transition
+// replaced by a new one, or aborted by a timeout, rejects its promises: those aborts are expected and ignored. If `fn`
+// itself throws, updateCallbackDone rejects with that error: it is logged, not hidden (ready/finished carry the same
+// error, so they stay silent to avoid logging it three times).
+const VT_ABORTS = ['AbortError', 'InvalidStateError', 'TimeoutError'];
 function withViewTransition(fn) {
-  if (typeof document.startViewTransition === 'function' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    document.startViewTransition(fn);
-  } else {
-    fn();
-  }
+  const canAnimate = typeof document.startViewTransition === 'function' && document.visibilityState === 'visible'
+    && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!canAnimate) { fn(); return; }
+  const vt = document.startViewTransition(fn);
+  const quiet = () => {};
+  vt.ready.catch(quiet);
+  vt.finished.catch(quiet);
+  vt.updateCallbackDone.catch((err) => {
+    if (!VT_ABORTS.includes(err?.name)) console.error('view transition callback failed:', err);
+  });
 }
 
 // ---------- applying a preset to the page
