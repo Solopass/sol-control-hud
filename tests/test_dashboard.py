@@ -159,3 +159,11 @@ def test_activity_feed_includes_doctor_and_tasks(tmp_path):
     assert len(items) == 2
     assert any("task: Daily Doctor (Health check) running" in i["text"] for i in items)
     assert any("doctor: stability check warnings (exit 1)" in i["text"] for i in items)
+
+
+def test_quickbar_and_doctor_api(app_hub):
+    h, c = app_hub
+    page = c.get("/").text
+    assert 'id="quickbar"' in page and 'id="qbPresets"' in page and 'id="qbCats"' in page and 'id="doctorModal"' in page
+    doc = c.get("/api/doctor").json()
+    assert doc["ok"] is True and isinstance(doc["checks"], list) and doc["checks"]

@@ -143,3 +143,20 @@ def test_menu_says_when_keys_are_taken_or_router_off():
     assert "Router off: keys work the Windows way" in _labels(media.media_keys_menu(media.MediaInfo(), "youtube"))
     last = media.media_keys_menu(media.MediaInfo(keys="on", last_key="08:40 play/pause -> x"), "auto")
     assert ("Last: 08:40 play/pause -> x", None) in last
+
+
+def test_winerror_4551_switches_to_ps1_immediately(tmp_path, monkeypatch):
+    noted = []
+    monkeypatch.setattr(media, "_swallowed", noted.append)
+    c, _, script = _files(tmp_path)
+
+    def blocked(*a, **k):
+        err = OSError("Application Control policy has blocked this file")
+        err.winerror = 4551
+        raise err
+
+    monkeypatch.setattr(media.subprocess, "run", blocked)
+    c.poll_once()
+    assert not c.using_exe()
+    assert c.command()[-1] == str(script)
+    assert noted == []

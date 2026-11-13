@@ -14,6 +14,12 @@
   <div class="brand"><span class="live" id="live"></span>SOL <b>CONTROL</b> HUD</div>
   <div class="mode" id="mode">…</div>
   <div class="headline" id="headline"></div>
+  <div class="hdr-metrics" id="hdrMetrics" title="Live workstation telemetry — click to jump to card">
+    <button class="hdr-chip" data-jump="c-gpu" id="hdrCpu">CPU <b>–</b></button>
+    <button class="hdr-chip" data-jump="c-gpu" id="hdrGpu">GPU <b>–</b></button>
+    <button class="hdr-chip" data-jump="c-vram" id="hdrVram">VRAM <b>–</b></button>
+    <button class="hdr-chip" data-jump="c-system" id="hdrRam">RAM <b>–</b></button>
+  </div>
   <div class="range" id="range" title="Chart range"><button data-range="1h" class="on">1 h</button><button data-range="24h">24 h</button><button data-range="7d">7 d</button></div>
   <span class="age" id="age">connecting…</span>
   <nav class="toolbar" aria-label="Dashboard controls">
@@ -23,6 +29,47 @@
     <button id="tickerBtn" class="mini" hidden>…</button>
   </nav>
 </header>
+
+<nav class="quickbar" id="quickbar" aria-label="Quick Switcher">
+  <div class="qb-group" title="Switch layout preset (Alt+1…9)">
+    <span class="qb-label">Layout</span>
+    <div class="qb-pills" id="qbPresets"></div>
+    <button class="qb-btn ghost" id="qbEditLayoutBtn" title="Edit current layout cards &amp; sizes (Alt+E)">✎</button>
+  </div>
+  <span class="qb-sep" aria-hidden="true"></span>
+  <div class="qb-group" title="Filter cards by category or jump to any card">
+    <span class="qb-label">View</span>
+    <div class="qb-pills" id="qbCats">
+      <button class="qb-pill on" data-qcat="all">All</button>
+      <button class="qb-pill" data-qcat="hw">⚡ Hardware</button>
+      <button class="qb-pill" data-qcat="ai">🧠 AI &amp; Chains</button>
+      <button class="qb-pill" data-qcat="dev">🛠 Dev &amp; Notes</button>
+      <button class="qb-pill" data-qcat="sys">🛡 System &amp; Net</button>
+    </div>
+    <div class="qb-jump-wrap">
+      <button class="qb-btn ghost" id="qbJumpBtn" title="Jump directly to any card">⤵ Jump ▾</button>
+      <div class="qb-jump-menu" id="qbJumpMenu" hidden></div>
+    </div>
+  </div>
+  <span class="qb-sep" aria-hidden="true"></span>
+  <div class="qb-group qb-ai-group" title="Quick Local AI power &amp; model switcher">
+    <span class="qb-label">AI</span>
+    <button class="qb-pill qb-ai-power" id="qbAiPowerBtn" title="Toggle Local AI power / wake to Desk mode">● AI</button>
+    <div class="qb-pills" id="qbModels">
+      <button class="qb-pill" data-quick-model="sol-fast" title="Load sol-fast (Gemma 4 12B, fast + vision)">⚡ Fast</button>
+      <button class="qb-pill" data-quick-model="sol-smart" title="Load sol-smart (gpt-oss-20b reasoning)">🧠 Smart</button>
+      <button class="qb-pill" data-quick-model="sol-long" title="Load sol-long (gpt-oss-20b 65k context)">📜 Long</button>
+    </div>
+  </div>
+  <div class="qb-right">
+    <div class="qb-search-wrap">
+      <input type="search" id="qbFilter" class="qb-search" placeholder="Filter cards… (/)" autocomplete="off" aria-label="Filter cards">
+    </div>
+    <button class="qb-btn ghost" id="qbCompactBtn" title="Toggle compact XS strip view across visible cards">▤ Compact</button>
+    <button class="qb-btn ghost" id="qbScratchBtn" title="Quick scratchpad / new note">📝 Scratch</button>
+    <button class="qb-btn ghost" id="qbDoctorBtn" title="Run live SOL Doctor system check">🩺 Doctor</button>
+  </div>
+</nav>
 
 <div class="alerts" id="alerts"></div>
 
@@ -391,7 +438,7 @@
         <button class="mini" id="secMasterToggleBtn" data-act="security_toggle" data-target="all" title="Toggle active security watchdog & canary traps">Turn Off Watchdog</button>
         <button class="mini ghost" id="secTestBtn" data-act="security_test" title="Send a test alarm to the iPad">🚨 Test Alarm</button>
         <button class="mini ghost" id="secAckBtn" data-act="security_ack" title="Acknowledge security alerts">✓ Ack</button>
-        <a class="mini ghost" href="http://192.168.0.241:5000/deck" target="_blank" title="Open SOL iPad Deck on PC">Deck ↗</a>
+        <a class="mini ghost" href="http://127.0.0.1:5000/deck" target="_blank" title="Open SOL iPad Deck on PC">Deck ↗</a>
       </div>
     </h2>
     <div id="secBody">
@@ -613,6 +660,20 @@
       <button id="gitModalClose" class="ghost">✕</button>
     </header>
     <pre class="git-status-pre" id="gitModalBody"></pre>
+  </div>
+</div>
+
+<!-- System Doctor Modal -->
+<div class="modal" id="doctorModal" hidden>
+  <div class="sheet sheet-sm">
+    <header>
+      <b>🩺 SOL System Doctor</b>
+      <div class="modal-acts">
+        <button id="doctorRefreshBtn" class="mini ghost" title="Re-run checks">⟳ Re-check</button>
+        <button id="doctorModalClose" class="ghost">✕</button>
+      </div>
+    </header>
+    <div class="doctor-body" id="doctorModalBody"><div class="empty">Running checks…</div></div>
   </div>
 </div>
 <script src="/static/app.js"></script>

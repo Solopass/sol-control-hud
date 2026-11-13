@@ -211,6 +211,11 @@ class MediaCollector:
                                  timeout=5, creationflags=NO_WINDOW)
             if res.returncode == 0 and res.stdout.strip():
                 return self._store(parse_line(res.stdout.strip()))
+        except OSError as e:
+            if getattr(e, "winerror", None) == 4551 and self.using_exe():
+                self._exe_fails = EXE_MAX_QUICK_FAILS
+            else:
+                _swallowed("media.MediaCollector.poll_once")
         except Exception:
             _swallowed("media.MediaCollector.poll_once")
         return MediaInfo()
@@ -239,6 +244,11 @@ class MediaCollector:
                     if line.strip():
                         lines += 1
                         self._store(parse_line(line.strip()))
+            except OSError as e:
+                if was_exe and getattr(e, "winerror", None) == 4551:
+                    self._exe_fails = EXE_MAX_QUICK_FAILS
+                    continue
+                _swallowed("media.MediaCollector._run")
             except Exception:
                 _swallowed("media.MediaCollector._run")
             finally:

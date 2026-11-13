@@ -170,6 +170,8 @@ def _deck_json(path: str, body: dict | None = None, timeout: float = 4.0) -> dic
         except Exception:
             _swallowed("network._deck_json.http_error")
             return {"ok": False, "error": f"HTTP {e.code}"}
+    except (urllib.error.URLError, TimeoutError):
+        return None
     except Exception:
         _swallowed("network._deck_json")
         return None

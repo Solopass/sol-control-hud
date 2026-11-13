@@ -1134,6 +1134,40 @@ class Hub:
             """The HUD health card (health.py)."""
             return {"ok": True, **self.health_report()}
 
+        @app.get("/api/doctor")
+        def run_doctor() -> dict:
+            """Instant non-blocking sol-doctor check using the hub's live collectors."""
+            from . import doctor
+            c = self.collectors
+            ls = c["llama_swap"].get() or {}
+            ol = c["ollama"].get() if "ollama" in c else {}
+            status = {
+                "llama_swap": ls,
+                "ollama": ol,
+                "backend": {} if ls.get("up") else {"known": False},
+                "gpu": c["gpu"].get() or {},
+                "vram": c["vram"].get() or {},
+                "displays": c["displays"].get() or {},
+                "speed": c["speed"].get() or {},
+                "memory": c["memory"].get() if "memory" in c else {},
+                "disks": c["disks"].get() if "disks" in c else [],
+                "backups": c["backups"].get() if "backups" in c else {},
+                "wsl": c["wsl"].get() or {},
+                "stability": c["stability"].get() or {},
+            }
+            if not status["memory"] or not status["disks"]:
+                from .data.collectors import system
+                status["memory"] = status["memory"] or system.memory()
+                status["disks"] = status["disks"] or system.disks()
+                status["backups"] = status["backups"] or system.backups()
+            results = doctor.checks(status)
+            worst = 2 if any(r[1] == doctor.FAIL for r in results) else 1 if any(r[1] == doctor.WARN for r in results) else 0
+            return {
+                "ok": True,
+                "exit": worst,
+                "checks": [{"name": n.strip(), "indent": n.startswith("  "), "level": l, "detail": d} for n, l, d in results],
+            }
+
         @app.get("/api/guard")
         def guard_state() -> dict:
             """Why the local AI is off, and whether a button can answer it (the AI card polls this)."""

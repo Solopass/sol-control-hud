@@ -77,12 +77,50 @@ setInterval(packCards, 2000);
 
 // ---------- XS chips: one line per card, from the live data
 function ensureChip(el, r) {
-  if (el.querySelector(':scope > .xs-chip')) return;
-  const chip = document.createElement('div');
-  chip.className = 'xs-chip';
-  chip.dataset.title = r.title;
-  el.prepend(chip);
+  if (!el.querySelector(':scope > .xs-chip')) {
+    const chip = document.createElement('div');
+    chip.className = 'xs-chip';
+    chip.dataset.title = r.title;
+    el.prepend(chip);
+  }
+  const h2 = el.querySelector(':scope > h2');
+  if (h2 && !h2.querySelector('.card-fold-btn')) {
+    const fold = document.createElement('button');
+    fold.type = 'button';
+    fold.className = 'mini ghost card-fold-btn';
+    fold.title = 'Collapse card to compact strip';
+    fold.textContent = '▴';
+    fold.onclick = (e) => {
+      e.stopPropagation();
+      toggleCardCollapse(el, r);
+    };
+    h2.appendChild(fold);
+  }
 }
+function toggleCardCollapse(el, r) {
+  if (!el || EDIT) return;
+  if (el.dataset.size === 'xs' && el.dataset.prevSize) {
+    const restore = el.dataset.prevSize;
+    delete el.dataset.prevSize;
+    el.dataset.size = restore;
+    const sp = LC.spanFor(r.sizes, restore.toUpperCase(), gridCols());
+    el.style.gridColumn = `span ${sp.cols}`;
+  } else if (el.dataset.size !== 'xs') {
+    el.dataset.prevSize = el.dataset.size || (r.default || 'M').toLowerCase();
+    el.dataset.size = 'xs';
+    el.style.gridColumn = 'span 1';
+    if (typeof payload !== 'undefined' && payload) updateChips(payload);
+  }
+  packCards();
+}
+document.addEventListener('click', (e) => {
+  const chip = e.target.closest('.card[data-size="xs"] > .xs-chip');
+  if (chip && !EDIT) {
+    const el = chip.parentElement;
+    const r = reg(el?.id);
+    if (el && r && el.dataset.prevSize) toggleCardCollapse(el, r);
+  }
+});
 const pct = (v) => (v == null ? '–' : `${Math.round(v)}%`);
 const kbs = (v) => (v == null ? '–' : v >= 1024 ? `${(v / 1024).toFixed(1)} MB/s` : `${Math.round(v)} KB/s`);
 const CHIPS = {
@@ -153,6 +191,19 @@ const CHIPS = {
     const r = s.review || {};
     return r.active ? `<b style="color:var(--cyan)">active</b> · ${esc(r.title || '')}` : 'idle';
   },
+  'c-security': () => {
+    const pill = lcard('secPill')?.textContent?.trim() || 'ok';
+    const ipad = lcard('secIpadStatus')?.textContent?.trim() || '';
+    return `<b>${esc(pill)}</b>${ipad ? ` · <span class="dim">${esc(ipad)}</span>` : ''}`;
+  },
+  'c-overnight': () => {
+    const st = lcard('overnightStatusPill')?.textContent?.trim() || 'idle';
+    return `<b>${esc(st)}</b>`;
+  },
+  'c-ai-usage': () => {
+    const w = lcard('aiUsageWeek')?.textContent?.trim() || 'Claude & Antigravity';
+    return `<b>${esc(w)}</b>`;
+  },
 };
 function updateChips(p) {
   const s = p?.snapshot || {};
@@ -205,7 +256,209 @@ function renderLayoutButton() {
   label.className = 'lbl'; label.textContent = ` ${p ? p.name : 'Layouts'}`;
   layoutsBtn.replaceChildren(p?.icon || '▦', label);
   layoutsBtn.title = `Layout: ${p ? p.name : 'none'}. Switch and arrange the cards (Alt+1…9)`;
+  renderQuickbarPresets();
+  applyQuickFilters();
 }
+
+// ---------- Quick Switcher Bar (below header): presets, category filters, card search, jump menu, compact mode
+const CARD_CATS = {
+  hw: ['c-gpu', 'c-vram', 'c-system', 'c-disks'],
+  ai: ['c-ai', 'c-ai-thinking', 'c-chains', 'c-overnight', 'c-ask', 'c-awayq', 'c-ai-usage'],
+  dev: ['c-projects', 'c-ports', 'c-work', 'c-notes', 'c-media', 'c-solang', 'c-review'],
+  sys: ['c-security', 'c-net', 'c-svc', 'c-stab', 'c-health', 'c-week', 'c-activity'],
+};
+let activeQuickCat = 'all';
+let activeQuickSearch = '';
+let compactAllActive = false;
+
+function renderQuickbarPresets() {
+  const box = lcard('qbPresets');
+  if (!box || !LAYOUT) return;
+  const html = (LAYOUT.presets || []).map((p, i) => {
+    const on = p.name === LAYOUT.active ? ' on' : '';
+    const count = p.widgets.filter((w) => !w.hidden).length;
+    const tip = `${p.name} (${count} cards)${i < 9 ? ` · Alt+${i + 1}` : ''}`;
+    return `<button class="qb-pill${on}" data-qpreset="${esc(p.name)}" title="${esc(tip)}">`
+      + `<span class="qb-ic">${esc(p.icon || '▦')}</span><span>${esc(p.name)}</span></button>`;
+  }).join('');
+  setHTML(box, html);
+}
+
+function applyQuickFilters() {
+  if (!LAYOUT || EDIT) return;
+  const p = activePreset();
+  if (!p) return;
+  const catSet = activeQuickCat !== 'all' ? new Set(CARD_CATS[activeQuickCat] || []) : null;
+  const q = activeQuickSearch.toLowerCase().trim();
+  const comeBack = [];
+
+  for (const w of p.widgets) {
+    const el = lcard(w.id);
+    const r = reg(w.id);
+    if (!el || !r) continue;
+    let shouldHide = !!w.hidden;
+    if (catSet) {
+      shouldHide = !catSet.has(w.id);
+    }
+    if (!shouldHide && q) {
+      const titleMatch = r.title.toLowerCase().includes(q) || w.id.toLowerCase().includes(q);
+      const bodyMatch = (el.textContent || '').toLowerCase().includes(q);
+      shouldHide = !(titleMatch || bodyMatch);
+    }
+    if (el.hidden && !shouldHide) comeBack.push(w.id);
+    el.hidden = shouldHide;
+  }
+
+  const loaders = new Set(comeBack.map((id) => LOADERS[id]).filter(Boolean));
+  for (const fn of loaders) { try { window[fn]?.(); } catch (e) { console.error(e); } }
+  packCards();
+}
+
+function jumpToCard(cardId) {
+  const el = lcard(cardId);
+  if (!el) return;
+  if (el.hidden) {
+    if (activeQuickCat !== 'all' || activeQuickSearch) {
+      activeQuickCat = 'all';
+      activeQuickSearch = '';
+      if (lcard('qbFilter')) lcard('qbFilter').value = '';
+      document.querySelectorAll('#qbCats .qb-pill').forEach((b) => b.classList.toggle('on', b.dataset.qcat === 'all'));
+      applyQuickFilters();
+    }
+    if (el.hidden) {
+      el.hidden = false;
+      const fn = LOADERS[cardId];
+      if (fn) { try { window[fn]?.(); } catch (e) { console.error(e); } }
+      packCards();
+    }
+  }
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
+  el.classList.remove('flash');
+  void el.offsetWidth;
+  el.classList.add('flash');
+}
+window.jumpToCard = jumpToCard;
+
+function renderJumpMenu() {
+  const menu = lcard('qbJumpMenu');
+  if (!menu || !LAYOUT) return;
+  const catNames = { hw: '⚡ Hardware', ai: '🧠 AI & Chains', dev: '🛠 Dev & Notes', sys: '🛡 System & Net' };
+  const cols = Object.entries(CARD_CATS).map(([cat, ids]) => {
+    const btns = ids.map((id) => {
+      const r = reg(id);
+      if (!r) return '';
+      const el = lcard(id);
+      const isHidden = el?.hidden;
+      return `<button class="qb-jump-item${isHidden ? ' is-hidden' : ''}" data-qjump="${esc(id)}">`
+        + `<span>${esc(r.title)}</span>${isHidden ? '<small class="dim">hidden</small>' : ''}</button>`;
+    }).join('');
+    return `<div class="qb-jump-col"><div class="qb-jump-head">${catNames[cat]}</div>${btns}</div>`;
+  }).join('');
+  setHTML(menu, `<div class="qb-jump-grid">${cols}</div>`);
+}
+
+const qbBar = lcard('quickbar');
+if (qbBar) {
+  qbBar.addEventListener('click', (e) => {
+    const presetBtn = e.target.closest('[data-qpreset]');
+    if (presetBtn) {
+      activateLayout(presetBtn.dataset.qpreset);
+      return;
+    }
+    const catBtn = e.target.closest('[data-qcat]');
+    if (catBtn) {
+      const cat = catBtn.dataset.qcat;
+      activeQuickCat = (activeQuickCat === cat && cat !== 'all') ? 'all' : cat;
+      qbBar.querySelectorAll('#qbCats .qb-pill').forEach((b) => b.classList.toggle('on', b.dataset.qcat === activeQuickCat));
+      applyQuickFilters();
+      return;
+    }
+    const jumpItem = e.target.closest('[data-qjump]');
+    if (jumpItem) {
+      lcard('qbJumpMenu').hidden = true;
+      jumpToCard(jumpItem.dataset.qjump);
+      return;
+    }
+  });
+}
+
+if (lcard('qbEditLayoutBtn')) {
+  lcard('qbEditLayoutBtn').onclick = () => {
+    if (EDIT) { endEdit(); applyPreset(activePreset()); toast('edit cancelled'); }
+    else startEdit();
+  };
+}
+
+if (lcard('qbJumpBtn')) {
+  lcard('qbJumpBtn').onclick = (e) => {
+    e.stopPropagation();
+    const menu = lcard('qbJumpMenu');
+    if (!menu) return;
+    if (menu.hidden) {
+      renderJumpMenu();
+      menu.hidden = false;
+    } else {
+      menu.hidden = true;
+    }
+  };
+  document.addEventListener('click', (e) => {
+    const menu = lcard('qbJumpMenu');
+    if (menu && !menu.hidden && !menu.contains(e.target) && e.target !== lcard('qbJumpBtn')) {
+      menu.hidden = true;
+    }
+  });
+}
+
+if (lcard('qbFilter')) {
+  lcard('qbFilter').addEventListener('input', (e) => {
+    activeQuickSearch = e.target.value;
+    applyQuickFilters();
+  });
+  lcard('qbFilter').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.target.value = '';
+      activeQuickSearch = '';
+      applyQuickFilters();
+      e.target.blur();
+    }
+  });
+}
+
+if (lcard('qbCompactBtn')) {
+  lcard('qbCompactBtn').onclick = () => {
+    if (EDIT) return;
+    compactAllActive = !compactAllActive;
+    lcard('qbCompactBtn').classList.toggle('on', compactAllActive);
+    const p = activePreset();
+    if (!p) return;
+    const cols = gridCols();
+    for (const w of p.widgets) {
+      const el = lcard(w.id);
+      const r = reg(w.id);
+      if (!el || !r) continue;
+      const targetSize = compactAllActive ? 'XS' : w.size;
+      delete el.dataset.prevSize;
+      el.dataset.size = targetSize.toLowerCase();
+      const sp = LC.spanFor(r.sizes, targetSize, cols);
+      el.style.gridColumn = `span ${sp.cols}`;
+    }
+    if (typeof payload !== 'undefined' && payload) updateChips(payload);
+    packCards();
+  };
+}
+
+addEventListener('keydown', (e) => {
+  if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
+    const flt = lcard('qbFilter');
+    if (flt) {
+      e.preventDefault();
+      flt.focus();
+      flt.select();
+    }
+  }
+});
 function renderLayoutMenu() {
   const items = (LAYOUT?.presets || []).map((p, i) => `<button class="litem${p.name === LAYOUT.active ? ' on' : ''}" data-lname="${esc(p.name)}">`
     + `<span class="lic">${esc(p.icon || '▦')}</span><span class="lname">${esc(p.name)}</span>`

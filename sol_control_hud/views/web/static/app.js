@@ -134,6 +134,13 @@ function render(p) {
   setHTML(tb, `▭<span class="lbl"> ${p.views.ticker ? 'Hide' : 'Show'} ticker</span>`);
   tb.onclick = async () => { tb.textContent = '…'; await post('/api/views', { ticker: !p.views.ticker }); };
   $('foot').textContent = `pace ${p.views.pace_s}s · ${s.gpu_name || ''}`;
+  if ($('hdrCpu')) setHTML($('hdrCpu'), `CPU <b>${s.cpu_percent != null ? Math.round(s.cpu_percent) + '%' : '–'}</b>`);
+  if ($('hdrGpu')) setHTML($('hdrGpu'), `GPU <b>${s.gpu_load != null ? Math.round(s.gpu_load) + '%' : '–'}</b>${s.gpu_temp != null ? ` <small class="dim">${s.gpu_temp}°</small>` : ''}`);
+  if ($('hdrVram')) {
+    const vCol = s.vram_spill_impact === 'slow' ? 'var(--red)' : s.vram_tight ? 'var(--amber)' : '';
+    setHTML($('hdrVram'), `VRAM <b${vCol ? ` style="color:${vCol}"` : ''}>${s.vram_used_gb != null ? s.vram_used_gb.toFixed(1) : '–'}G</b>`);
+  }
+  if ($('hdrRam')) setHTML($('hdrRam'), `RAM <b>${s.ram_percent != null ? Math.round(s.ram_percent) + '%' : '–'}</b>`);
 
   renderAlerts(p.attention || []);
   renderAway(p);
@@ -678,6 +685,20 @@ function renderAi(p) {
   pw.disabled = mode === 'away'; pw.title = mode === 'away' ? 'Away is running: Stop AI work first' : '';
   $('aiHint').textContent = locked;
   const lock = $('aiLock'); lock.textContent = s.gpu_locked ? 'held (a job is using the GPU)' : 'free'; lock.style.color = s.gpu_locked ? 'var(--amber)' : 'var(--dim)';
+  const qbPw = $('qbAiPowerBtn');
+  if (qbPw) {
+    const isOff = mode === 'off' || p.router?.up === false;
+    qbPw.dataset.power = isOff ? 'on' : 'off';
+    qbPw.className = `qb-pill qb-ai-power ${mode === 'away' ? 'away' : isOff ? 'off' : 'on'}`;
+    qbPw.textContent = mode === 'away' ? '🌙 Away' : isOff ? '▶ Wake AI' : '● Desk AI';
+    qbPw.title = mode === 'away' ? 'Away mode active (click to stop Away)' : isOff ? 'Local AI is off — click to wake to Desk mode' : 'Local AI is in Desk mode — click to turn off';
+  }
+  const activeMod = s.ai_model || '';
+  document.querySelectorAll('[data-quick-model]').forEach((b) => {
+    const isLoaded = b.dataset.quickModel === activeMod && ['loaded', 'generating'].includes(state);
+    b.classList.toggle('active', isLoaded);
+    b.classList.toggle('on', isLoaded);
+  });
 }
 
 function renderChains(p) {
@@ -2087,14 +2108,75 @@ if ($('ackCrashBtn')) {
   };
 }
 
-// Quick Model Switcher
+// Quick Model Switcher & Header/Quickbar Actions
 document.addEventListener('click', (e) => {
   const qm = e.target.closest('[data-quick-model]');
   if (qm) {
     const model = qm.dataset.quickModel;
     post('/api/action', { action: 'model', target: model, op: 'load' }).then((r) => toast(r.why));
+    return;
+  }
+  const jmp = e.target.closest('[data-jump]');
+  if (jmp && typeof window.jumpToCard === 'function') {
+    window.jumpToCard(jmp.dataset.jump);
   }
 });
+
+if ($('qbAiPowerBtn')) {
+  $('qbAiPowerBtn').onclick = async () => {
+    const mode = payload?.snapshot?.ai_mode;
+    if (mode === 'away') {
+      const r = await post('/api/action', { action: 'stop_ai' });
+      toast(r?.why || 'Stopping Away');
+      return;
+    }
+    const want = $('qbAiPowerBtn').dataset.power || 'on';
+    if (want === 'off' && !confirm('Turn the local AI off?')) return;
+    $('qbAiPowerBtn').disabled = true;
+    const r = await post('/api/action', { action: 'ai_power', target: want });
+    $('qbAiPowerBtn').disabled = false;
+    toast(r?.why || (want === 'on' ? 'Starting Local AI…' : 'Stopped Local AI'));
+  };
+}
+
+if ($('qbScratchBtn')) {
+  $('qbScratchBtn').onclick = () => $('notesComposeBtn')?.click();
+}
+
+async function openDoctorModal() {
+  const modal = $('doctorModal');
+  const body = $('doctorModalBody');
+  if (!modal || !body) return;
+  modal.hidden = false;
+  setHTML(body, '<div class="empty">Running SOL Doctor checks…</div>');
+  try {
+    const res = await (await fetch('/api/doctor', { cache: 'no-store' })).json();
+    if (!res.ok) {
+      setHTML(body, '<div class="empty">Doctor check failed</div>');
+      return;
+    }
+    const badgeCol = { OK: 'ok', WARN: 'warn', FAIL: 'bad' };
+    const summaryText = res.exit === 0 ? 'All checks passed' : res.exit === 1 ? 'Warnings detected' : 'Action needed';
+    const summaryCls = res.exit === 0 ? 'ok' : res.exit === 1 ? 'warn' : 'bad';
+    const rows = (res.checks || []).map((c) => `
+      <div class="doc-row${c.indent ? ' doc-indent' : ''}">
+        <span class="pill ${badgeCol[c.level] || ''}">${esc(c.level)}</span>
+        <b class="doc-name">${esc(c.name)}</b>
+        <span class="doc-detail">${esc(c.detail)}</span>
+      </div>
+    `).join('');
+    setHTML(body, `<div class="doc-summary"><span class="pill ${summaryCls}">${esc(summaryText)}</span><span class="dim small">${(res.checks || []).length} subsystem checks</span></div><div class="doc-list">${rows}</div>`);
+  } catch (err) {
+    setHTML(body, '<div class="empty">Could not reach /api/doctor</div>');
+  }
+}
+
+if ($('qbDoctorBtn')) $('qbDoctorBtn').onclick = openDoctorModal;
+if ($('doctorRefreshBtn')) $('doctorRefreshBtn').onclick = openDoctorModal;
+if ($('doctorModalClose')) $('doctorModalClose').onclick = () => { $('doctorModal').hidden = true; };
+if ($('doctorModal')) {
+  $('doctorModal').addEventListener('click', (e) => { if (e.target.id === 'doctorModal') $('doctorModal').hidden = true; });
+}
 
 // Note row clicks and Star Pinning
 document.addEventListener('click', async (e) => {
@@ -2170,12 +2252,15 @@ addEventListener('keydown', (e) => {
     if (paletteOpen) closePalette();
     if ($('composerModal') && !$('composerModal').hidden) $('composerModal').hidden = true;
     if ($('gitModal') && !$('gitModal').hidden) $('gitModal').hidden = true;
+    if ($('doctorModal') && !$('doctorModal').hidden) $('doctorModal').hidden = true;
   }
 });
 
 function getPaletteItems(query) {
   const q = query.toLowerCase().trim();
   const items = [
+    { label: 'Run SOL System Doctor (Health Check)', cat: 'System', run: () => { closePalette(); openDoctorModal(); } },
+    { label: 'Wake Local AI (Desk Mode)', cat: 'AI', run: () => { closePalette(); post('/api/action', { action: 'ai_power', target: 'on' }).then((r) => toast(r.why)); } },
     { label: 'New Scratch Note / Composer', cat: 'Action', run: () => { closePalette(); $('notesComposeBtn')?.click(); } },
     { label: 'Inspect & Acknowledge Crashes', cat: 'Action', run: () => { closePalette(); post('/api/action', { action: 'ack_crashes' }).then((r) => toast(r.why)); } },
     { label: 'Unload All Local AI Models', cat: 'AI', run: () => { closePalette(); post('/api/action', { action: 'models_unload_all' }).then((r) => toast(r.why)); } },

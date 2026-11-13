@@ -120,10 +120,13 @@ def checks(status: dict) -> list[tuple[str, str, str]]:
 
     s = status["stability"]
     if s.get("available"):
-        bad = s["whea"] + s["unexpected_reboots"] + s["gpu_driver_resets"]
-        since = f" since {s['since'][:16]} (earlier events acknowledged)" if s.get("acknowledged") else ""
+        whea = s.get("whea", 0)
+        reboots = s.get("unexpected_reboots", 0)
+        resets = s.get("gpu_driver_resets", 0)
+        bad = whea + reboots + resets
+        since = f" since {s['since'][:16]} (earlier events acknowledged)" if s.get("acknowledged") and s.get("since") else ""
         out.append(("Stability since baseline", FAIL if bad else OK,
-                    f"WHEA {s['whea']}, unexpected reboots {s['unexpected_reboots']}, GPU driver resets {s['gpu_driver_resets']}{since}"
+                    f"WHEA {whea}, unexpected reboots {reboots}, GPU driver resets {resets}{since}"
                     + (" - run D:\\OBVLT\\tools\\crash-watch.ps1" if bad else "")))
     else:
         out.append(("Stability since baseline", WARN, "event log query failed"))
@@ -135,8 +138,12 @@ def collect() -> dict:
     sampler.start()
     time.sleep(2.5)  # two counter samples for a real utilization value
     ollama = engines.ollama()
+    llama_swap = engines.llama_swap()
+    # Only read legacy %LOCALAPPDATA%\Ollama\server*.log if real Ollama (not llamacpp-shim) is serving
+    is_real_ollama = bool(ollama.get("up")) and not str(ollama.get("version") or "").endswith("llamacpp-shim")
+    backend = engines.ollama_backend() if is_real_ollama else ({} if llama_swap.get("up") else {"known": False})
     status = {
-        "ollama": ollama, "backend": engines.ollama_backend(), "llama_swap": engines.llama_swap(), "gpu": sampler.latest,
+        "ollama": ollama, "backend": backend, "llama_swap": llama_swap, "gpu": sampler.latest,
         "vram": vram.VramGuard(confirm=1).update(sampler.latest, ollama),
         "displays": displays.report(sampler.last_util, lambda pid: gpu.process_name(pid, {})),
         "speed": speed.answer_speed(),
