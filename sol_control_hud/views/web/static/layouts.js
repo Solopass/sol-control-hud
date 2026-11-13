@@ -343,7 +343,6 @@ const CARD_CATS = {
   sys: ['c-security', 'c-net', 'c-svc', 'c-stab', 'c-health', 'c-week', 'c-activity'],
 };
 let activeQuickCat = 'all';
-let activeQuickSearch = '';
 let compactAllActive = false;
 
 function renderQuickbarPresets() {
@@ -364,7 +363,6 @@ function applyQuickFilters() {
   const p = activePreset();
   if (!p) return;
   const catSet = activeQuickCat !== 'all' ? new Set(CARD_CATS[activeQuickCat] || []) : null;
-  const q = activeQuickSearch.toLowerCase().trim();
   const comeBack = [];
 
   for (const w of p.widgets) {
@@ -374,11 +372,6 @@ function applyQuickFilters() {
     let shouldHide = !!w.hidden;
     if (catSet) {
       shouldHide = !catSet.has(w.id);
-    }
-    if (!shouldHide && q) {
-      const titleMatch = r.title.toLowerCase().includes(q) || w.id.toLowerCase().includes(q);
-      const bodyMatch = (el.textContent || '').toLowerCase().includes(q);
-      shouldHide = !(titleMatch || bodyMatch);
     }
     if (el.hidden && !shouldHide) comeBack.push(w.id);
     el.hidden = shouldHide;
@@ -393,10 +386,8 @@ function jumpToCard(cardId) {
   const el = lcard(cardId);
   if (!el) return;
   if (el.hidden) {
-    if (activeQuickCat !== 'all' || activeQuickSearch) {
+    if (activeQuickCat !== 'all') {
       activeQuickCat = 'all';
-      activeQuickSearch = '';
-      if (lcard('qbFilter')) lcard('qbFilter').value = '';
       document.querySelectorAll('#qbCats .qb-pill').forEach((b) => b.classList.toggle('on', b.dataset.qcat === 'all'));
       applyQuickFilters();
     }
@@ -414,6 +405,24 @@ function jumpToCard(cardId) {
   el.classList.add('flash');
 }
 window.jumpToCard = jumpToCard;
+
+// Quick-bar search (app.js initQuickSearch): cards of the active layout whose title or id contains q.
+function quickCardMatches(q, max) {
+  q = String(q || '').toLowerCase().trim();
+  const p = activePreset();
+  if (!q || !p) return [];
+  const out = [];
+  for (const w of p.widgets) {
+    const r = reg(w.id);
+    if (!r) continue;
+    if (r.title.toLowerCase().includes(q) || w.id.toLowerCase().includes(q)) {
+      out.push({ id: w.id, title: r.title, hidden: !!lcard(w.id)?.hidden });
+      if (out.length >= (max || 5)) break;
+    }
+  }
+  return out;
+}
+window.quickCardMatches = quickCardMatches;
 
 function renderJumpMenu() {
   const menu = lcard('qbJumpMenu');
@@ -481,21 +490,6 @@ if (lcard('qbJumpBtn')) {
     const menu = lcard('qbJumpMenu');
     if (menu && !menu.hidden && !menu.contains(e.target) && e.target !== lcard('qbJumpBtn')) {
       menu.hidden = true;
-    }
-  });
-}
-
-if (lcard('qbFilter')) {
-  lcard('qbFilter').addEventListener('input', (e) => {
-    activeQuickSearch = e.target.value;
-    applyQuickFilters();
-  });
-  lcard('qbFilter').addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      e.target.value = '';
-      activeQuickSearch = '';
-      applyQuickFilters();
-      e.target.blur();
     }
   });
 }
