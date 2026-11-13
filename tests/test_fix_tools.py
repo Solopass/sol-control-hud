@@ -610,7 +610,7 @@ type: fix-queue
     assert st["unresolved"][0]["reason"] == "no-match"
 
     # Add task
-    monkeypatch.setattr(fx, "load_repos", lambda: {"media-api": {}, "speedman": {}})
+    monkeypatch.setattr(fx, "load_repos", lambda: {"media-api": {}, "speedman": {}, "edit-api": {}})
     ok = fx.add_queue_task("media-api", "add timeout to second call", q)
     assert ok is True
     st2 = fx.queue_status(q)
@@ -623,3 +623,78 @@ type: fix-queue
     st3 = fx.queue_status(q)
     assert st3["total_open"] == 3
     assert len(st3["unresolved"]) == 0
+
+
+NL = chr(10)
+QUEUE_TEXT = NL.join(["## Open", "- [ ] [attempts: 1/2] media-api: open one", "", "## Unresolved",
+                      "- edit-api: add feature [failed: no-match]", ""])
+
+
+def _q(tmp_path, monkeypatch, text=QUEUE_TEXT):
+    q = tmp_path / "Fix queue.md"
+    q.write_text(text, encoding="utf-8", newline="")
+    monkeypatch.setattr(fx, "load_repos", lambda: {"media-api": {}, "edit-api": {}})
+    return q
+
+
+def test_reset_moves_unresolved_to_open(tmp_path, monkeypatch):
+    q = _q(tmp_path, monkeypatch)
+    assert fx.reset_queue_task("edit-api", "add feature", q) is True
+    text = q.read_text(encoding="utf-8")
+    assert "[failed:" not in text
+    lines = text.split(NL)
+    assert lines[0] == "## Open"
+    assert lines[1] == "- [ ] [attempts: 0/2] edit-api: add feature"
+    assert lines.index("## Unresolved") > 1
+
+
+def test_reset_open_task_rejected_and_file_unchanged(tmp_path, monkeypatch):
+    q = _q(tmp_path, monkeypatch)
+    with pytest.raises(fx.Rejected) as e:
+        fx.reset_queue_task("media-api", "open one", q)
+    assert "still open" in str(e.value)
+    assert q.read_text(encoding="utf-8") == QUEUE_TEXT
+
+
+def test_reset_no_match_returns_false(tmp_path, monkeypatch):
+    q = _q(tmp_path, monkeypatch)
+    assert fx.reset_queue_task("edit-api", "nothing here", q) is False
+    assert q.read_text(encoding="utf-8") == QUEUE_TEXT
+
+
+BAD_TASKS = ["a" + NL + "b", "a" + chr(13) + NL + "- [ ] [attempts: 0/99] media-api: x", "a" + chr(0) + "b",
+             "a" + chr(27) + "b", "x [failed: y]", "x -> branch b", "x" * 301, "   "]
+
+
+@pytest.mark.parametrize("bad", BAD_TASKS)
+def test_bad_task_text_rejected_for_add_and_reset(tmp_path, monkeypatch, bad):
+    q = _q(tmp_path, monkeypatch)
+    with pytest.raises(fx.Rejected):
+        fx.add_queue_task("media-api", bad, q)
+    with pytest.raises(fx.Rejected):
+        fx.reset_queue_task("edit-api", bad, q)
+    assert q.read_text(encoding="utf-8") == QUEUE_TEXT
+
+
+def test_reset_repo_not_allowlisted_rejected(tmp_path, monkeypatch):
+    q = _q(tmp_path, monkeypatch)
+    with pytest.raises(fx.Rejected):
+        fx.reset_queue_task("other-repo", "add feature", q)
+    with pytest.raises(fx.Rejected):
+        fx.reset_queue_task("Bad Repo!", "add feature", q)
+
+
+def test_add_duplicate_open_rejected(tmp_path, monkeypatch):
+    q = _q(tmp_path, monkeypatch)
+    with pytest.raises(fx.Rejected):
+        fx.add_queue_task("media-api", "open one", q)
+    assert q.read_text(encoding="utf-8") == QUEUE_TEXT
+
+
+def test_reset_only_first_of_duplicate_unresolved(tmp_path, monkeypatch):
+    text = NL.join(["## Open", "", "## Unresolved", "- edit-api: dup [failed: a]", "- edit-api: dup [failed: b]", ""])
+    q = _q(tmp_path, monkeypatch, text)
+    assert fx.reset_queue_task("edit-api", "dup", q) is True
+    st = fx.queue_status(q)
+    assert st["total_open"] == 1 and len(st["unresolved"]) == 1
+    assert st["unresolved"][0]["reason"] == "b"

@@ -831,55 +831,81 @@ def queue_status(path: Path = QUEUE_FILE) -> dict:
     }
 
 
-def add_queue_task(repo: str, task: str, path: Path = QUEUE_FILE) -> bool:
+MAX_TASK_CHARS = 300
+REPO_NAME_RE = re.compile(r"^[a-z0-9._-]+$")
+
+
+def _check_task_input(repo: str, task: str) -> tuple[str, str]:
+    """Shared validation for add/reset: returns the cleaned (repo, task) or raises Rejected."""
     repo = repo.strip().lower()
     task = task.strip()
     if not repo or not task:
-        return False
-    repos = load_repos()
-    if repo not in repos:
+        raise Rejected("denied", "repo and task must not be empty")
+    if not REPO_NAME_RE.match(repo):
+        raise Rejected("denied", f"invalid repo name {repo!r}")
+    if len(task) > MAX_TASK_CHARS:
+        raise Rejected("denied", f"task is longer than {MAX_TASK_CHARS} characters")
+    if any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 or c in "\u2028\u2029" for c in task):
+        raise Rejected("denied", "task must be one line without control characters")
+    if " [failed: " in task or " -> branch " in task:
+        raise Rejected("denied", "task must not contain ' [failed: ' or ' -> branch '")
+    if repo not in load_repos():
         raise Rejected("denied", f"repo {repo!r} is not on the fix allowlist")
+    return repo, task
 
+
+def _insert_open(lines: list[str], new_line: str) -> None:
+    """Put a fresh open task line at the top of the ## Open section (creating it if missing)."""
+    for idx, line in enumerate(lines):
+        if line.strip().lower() == "## open":
+            lines.insert(idx + 1, new_line)
+            return
+    lines.extend(["", "## Open", new_line])
+
+
+def add_queue_task(repo: str, task: str, path: Path = QUEUE_FILE) -> bool:
+    repo, task = _check_task_input(repo, task)
     new_line = f"- [ ] [attempts: 0/2] {repo}: {task}"
 
     def mutate(text: str) -> str:
+        for ln in text.split("\n"):
+            m = TASK_RE.match(ln.strip())
+            if m and m.group(3) == repo and m.group(4) == task:
+                raise Rejected("denied", "task is already open for this repo")
         lines = text.split("\n")
-        open_idx = -1
-        for idx, line in enumerate(lines):
-            if line.strip().lower() == "## open":
-                open_idx = idx
-                break
-        if open_idx != -1:
-            lines.insert(open_idx + 1, new_line)
-        else:
-            lines.extend(["", "## Open", new_line])
+        _insert_open(lines, new_line)
         return "\n".join(lines)
 
     return edit_queue(path, mutate)
 
 
 def reset_queue_task(repo: str, task: str, path: Path = QUEUE_FILE) -> bool:
-    repo = repo.strip().lower()
-    task = task.strip()
+    """Re-queue a FAILED task: the first matching unresolved line moves to ## Open with fresh attempts.
+    Open tasks are refused (attempts are counted before a run [R7]; the daemon may be mid-run on one)."""
+    repo, task = _check_task_input(repo, task)
+    found = False
 
     def mutate(text: str) -> str:
+        nonlocal found
+        found = False
         lines = text.split("\n")
-        new_lines = []
-        replaced = False
-        for ln in lines:
-            m_unres = UNRESOLVED_RE.match(ln.strip())
+        hit = -1
+        for i, ln in enumerate(lines):
             m_open = TASK_RE.match(ln.strip())
-            if m_unres and m_unres.group(1) == repo and m_unres.group(2) == task:
-                new_lines.append(f"- [ ] [attempts: 0/2] {repo}: {task}")
-                replaced = True
-            elif m_open and m_open.group(3) == repo and m_open.group(4) == task:
-                new_lines.append(f"- [ ] [attempts: 0/2] {repo}: {task}")
-                replaced = True
-            else:
-                new_lines.append(ln)
-        return "\n".join(new_lines) if replaced else text
+            if m_open and m_open.group(3) == repo and m_open.group(4) == task:
+                raise Rejected("denied", "task is still open; only failed tasks can be reset")
+            m_unres = UNRESOLVED_RE.match(ln.strip())
+            if hit == -1 and m_unres and m_unres.group(1) == repo and m_unres.group(2) == task:
+                hit = i
+        if hit == -1:
+            return text
+        found = True
+        del lines[hit]
+        _insert_open(lines, f"- [ ] [attempts: 0/2] {repo}: {task}")
+        return "\n".join(lines)
 
-    return edit_queue(path, mutate)
+    ok = edit_queue(path, mutate)
+    return ok and found
 
 
 # ------------------------------------------------------------------ startup scrub, abort flag, the chain tool

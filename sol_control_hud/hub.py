@@ -1403,8 +1403,11 @@ class Hub:
                 except fix_tools.Rejected as e:
                     return {"ok": False, "why": str(e)}
             if action == "reset":
-                ok = fix_tools.reset_queue_task(repo, task)
-                return {"ok": ok, "why": "reset task" if ok else "failed to reset task"}
+                try:
+                    ok = fix_tools.reset_queue_task(repo, task)
+                    return {"ok": ok, "why": "reset task" if ok else "failed to reset task"}
+                except fix_tools.Rejected as e:
+                    return {"ok": False, "why": str(e)}
             return {"ok": False, "why": f"unknown action: {action}"}
 
         @app.post("/api/playground")
