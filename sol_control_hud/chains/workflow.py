@@ -86,7 +86,7 @@ class Workflow:
 _REF = re.compile(r"\{\{\s*([a-zA-Z_][\w.]*)\s*\}\}")
 _NAME = re.compile(r"^[a-zA-Z_]\w*$")
 CHECK_KEYS = {"path", "min_items", "max_items", "contains", "matches", "equals", "min_length", "min_bullets", "max_bullets",
-              "min_words", "max_words"}
+              "min_words", "max_words", "json"}
 REASONING = ("off", "on", "low", "medium", "high")
 STEP_KEYS = {"id", "model", "prompt", "schema", "checks", "retries", "escalate_to", "max_tokens", "tool", "args", "system",
              "reasoning", "temperature", "long_model", "for_each", "continue_on_error", "critic", "compact"}

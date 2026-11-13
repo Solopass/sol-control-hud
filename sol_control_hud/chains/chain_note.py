@@ -48,6 +48,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import jsonschema
 import yaml
 
 from . import file_tools, gather_tools
@@ -73,7 +74,7 @@ DESK_MODELS = FAST_MODELS | {"sol-smart", "sol-long"}          # served in Desk,
 _FRONT = re.compile(r"\A\ufeff?---\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
 _HEADING = re.compile(r"^##\s+(.+?)\s*#*\s*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
-_SETTING = re.compile(r"^(model|reasoning|check|max tokens|retries|system|long model|temperature|hide|critic|tool|file|path|batch_size|max_items|offset|state_file|filter_music|auto_advance|auto_save|items|urls)\s*:\s*(.+?)\s*$", re.I)
+_SETTING = re.compile(r"^(model|reasoning|check|schema|max tokens|retries|system|long model|temperature|hide|critic|tool|file|path|batch_size|max_items|offset|state_file|filter_music|auto_advance|auto_save|items|urls)\s*:\s*(.+?)\s*$", re.I)
 _FOR_FILES = re.compile(r"^for each file in (.+?) matching (.+?)(?: changed in the last (\d+) days?)?\s*:\s*$", re.I)
 _FOR_LINES = re.compile(r"^for each ([a-z_]\w*) (?:in|of) (.+?)\s*:\s*$", re.I)
 _GATHER = re.compile(r"^gather\s*:\s*(.+?)\s*$", re.I)
@@ -165,8 +166,10 @@ def parse_check(text: str, where: str) -> dict:
     m = re.fullmatch(r"(?:mentions|contains|must mention)\s+(.+)", text.strip(), re.I)
     if m:
         return {"path": "", "contains": m.group(1).strip().strip('"')}
+    if t == "json":
+        return {"path": "", "json": True}
     raise ChainError(f"{where}: I don't understand `check: {text}`. Use e.g. `3-6 bullets`, `at least 300 words`, "
-                     f"`at most 50 words` or `mentions budget`")
+                     f"`at most 50 words`, `mentions budget` or `json`")
 
 
 def parse_gather(text: str, where: str) -> dict:
@@ -256,6 +259,17 @@ def load_chain(path: str | Path) -> Chain:
                 key, val = s.group(1).lower(), s.group(2)
                 if key == "check":
                     step.checks.append(parse_check(val, where))
+                elif key == "schema":
+                    try:
+                        schema = json.loads(val)
+                        if not isinstance(schema, (dict, bool)):
+                            raise ValueError("a JSON schema is an object like {\"type\": \"object\"}")
+                        jsonschema.Draft202012Validator.check_schema(schema)
+                    except ValueError as e:
+                        raise ChainError(f"{where}: `schema:` must be a JSON schema on one line ({str(e)[:120]})") from e
+                    except jsonschema.SchemaError as e:
+                        raise ChainError(f"{where}: `schema:` is not a valid JSON schema ({e.message[:120]})") from e
+                    step.settings["schema"] = schema
                 else:
                     step.settings[key] = val
             elif step.loop:
@@ -272,6 +286,8 @@ def load_chain(path: str | Path) -> Chain:
                 if gm:  # `for each part in {{Per file}} grouped by repo:` - an earlier loop's answers, per repo, in parts
                     step.loop.update(source=gm.group(1).strip(), group=gm.group(2).lower())
         step.prompt = "\n".join(rest).strip()
+        if "schema" in step.settings and not any(c.get("json") for c in step.checks):
+            raise ChainError(f"{where}: `schema:` needs `check: json` on the step (the schema checks the JSON answer)")
         if step.gather:
             if step.prompt or step.loop or step.settings or step.checks:
                 raise ChainError(f"{where}: a `gather:` step only collects; put the prompt and settings in the next step")
@@ -407,6 +423,8 @@ def to_workflow(chain: Chain) -> dict:
             step["compact"] = int(c_val) if c_val.isdigit() else (c_val in ("true", "yes", "on"))
         if s.checks:
             step["checks"] = s.checks
+        if "schema" in st:  # also constrains the model's output through the router (llama.cpp json_schema)
+            step["schema"] = st["schema"]
         if s.loop and s.loop["kind"] == "files":
             steps.append({"id": f"{s.id}__files", "tool": "list_files", "args": {
                 "folder": _translate(s.loop["folder"], chain, idx, where), "glob": s.loop["glob"], "recursive": True,

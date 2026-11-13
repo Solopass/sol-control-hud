@@ -158,6 +158,15 @@ def run_checks(output, checks: list[dict]) -> None:
                 raise StepFailure(f"needs {_range(c.get('min_words'), c.get('max_words'))} words, got {n}")
 
 
+_JSON_FENCE = re.compile(r"\A\s*```[A-Za-z]*[ \t]*\r?\n?(.*?)\r?\n?```\s*\Z", re.S)
+
+
+def strip_json_fence(text: str) -> str:
+    """The answer without a surrounding ```json fence and whitespace."""
+    m = _JSON_FENCE.match(text)
+    return (m.group(1) if m else text).strip()
+
+
 _BULLET = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+\S", re.M)
 
 
@@ -505,15 +514,23 @@ class Runner:
         text = result.content.strip()
         if not text:
             raise StepFailure("empty answer")
-        if step.schema is None:
+        want_json = any(c.get("json") for c in step.checks)
+        if step.schema is None and not want_json:
             output: object = text
         else:
+            text = strip_json_fence(text)
             try:
                 output = json.loads(text)
             except json.JSONDecodeError as e:
                 raise StepFailure(f"answer is not valid JSON ({e.msg})") from e
-            errors = sorted(jsonschema.Draft202012Validator(step.schema).iter_errors(output), key=lambda er: er.path)
-            if errors:
-                raise StepFailure("schema: " + "; ".join(f"{'/'.join(map(str, er.path)) or '(root)'}: {er.message}" for er in errors[:3]))
+            if want_json and not isinstance(output, (dict, list)):
+                raise StepFailure("answer must be a JSON object or array")
+            if step.schema is not None:
+                errors = sorted(jsonschema.Draft202012Validator(step.schema).iter_errors(output), key=lambda er: list(map(str, er.path)))
+                if errors:
+                    msg = "schema: " + "; ".join(f"{'/'.join(map(str, er.path)) or '(root)'}: {er.message}" for er in errors[:3])
+                    raise StepFailure(msg[:300])
+            if want_json:  # later steps get the clean JSON text (no fences or chatter), which tools like sync_tasks accept
+                output = json.dumps(output, ensure_ascii=False)
         run_checks(output, step.checks)
         return output

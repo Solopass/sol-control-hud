@@ -223,3 +223,121 @@ args:
     assert scan_step["args"]["days"] == 7
     assert scan_step["args"]["limit"] == 10
 
+
+
+# ---------------------------------------------------------------- check: json / schema:
+SCHEMA = '{"type": "object", "required": ["tasks"], "properties": {"tasks": {"type": "array", "items": {"type": "object", "required": ["task"], "properties": {"task": {"type": "string"}}}}}}'
+JSON_NOTE = "---\nstatus: queued\n---\n## Items\ncheck: json\nschema: " + SCHEMA + "\nList tasks.\n\n## Sync\ntool: echo_args\ntasks: {{Items}}\n"
+
+# step blocks copied from the real notes (Idea sorter, Weekly digest); tests never read D:\OBVLT
+REAL_IDEA_SORTER = """---
+status: queued
+inputs:
+  folder: C:/x
+---
+## Process ideas
+for each file in {{folder}} matching *.md changed in the last 7 days:
+Summarize {{file.name}} in one line: {{file.text}}
+
+## Weekly Pick
+check: json
+schema: {"type": "object", "required": ["picks"], "properties": {"picks": {"type": "array", "minItems": 0, "maxItems": 3, "items": {"type": "object", "required": ["idea", "difficulty", "why_now"], "properties": {"idea": {"type": "string"}, "difficulty": {"type": "string", "enum": ["easy", "medium", "hard"]}, "why_now": {"type": "string"}, "next_step": {"type": "string"}}}}}}
+Based on these evaluated ideas:
+{{Process ideas}}
+
+If there are no ideas listed above, return {"picks": []}.
+"""
+REAL_DIGEST = """---
+status: queued
+---
+## Open loops
+List the open loops.
+
+## Action items JSON
+check: json
+schema: {"type": "object", "required": ["tasks"], "properties": {"tasks": {"type": "array", "items": {"type": "object", "required": ["task"], "properties": {"task": {"type": "string"}, "due": {"type": "string"}, "loop": {"type": "string"}}}}}}
+From these open loops:
+{{Open loops}}
+
+Return JSON with a "tasks" array.
+
+## Sync tasks
+tool: sync_tasks
+tasks: {{Action items JSON}}
+"""
+
+
+def test_parse_check_json():
+    assert cn.parse_check("json", "x") == {"path": "", "json": True}
+    assert cn.parse_check(" JSON ", "x") == {"path": "", "json": True}
+    with pytest.raises(cn.ChainError, match="`json`"):
+        cn.parse_check("nonsense", "x")
+
+
+def _note(tmp_path, text):
+    p = tmp_path / "J.md"; p.write_text(text, encoding="utf-8")
+    return cn.load_chain(p)
+
+
+def test_json_check_and_schema_parse_and_reach_the_workflow(tmp_path):
+    chain = _note(tmp_path, JSON_NOTE.replace("tool: echo_args\ntasks: {{Items}}", "Use {{Items}}"))
+    st = chain.steps[0]
+    assert st.checks == [{"path": "", "json": True}] and st.settings["schema"]["required"] == ["tasks"]
+    wf = cn.to_workflow(chain)
+    assert wf["steps"][0]["schema"]["required"] == ["tasks"] and wf["steps"][0]["checks"] == [{"path": "", "json": True}]
+
+
+def _accept(chain_text, tmp_path, answer):
+    chain = _note(tmp_path, chain_text)
+    wf = cn.parse(cn.to_workflow(chain))
+    return Runner._accept(wf.steps[0], ChatResult(content=answer, finish_reason="stop", completion_tokens=5))
+
+
+def test_json_check_outcomes(tmp_path):
+    from sol_control_hud.chains.runner import StepFailure
+    note = "---\nstatus: queued\n---\n## A\ncheck: json\nschema: " + SCHEMA + "\nGo.\n"
+    good = '{"tasks": [{"task": "x"}]}'
+    assert json.loads(_accept(note, tmp_path, good)) == {"tasks": [{"task": "x"}]}
+    fenced = "```json\n" + good + "\n```\n"
+    assert _accept(note, tmp_path, fenced) == json.dumps(json.loads(good))   # clean JSON text, no fences
+    with pytest.raises(StepFailure, match="not valid JSON"):
+        _accept(note, tmp_path, "here are your tasks")
+    with pytest.raises(StepFailure, match="schema"):
+        _accept(note, tmp_path, '{"tasks": [{"nope": 1}]}')
+    with pytest.raises(StepFailure, match="schema"):
+        _accept(note, tmp_path, '{"other": 1}')
+    plain = "---\nstatus: queued\n---\n## A\ncheck: json\nGo.\n"   # no schema: any object or array
+    assert json.loads(_accept(plain, tmp_path, "```\n[1, 2]\n```")) == [1, 2]
+    with pytest.raises(StepFailure, match="object or array"):
+        _accept(plain, tmp_path, "42")
+
+
+def test_downstream_step_gets_clean_json(env):
+    chains, _ = env
+    p = chains / "Sync.md"
+    p.write_text(JSON_NOTE.replace("tool: echo_args\ntasks: {{Items}}", "Repeat {{Items}}"), encoding="utf-8")
+    chain = cn.load_chain(p)
+    wf = cn.parse(cn.to_workflow(chain))
+    out = Runner._accept(wf.steps[0], ChatResult(content='```json\n{"tasks": [{"task": "a"}]}\n```', finish_reason="stop", completion_tokens=5))
+    from sol_control_hud.chains.workflow import render
+    assert render("{{ steps.items.output }}", {"steps": {"items": {"output": out}}}) == '{"tasks": [{"task": "a"}]}'
+    assert json.loads(out)["tasks"][0]["task"] == "a"
+
+
+@pytest.mark.parametrize("body, msg", [
+    ("## A\nschema: {\"type\": \"object\"}\nhi", "needs `check: json`"),
+    ("## A\ncheck: json\nschema: {not json}\nhi", r"step 'A' \(line \d+\).*JSON schema on one line"),
+    ("## A\ncheck: json\nschema: [1]\nhi", "JSON schema on one line"),
+    ("## A\ncheck: json\nschema: {\"type\": 12}\nhi", "not a valid JSON schema"),
+])
+def test_schema_errors(tmp_path, body, msg):
+    p = tmp_path / "Bad.md"; p.write_text("---\nstatus: draft\n---\n" + body, encoding="utf-8")
+    with pytest.raises(cn.ChainError, match=msg):
+        cn.load_chain(p)
+
+
+@pytest.mark.parametrize("text", [REAL_IDEA_SORTER, REAL_DIGEST])
+def test_real_notes_with_json_checks_parse(tmp_path, text):
+    chain = _note(tmp_path, text)
+    wf = cn.to_workflow(chain)
+    assert any(s.get("schema") for s in wf["steps"])
