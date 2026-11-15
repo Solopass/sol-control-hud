@@ -362,6 +362,19 @@ class Hub:
                 self.collectors["security"].value = None
             log(f"security: {action} target={target} -> {res.get('why')}")
             return res
+        if action in ("pad_start", "pad_stop", "pad_restart"):
+            from .data.collectors import sol_pad
+            if action == "pad_start":
+                res = sol_pad.start_pad()
+            elif action == "pad_stop":
+                res = sol_pad.stop_pad()
+            else:
+                res = sol_pad.restart_pad()
+            if hasattr(self, "collectors") and "sol_pad" in self.collectors:
+                self.collectors["sol_pad"].at = 0
+                self.collectors["sol_pad"].value = None
+            log(f"sol_pad: {action} -> {res.get('why')}")
+            return res
         if action in ("ask", "ask_remove", "chain"):
             from . import control
             b = body or {}
@@ -939,6 +952,7 @@ class Hub:
                 "ai_ops": c["ai_ops"].get() if "ai_ops" in c else {},
                 "security": c["security"].get() if "security" in c else {},
                 "network": c["network"].get() if "network" in c else {},
+                "sol_pad": c["sol_pad"].get() if "sol_pad" in c else {},
                 "layout": {"active": self._layouts["active"], "rev": self._layouts["rev"]}}
 
     @staticmethod
@@ -1000,6 +1014,8 @@ class Hub:
         from .data.collectors import network          # Pi-hole + LAN devices: its own thread probes, this only reads
         network.start_network_monitor()
         self.collectors["network"] = Cached(network.last_status, 2)
+        from .data.collectors import sol_pad
+        self.collectors["sol_pad"] = Cached(sol_pad.get_sol_pad_status, 5)
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 

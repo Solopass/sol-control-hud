@@ -288,6 +288,7 @@ function render(p) {
   renderDisks(s);
   renderSecurity(p);
   renderNetwork(p);
+  renderSolPad(p);
 
   // stability
   const sys = slide(p, 'SYS'); setHTML($('sysSeg'), sys ? segHtml(sys.segments) : '');
@@ -993,6 +994,29 @@ function renderNetwork(p) {
 }
 
 // The iPad deck's own report (sol-deck's diag.js -> /api/clientlog): pairing, input
+function renderSolPad(p) {
+  if (typeof cardShown === 'function' && !cardShown('c-pad')) return;
+  const sp = p.sol_pad || {};
+  const pill = $('padPill');
+  if (!pill) return;
+  const states = {
+    online: ['ONLINE', 'ok'],
+    partial: ['PARTIAL', 'warn'],
+    standby: ['USB READY', 'dim'],
+    offline: ['OFFLINE', 'dim'],
+  };
+  const [label, cls] = states[sp.state] || ['…', 'dim'];
+  pill.textContent = label;
+  pill.className = `pill ${cls}`;
+  const yn = (v, yes, no, warn) => (v == null ? '<span class="dim">–</span>' : v ? `<span style="color:var(--green)">${yes}</span>` : `<span style="color:${warn ? 'var(--amber)' : 'var(--dim)'}">${no}</span>`);
+  setHTML($('padUsb'), yn(sp.usb_connected, 'Connected (USB)', 'Unplugged', false));
+  setHTML($('padStream'), yn(sp.stream_running, 'Running', 'Stopped', false));
+  setHTML($('padDock'), yn(sp.dock_running, 'Running', 'Stopped', false));
+  const running = Boolean(sp.stream_running || sp.dock_running);
+  if ($('padStartBtn')) $('padStartBtn').hidden = Boolean(sp.stream_running && sp.dock_running);
+  if ($('padRestartBtn')) $('padRestartBtn').hidden = !running;
+  if ($('padStopBtn')) $('padStopBtn').hidden = !running;
+}
 // lag p50/p95, transport, errors. Empty when sol-deck sends none.
 function deckHealthHtml(client) {
   const parts = [];
