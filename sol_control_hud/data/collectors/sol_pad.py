@@ -99,11 +99,28 @@ def start_pad() -> dict:
 
 
 def stop_pad() -> dict:
-    subprocess.run(
-        ["taskkill", "/IM", "sol-pad-stream.exe", "/IM", "sol-pad-dock.exe", "/F"],
-        capture_output=True,
-        creationflags=0x08000000,
-    )
+    errors = []
+    for exe_name in ("sol-pad-stream.exe", "sol-pad-dock.exe"):
+        r = subprocess.run(
+            ["taskkill", "/IM", exe_name, "/T", "/F"],
+            capture_output=True,
+            text=True,
+            creationflags=0x08000000,
+        )
+        msg = (r.stderr or r.stdout or "").strip()
+        if r.returncode != 0 and "not found" not in msg.lower():
+            errors.append(f"{exe_name}: {msg}")
+    time.sleep(0.15)
+    still = [
+        name
+        for name, m in (("sol-pad-stream", r"Local\SOLPadStreamMutex"), ("sol-pad-dock", r"Local\SOLPadDockMutex"))
+        if _mutex_exists(m)
+    ]
+    if still:
+        why = f"still running ({', '.join(still)})"
+        if errors:
+            why += f" — {'; '.join(errors)}"
+        return {"ok": False, "why": why}
     return {"ok": True, "why": "stopped sol-pad-stream & sol-pad-dock"}
 
 
