@@ -795,11 +795,13 @@ class Hub:
         return {**media_apis.collect(reg, listening, wsl_state, probe=probe), "notes": launcher.note_runs()}
 
     def deck_services_payload(self) -> dict:
-        """The Deck services card: only reads the projects / security collectors (no scan, no request of its own)."""
+        """The Deck services card: reads the ports / security collectors only (never the projects collector, whose
+        process and git scans would then run all the time, card shown or not)."""
         c = self.collectors
-        reg, _probe, _listening = self._launchpad()
-        rows = (c["projects"].get() or {}).get("projects") or []
-        return deck_services.build_payload(reg, rows, self.autostart_results, c["security"].get() if "security" in c else {},
+        from .data.collectors import projects
+        reg = projects.load_registry()      # not self._launchpad(): that also reads the WSL probe collector
+        listening = (c["ports"].get() or {}).get("listening") or []
+        return deck_services.build_payload(reg, listening, self.autostart_results, c["security"].get() if "security" in c else {},
                                            time.time())
 
     def _deck_down_notices(self) -> list:

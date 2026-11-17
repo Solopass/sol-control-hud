@@ -12,11 +12,14 @@ REG = {"projects": {
 
 
 def _rows(deck_up=True, cs2_up=False):
-    return [
-        {"name": "sol-deck", "running": {"pid": 11, "port": 5000, "up_seconds": 600} if deck_up else None, "busy_by": None},
-        {"name": "sol-cs2", "running": {"pid": 22, "port": 5010, "up_seconds": 5} if cs2_up else None, "busy_by": None},
-        {"name": "other", "running": None},
-    ]
+    """The ports collector's listening rows."""
+    out = []
+    if deck_up:
+        out.append({"port": 5000, "pid": 11, "name": "sol-deck", "up_seconds": 600})
+    if cs2_up:
+        out.append({"port": 5010, "pid": 22, "name": "sol-cs2", "up_seconds": 5})
+    out.append({"port": 8082, "pid": 33, "name": "node", "up_seconds": 9})
+    return out
 
 
 def test_only_autostart_projects_and_never_self():
@@ -36,10 +39,10 @@ def test_payload_up_down_results_and_ipad():
     assert p["ipad"] == {"deck_up": True, "active": True, "name": "iPad mini 1", "status_text": "Connected"}
 
 
-def test_payload_missing_row_and_deck_offline():
+def test_payload_nothing_listening_and_deck_offline():
     p = ds.build_payload(REG, [], None, {"up": False, "client": {"active": False, "status_text": "Service Offline (:5000)"}}, 1.0)
     assert [s["up"] for s in p["services"]] == [False, False]
-    assert all(not s["can_start"] for s in p["services"])        # no project row: nothing to start
+    assert all(s["can_start"] for s in p["services"])            # down and startable
     assert p["ipad"]["deck_up"] is False and p["ipad"]["active"] is False
     assert ds.build_payload(REG, [], None, None, 1.0)["ipad"]["deck_up"] is False
 
@@ -78,3 +81,27 @@ def test_down_watch_tracks_projects_separately():
     w.step(["sol-deck", "sol-cs2"], 100.0, 1100.0)
     got = w.step(["sol-deck", "sol-cs2"], 130.0, 1130.0)
     assert [n for n, _ in got] == ["sol-deck"]                   # cs2 has only been down 30 s
+
+
+def test_deck_payload_never_reads_the_projects_collector(monkeypatch, tmp_path):
+    from sol_control_hud import hub
+    monkeypatch.setattr(hub, "SETTINGS_FILE", tmp_path / "hub-settings.json")
+    h = hub.Hub(dict(hub.DEFAULTS), False, False)
+
+    class Boom:
+        def get(self):
+            raise AssertionError("projects collector read")
+
+    class Val:
+        def __init__(self, v):
+            self.v = v
+
+        def get(self):
+            return self.v
+
+    h.collectors = {"projects": Boom(), "media_probe": Boom(),
+                    "ports": Val({"listening": [{"port": 5000, "pid": 7, "name": "sol-deck", "up_seconds": 42}]}),
+                    "security": Val({"up": True, "client": {}})}
+    p = h.deck_services_payload()
+    deck = next(s for s in p["services"] if s["name"] == "sol-deck")
+    assert deck["up"] is True and deck["pid"] == 7 and deck["up_seconds"] == 42

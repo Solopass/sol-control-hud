@@ -1,6 +1,7 @@
 """The "Deck services" card: are the projects the HUD autostarts (sol-deck, sol-cs2) up, since when, what did the
 last autostart do, and has the iPad deck client been seen lately. Built only from what other collectors already
-hold (projects rows, the security collector), so it adds no scan and no request. Also the down-too-long warning."""
+hold (the Localhost card's listener rows, the security collector), so it adds no scan and no request. It must not
+read the projects collector: that one scans processes and git, and would then refresh all the time. Also the down-too-long warning."""
 from __future__ import annotations
 
 DOWN_AFTER_S = 120.0        # an autostart project down this long ...
@@ -13,14 +14,19 @@ def autostart_names(reg: dict) -> list[str]:
             if (spec or {}).get("autostart") and not (spec or {}).get("self")]
 
 
-def build_payload(reg: dict, rows: list[dict], results: dict | None, security: dict | None, now: float) -> dict:
-    """results: {name: {"ok", "why", "at"(epoch)}} from Hub._autostart. security: the security collector's answer."""
+def build_payload(reg: dict, listening: list[dict], results: dict | None, security: dict | None, now: float) -> dict:
+    """listening: the ports collector's rows (port, pid, up_seconds). A listener on a project's port counts as that
+    project running (no check of which process it is, so a foreign process on the port reads as up, never "busy").
+    results: {name: {"ok", "why", "at"(epoch)}} from Hub._autostart. security: the security collector's answer."""
     results = results or {}
+    by_port = {}
+    for r in listening or []:
+        by_port.setdefault(r.get("port"), r)
     services = []
     for name in autostart_names(reg):
         spec = (reg.get("projects") or {}).get(name) or {}
-        row = next((r for r in rows if r.get("name") == name), None)
-        run = (row or {}).get("running") or None
+        port = spec.get("port")
+        run = by_port.get(int(port)) if port else None
         res = results.get(name)
         services.append({
             "name": name,
@@ -29,8 +35,8 @@ def build_payload(reg: dict, rows: list[dict], results: dict | None, security: d
             "up": bool(run),
             "pid": (run or {}).get("pid"),
             "up_seconds": (run or {}).get("up_seconds"),
-            "busy_by": (row or {}).get("busy_by"),
-            "can_start": bool(row) and not run and bool(spec.get("start")),
+            "busy_by": None,
+            "can_start": not run and bool(spec.get("start")),
             "autostart": ({"ok": bool(res.get("ok")), "why": str(res.get("why") or ""), "ago_s": max(0, int(now - (res.get("at") or now)))}
                           if res else None),
         })
