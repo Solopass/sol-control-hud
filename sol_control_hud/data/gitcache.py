@@ -17,7 +17,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
-MAX_AGE_S = 60.0   # a clean repo whose files you just edited shows as changed within this (the edit touches nothing in .git)
+MAX_AGE_S = 300.0  # a clean repo whose files you just edited shows as changed within this (the edit touches nothing in .git);
+                   # 60 s cost ~2.5% of a core re-checking ~40 repos
 _BASE = 6                       # length of the fingerprint's repo part (the rest is the dirty files' times)
 
 
