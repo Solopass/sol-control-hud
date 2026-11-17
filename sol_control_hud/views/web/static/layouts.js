@@ -269,6 +269,10 @@ const CHIPS = {
     const ipad = lcard('secIpadStatus')?.textContent?.trim() || '';
     return `<b>${esc(pill)}</b>${ipad ? ` · <span class="dim">${esc(ipad)}</span>` : ''}`;
   },
+  'c-deck': () => {
+    const pill = lcard('deckPill')?.textContent?.trim() || '…';
+    return `<b>${esc(pill)}</b>`;
+  },
   'c-pad': () => {
     const pill = lcard('padPill')?.textContent?.trim() || 'offline';
     const usb = lcard('padUsb')?.textContent?.trim() || '';
@@ -355,7 +359,7 @@ const CARD_CATS = {
   hw: ['c-gpu', 'c-vram', 'c-system', 'c-disks'],
   ai: ['c-ai', 'c-ai-thinking', 'c-chains', 'c-overnight', 'c-ask', 'c-awayq', 'c-ai-usage'],
   dev: ['c-projects', 'c-ports', 'c-work', 'c-notes', 'c-media', 'c-solang', 'c-review'],
-  sys: ['c-security', 'c-net', 'c-pad', 'c-svc', 'c-stab', 'c-health', 'c-week', 'c-activity'],
+  sys: ['c-security', 'c-deck', 'c-net', 'c-pad', 'c-svc', 'c-stab', 'c-health', 'c-week', 'c-activity'],
 };
 let activeQuickCat = 'all';
 let compactAllActive = false;

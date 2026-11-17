@@ -297,6 +297,64 @@ def solve_with_gemini(
     raise GeminiError("No models available to fulfill request.")
 
 
+def _scrub(text: str, key: str | None) -> str:
+    """Never let the API key reach an error message, a log line or a response."""
+    out = str(text)
+    if key:
+        out = out.replace(key, "***")
+    return re.sub(r"([?&]key=)[^&\s'\"]+", r"\1***", out)
+
+
+def chat_text(
+    prompt: str,
+    system: str = "",
+    model: str | None = None,
+    api_key: str | None = None,
+    timeout: float = 60.0,
+    client: httpx.Client | None = None,
+) -> str:
+    """Plain text chat with Gemini (the Playground). Returns the reply text; raises GeminiError.
+    The key goes in the x-goog-api-key header, not the URL, so it can't show up in an httpx error message."""
+    key = api_key or get_api_key()
+    if not key:
+        raise GeminiError("no Gemini API key set")
+    if not str(prompt).strip():
+        raise GeminiError("empty prompt")
+    use_model = (model or "").strip() or get_model()
+    payload: dict = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
+    }
+    if system.strip():
+        payload["systemInstruction"] = {"parts": [{"text": system}]}
+    url = API_URL_TEMPLATE.format(model=use_model)
+    headers = {"x-goog-api-key": key}
+
+    def _execute() -> str:
+        local_client = client or httpx.Client(timeout=timeout)
+        try:
+            resp = local_client.post(url, json=payload, headers=headers)
+            if resp.status_code == 429:
+                raise GeminiRateLimitError("Rate limited (429)")
+            resp.raise_for_status()
+            data = resp.json()
+            candidates = data.get("candidates") or []
+            if not candidates:
+                raise GeminiError("Gemini returned no answer (blocked or empty)")
+            cand_parts = (candidates[0].get("content") or {}).get("parts") or []
+            return "".join(p.get("text", "") for p in cand_parts if isinstance(p, dict) and p.get("text") and not p.get("thought"))
+        finally:
+            if client is None:
+                local_client.close()
+
+    try:
+        return call_with_retry(_execute, max_retries=2)
+    except GeminiError as e:
+        raise GeminiError(_scrub(str(e), key)) from None
+    except httpx.HTTPError as e:
+        raise GeminiError(_scrub(f"{type(e).__name__}: {e}", key)) from None
+
+
 def _clean_and_parse_json(text: str) -> dict:
     """Strips markdown fences and parses JSON securely."""
     clean = text.strip()

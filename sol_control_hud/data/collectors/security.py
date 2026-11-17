@@ -38,6 +38,7 @@ def close_client() -> None:
 
 
 _DECK_NAMES = ("sol-deck.exe", "sol-deck-cli.exe", "sol-deck")
+_now = time.monotonic                     # the scan clock (tests replace this, never time.monotonic itself)
 FULL_SCAN_EVERY = 30.0                    # seconds between full process scans while sol-deck isn't found
 _NOT_RUNNING = {"running": False, "pid": None, "ram_mb": 0.0, "uptime_sec": 0}
 _deck_seen: dict = {"pid": None, "create_time": 0.0, "name": "", "scan_at": None}   # scan_at: monotonic time of the last full scan
@@ -72,7 +73,7 @@ def get_deck_process_status() -> dict:
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             pass
         _deck_seen.update(pid=None, create_time=0.0, name="")
-    now = time.monotonic()
+    now = _now()
     last = _deck_seen["scan_at"]
     if last is not None and now - last < FULL_SCAN_EVERY:
         return dict(_NOT_RUNNING)

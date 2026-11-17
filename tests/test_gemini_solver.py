@@ -169,3 +169,53 @@ def test_call_with_retry_network_timeout():
     assert res == "success_after_timeout"
     assert attempts == 2
 
+
+
+def _resp(status=200, payload=None):
+    r = MagicMock()
+    r.status_code = status
+    r.json.return_value = payload if payload is not None else {}
+    if status >= 400 and status != 429:
+        r.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "bad https://x/y?key=SECRETKEY123", request=MagicMock(), response=r)
+    return r
+
+
+def test_chat_text_returns_text_and_keeps_key_in_header():
+    client = MagicMock()
+    client.post.return_value = _resp(payload={"candidates": [{"content": {"parts": [
+        {"text": "hello "}, {"text": "secret thoughts", "thought": True}, {"text": "world"}]}}]})
+    out = gemini_solver.chat_text("hi", system="be brief", model="gemini-x", api_key="SECRETKEY123", client=client)
+    assert out == "hello world"
+    args, kwargs = client.post.call_args
+    assert "SECRETKEY123" not in args[0]
+    assert kwargs["headers"]["x-goog-api-key"] == "SECRETKEY123"
+    assert "gemini-x" in args[0]
+    assert kwargs["json"]["systemInstruction"]["parts"][0]["text"] == "be brief"
+    assert kwargs["json"]["contents"][0]["parts"][0]["text"] == "hi"
+
+
+def test_chat_text_no_key(monkeypatch):
+    monkeypatch.setattr(gemini_solver, "get_api_key", lambda *a, **k: None)
+    with pytest.raises(gemini_solver.GeminiError, match="no Gemini API key"):
+        gemini_solver.chat_text("hi")
+
+
+def test_chat_text_error_never_contains_key(monkeypatch):
+    monkeypatch.setattr(gemini_solver.time, "sleep", lambda s: None)
+    client = MagicMock()
+    client.post.return_value = _resp(status=400)
+    with pytest.raises(gemini_solver.GeminiError) as ei:
+        gemini_solver.chat_text("hi", api_key="SECRETKEY123", client=client)
+    assert "SECRETKEY123" not in str(ei.value)
+    client.post.side_effect = httpx.ConnectError("cannot reach https://x?key=SECRETKEY123")
+    with pytest.raises(gemini_solver.GeminiError) as ei:
+        gemini_solver.chat_text("hi", api_key="SECRETKEY123", client=client)
+    assert "SECRETKEY123" not in str(ei.value)
+
+
+def test_chat_text_blocked_answer():
+    client = MagicMock()
+    client.post.return_value = _resp(payload={"candidates": []})
+    with pytest.raises(gemini_solver.GeminiError, match="no answer"):
+        gemini_solver.chat_text("hi", api_key="k", client=client)

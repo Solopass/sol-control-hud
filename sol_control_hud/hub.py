@@ -30,7 +30,7 @@ from pathlib import Path
 
 from fastapi import Request   # module level: annotations are strings here, FastAPI resolves them from globals
 
-from . import health, heal, models_ctl
+from . import deck_services, health, heal, models_ctl
 from .data.collectors import engines, vram
 from .data.snapshot import RED, TickerCollector, attention, format_multiline_rows, format_slides
 from .paths import DATA_DIR
@@ -238,6 +238,10 @@ class Hub:
         self._last_health = 0.0
         self._last_media_check = 0.0
         self._media_stuck_seen: set[str] = set()
+        self.autostart_results: dict[str, dict] = {}      # name -> {ok, why, at}: what the HUD's start-up autostart did
+        self._hud_started = time.monotonic()
+        self._deck_watch = deck_services.DownWatch()      # warns once per down period of an autostart project
+        self._last_deck_check = 0.0
         self._last_digest_check = 0.0
         from . import layouts                      # the dashboard's layout presets (data/layouts.json)
         self._layouts = layouts.load()
@@ -760,6 +764,26 @@ class Hub:
         from . import launcher
         return {**media_apis.collect(reg, listening, wsl_state, probe=probe), "notes": launcher.note_runs()}
 
+    def deck_services_payload(self) -> dict:
+        """The Deck services card: only reads the projects / security collectors (no scan, no request of its own)."""
+        c = self.collectors
+        reg, _probe, _listening = self._launchpad()
+        rows = (c["projects"].get() or {}).get("projects") or []
+        return deck_services.build_payload(reg, rows, self.autostart_results, c["security"].get() if "security" in c else {},
+                                           time.time())
+
+    def _deck_down_notices(self) -> list:
+        from .notify import Notice
+        payload = self.collectors["deck_services"].get() or {}
+        names = {s["name"]: s for s in payload.get("services") or []}
+        out = []
+        for name, key in self._deck_watch.step(payload.get("down") or [], time.monotonic(), time.monotonic() - self._hud_started):
+            res = (names.get(name) or {}).get("autostart")
+            tail = f" The autostart failed: {res['why']}." if res and not res["ok"] else ""
+            out.append(Notice("deck_down", f"{(names.get(name) or {}).get('title') or name} is down",
+                              f"It has been down for over 2 minutes.{tail} Start it from the Deck services card.", "warning", key))
+        return out
+
     def _start_autostart(self, delay_s: float = 15.0) -> None:
         """Once, after the network is up: start the projects marked `autostart: true` in launchpad.yaml.
         Only called from run(), so tests (which build the Hub without running it) never start anything."""
@@ -776,6 +800,7 @@ class Hub:
             tiles = self.media_payload()["tiles"]
             for r in launcher.autostart_projects(reg, rows, tiles):
                 log(f"autostart {r['name']}: {'ok' if r['ok'] else 'skipped'}: {r['why']}")
+                self.autostart_results[r["name"]] = {"ok": bool(r["ok"]), "why": str(r.get("why") or ""), "at": time.time()}
         except (launcher.LaunchError, OSError, KeyError, ValueError, TypeError):
             _swallowed("hub.autostart")
 
@@ -971,6 +996,7 @@ class Hub:
                 "speed": c["speed"].get(), "heal": c["heal"].get(), "review": self._review_state(),
                 "ai_ops": c["ai_ops"].get() if "ai_ops" in c else {},
                 "security": c["security"].get() if "security" in c else {},
+                "deck_services": c["deck_services"].get() if "deck_services" in c else {},
                 "network": c["network"].get() if "network" in c else {},
                 "sol_pad": c["sol_pad"].get() if "sol_pad" in c else {},
                 "layout": {"active": self._layouts["active"], "rev": self._layouts["rev"]}}
@@ -1078,6 +1104,7 @@ class Hub:
         self.collectors["ai_usage"] = Cached(ai_usage.get_ai_usage, 10)
         from .data.collectors import security
         self.collectors["security"] = Cached(security.get_security_status, 2)
+        self.collectors["deck_services"] = Cached(self.deck_services_payload, 5)
         from .data.collectors import network          # Pi-hole + LAN devices: its own thread probes, this only reads
         network.start_network_monitor()
         self.collectors["network"] = Cached(network.last_status, 2)
@@ -1484,22 +1511,25 @@ class Hub:
             t0 = time.monotonic()
             if _is_cloud_model(model):
                 from . import gemini_solver
+                key = gemini_solver.get_api_key()
+                if not key:
+                    return {"ok": False, "why": "no Gemini API key set"}
                 try:
-                    res = gemini_solver.solve(augmented_prompt, api_key=gemini_solver.get_api_key(), model=model)
+                    text = gemini_solver.chat_text(augmented_prompt, system=system, model=model, api_key=key)
                     dt = time.monotonic() - t0
                     return {
                         "ok": True,
                         "model": model,
-                        "text": res.get("text", ""),
+                        "text": text,
                         "elapsed_s": round(dt, 2),
-                        "tok_s": round(res.get("chars", len(res.get("text", ""))) / 4.0 / max(dt, 0.001), 1),
-                        "thought": res.get("thought", ""),
+                        "tok_s": round(len(text) / 4.0 / max(dt, 0.001), 1),
+                        "thought": "",
                         "citations": citations,
                         "context_skipped": context_skipped,
                         "context_note": context_note,
                     }
-                except Exception as e:
-                    return {"ok": False, "why": f"Gemini error: {e}"}
+                except gemini_solver.GeminiError as e:
+                    return {"ok": False, "why": f"Gemini error: {gemini_solver._scrub(str(e), key)}"}
             else:
                 # Local llama router
                 messages = []
@@ -1831,6 +1861,9 @@ class Hub:
                     from .notify import from_media
                     tiles = (self.collectors["media"].get() or {}).get("tiles") or []
                     extra = from_media(tiles, self._media_stuck_seen)
+                if time.monotonic() - self._last_deck_check >= 10 and "deck_services" in (getattr(self, "collectors", None) or {}):
+                    self._last_deck_check = time.monotonic()
+                    extra += self._deck_down_notices()
                 if time.monotonic() - self._last_digest_check >= 60:
                     self._last_digest_check = time.monotonic()
                     extra += self._weekly_digest(snap)

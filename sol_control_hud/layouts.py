@@ -48,6 +48,7 @@ WIDGETS: dict[str, tuple[str, dict[str, list[int]], str]] = {
     "c-security": ("Cyber Security & Canary", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-stab": ("Stability & backups", {"XS": [1, 1], "M": [1, 1]}, "M"),
     "c-svc": ("Services", {"XS": [1, 1], "M": [1, 1]}, "M"),
+    "c-deck": ("Deck services", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-net": ("Network · Pi-hole", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "L"),
     "c-health": ("HUD health", {"XS": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-work": ("Workspace", {"XS": [1, 1], "M": [1, 1]}, "M"),
@@ -103,6 +104,7 @@ def default_presets() -> list[dict]:
             ("c-media", "L"),
             ("c-gpu", "M"),
             ("c-net", "M"),
+            ("c-deck", "M"),
         ], ticker=["HW", "GIT", "APPS", "NOTE", "NET"]),
         _preset("Overnight", "🌙", [
             ("c-overnight", "XL"),
@@ -111,6 +113,7 @@ def default_presets() -> list[dict]:
             ("c-stab", "M"),
             ("c-disks", "M"),
             ("c-security", "L"),
+            ("c-deck", "M"),
             ("c-health", "M"),
             ("c-week", "M"),
         ], auto_when="away", ticker=["AI", "RUN", "DISK", "SYS"]),
@@ -221,6 +224,11 @@ def merge(data: dict) -> dict:
                         if w["id"] == "c-procs":
                             w["hidden"] = False
                             w["size"] = "L"
+                if "c-deck" not in {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict)}:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-deck":
+                            w["hidden"] = False
+                            w["size"] = "M"
             elif cp["name"] == "Overnight":
                 known_shown = {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict) and not w.get("hidden")}
                 if "c-overnight" not in known_shown:
@@ -238,6 +246,11 @@ def merge(data: dict) -> dict:
                         if w["id"] == "c-security":
                             w["hidden"] = False
                             w["size"] = "L"
+                if "c-deck" not in {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict)}:
+                    for w in cp["widgets"]:
+                        if w["id"] == "c-deck":
+                            w["hidden"] = False
+                            w["size"] = "M"
             presets.append(cp)
     if presets:
         out["presets"] = presets

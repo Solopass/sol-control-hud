@@ -35,7 +35,7 @@ def deck(monkeypatch):
                 return p
         raise security.psutil.NoSuchProcess(pid)
     monkeypatch.setattr(security.psutil, "Process", process)
-    monkeypatch.setattr(security.time, "monotonic", lambda: state.clock[0])
+    monkeypatch.setattr(security, "_now", lambda: state.clock[0])   # not time.monotonic: that would change it for every thread
     security.reset_deck_cache()
     yield state
     security.reset_deck_cache()
