@@ -191,10 +191,29 @@ def write_live_thought(data: dict, path: Path = THOUGHT_FILE) -> None:
         pass
 
 
+_parsed: dict[str, tuple[tuple, dict]] = {}     # log path -> ((size, mtime_ns), parse of its tail)
+
+
+def _router_events(router_log: Path) -> dict:
+    """parse_router_events() of the log's tail, re-run only when the file changed (size or mtime). The parse is
+    stateful over the tail (slots, ports), so it isn't made incremental: an idle log is simply not re-read."""
+    try:
+        st = router_log.stat()
+        sig = (st.st_size, st.st_mtime_ns)
+    except OSError:
+        _parsed.pop(str(router_log), None)
+        return parse_router_events("")
+    hit = _parsed.get(str(router_log))
+    if hit and hit[0] == sig:
+        return hit[1]
+    events = parse_router_events(_tail(router_log))
+    _parsed[str(router_log)] = (sig, events)
+    return events
+
+
 def sample_ai_ops(procs: dict | None = None, router_log: Path = ROUTER_LOG, thought_file: Path = THOUGHT_FILE) -> dict:
     """Aggregate real-time inference telemetry and live thinking state for HUD dashboard."""
-    log_text = _tail(router_log)
-    events = parse_router_events(log_text)
+    events = _router_events(router_log)
     thought = read_live_thought(thought_file)
 
     by_port = {int(v["port"]): alias for alias, v in (procs or {}).items() if isinstance(v, dict) and v.get("port")}

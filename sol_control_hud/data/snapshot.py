@@ -19,6 +19,7 @@ import httpx
 import psutil
 
 from ..away import screen as away_screen
+from . import gitcache
 from .collectors import engines, gpu, system, vram
 from .collectors.adl import get_gpu_sensors
 from .collectors.media import get_media_info, start_media_collector, stop_media_collector
@@ -447,6 +448,18 @@ def read_daily_note_status(vault_dir: Path | None = None) -> tuple[bool, int, st
         return True, 0, None, note_path
 
 
+def repo_porcelain(d: Path) -> str | None:
+    """`git status --porcelain` text for a repo, or None if git failed. Cached until the repo changes (gitcache.py), so
+    the dirty check and the age lookup after it share one git run, and an idle workspace costs no git processes."""
+    def run() -> str | None:
+        # --no-optional-locks: a plain `git status` may take .git/index.lock to refresh the index, and then a
+        # commit you (or Gemini) make at that moment fails with "index.lock exists"
+        res = subprocess.run(["git", "--no-optional-locks", "-C", str(d), "status", "--porcelain"],
+                             capture_output=True, text=True, timeout=5, creationflags=NO_WINDOW)
+        return res.stdout if res.returncode == 0 else None
+    return gitcache.PORCELAIN.get(d, run, paths=gitcache.porcelain_paths, keep=lambda v: v is not None)
+
+
 def check_workspace_git(workspace_dir: Path | None = None) -> tuple[int, list[str], int]:
     """Scans repositories in D:\\Workspace for uncommitted / dirty files.
     Returns (dirty_count, dirty_repos, total_repos).
@@ -464,16 +477,8 @@ def check_workspace_git(workspace_dir: Path | None = None) -> tuple[int, list[st
         total = len(entries)
         for d in entries:
             try:
-                # --no-optional-locks: a plain `git status` may take .git/index.lock to refresh the index, and then a
-                # commit you (or Gemini) make at that moment fails with "index.lock exists"
-                res = subprocess.run(
-                    ["git", "--no-optional-locks", "-C", str(d), "status", "--porcelain"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                    creationflags=NO_WINDOW,
-                )
-                if res.returncode == 0 and res.stdout.strip():
+                out = repo_porcelain(d)
+                if out is not None and out.strip():
                     dirty_repos.append(d.name)
             except Exception:
                 _swallowed("snapshot.check_workspace_git")
@@ -733,9 +738,7 @@ class TickerCollector:
                     self._git_data = check_workspace_git()
                     ws, ages = Path(r"D:\Workspace"), {}
                     for name in self._git_data[1]:
-                        res = subprocess.run(["git", "--no-optional-locks", "-C", str(ws / name), "status", "--porcelain"],
-                                             capture_output=True, text=True, timeout=5, creationflags=NO_WINDOW)
-                        age = dirty_age_days(ws / name, res.stdout)
+                        age = dirty_age_days(ws / name, repo_porcelain(ws / name) or "")
                         if age is not None:
                             ages[name] = age
                     self._git_ages = ages

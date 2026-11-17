@@ -36,6 +36,8 @@ from .data.snapshot import RED, TickerCollector, attention, format_multiline_row
 from .paths import DATA_DIR
 from .swallow import note as _swallowed
 
+HUD_TARGET_CPU = 1.5          # % of one core the HUD should stay under (health card; the CPU notice fires at 3x for 10 min)
+
 SETTINGS_FILE = DATA_DIR / "hub-settings.json"
 LOCK_FILE = DATA_DIR / "hub.lock"
 LOG_FILE = DATA_DIR / "hub.log"
@@ -242,6 +244,8 @@ class Hub:
         self._hud_started = time.monotonic()
         self._deck_watch = deck_services.DownWatch()      # warns once per down period of an autostart project
         self._last_deck_check = 0.0
+        self._cpu_watch = health.CpuWatch()               # warns once per episode of the HUD itself burning CPU
+        self._last_cpu_check = 0.0
         self._last_digest_check = 0.0
         from . import layouts                      # the dashboard's layout presets (data/layouts.json)
         self._layouts = layouts.load()
@@ -784,6 +788,16 @@ class Hub:
                               f"It has been down for over 2 minutes.{tail} Start it from the Deck services card.", "warning", key))
         return out
 
+    def _cpu_notices(self, snap) -> list:
+        from .notify import Notice
+        cpu, target = getattr(snap, "self_cpu", None), HUD_TARGET_CPU
+        if not self._cpu_watch.step(cpu, target, time.monotonic()):
+            return []
+        return [Notice("hud_cpu", "SOL HUD is using too much CPU",
+                       f"SOL HUD is using more CPU than it should ({cpu:.0f}% of one core for 10 min). "
+                       "Close dashboard tabs you aren't looking at, or restart the HUD.", "warning",
+                       f"hud_cpu:{int(time.time())}")]
+
     def _start_autostart(self, delay_s: float = 15.0) -> None:
         """Once, after the network is up: start the projects marked `autostart: true` in launchpad.yaml.
         Only called from run(), so tests (which build the Hub without running it) never start anything."""
@@ -1014,10 +1028,29 @@ class Hub:
         except Exception:  # noqa: BLE001 - a display nicety
             return []
 
+    @staticmethod
+    def _process_rows() -> list:
+        """[(pid, name, cpu_seconds, rss_bytes)] for every process. One NtQuerySystemInformation call (~10 ms) where
+        possible; psutil's per-process queries cost ~1 s per scan of ~400 processes on Windows, so that is the fallback."""
+        from .data.collectors import procsnap
+        try:
+            return procsnap.snapshot()
+        except (OSError, NotImplementedError, ValueError, AttributeError):
+            _swallowed("hub._process_rows")
+        import psutil
+        rows = []
+        for p in psutil.process_iter(["pid", "name", "memory_info", "cpu_times"]):
+            try:
+                mem, ct = p.info.get("memory_info"), p.info.get("cpu_times")
+                rows.append((p.info.get("pid"), p.info.get("name") or "", (ct.user + ct.system) if ct else 0.0,
+                             mem.rss if mem else 0))
+            except (psutil.Error, KeyError, AttributeError):
+                continue
+        return rows
+
     def _top_processes_payload(self) -> dict:
         """Top processes by CPU / memory / GPU. Runs as the `top_procs` collector (once per TTL, shared by every tab), so
         the CPU% baseline in `_proc_cpu_cache` always spans one whole TTL."""
-        import psutil
         now = time.monotonic()
         prev_cache = getattr(self, "_proc_cpu_cache", {})   # pid -> (cpu_time, sampled_at)
         procs = []
@@ -1025,34 +1058,18 @@ class Hub:
         gpu_col = (getattr(self, "collectors", None) or {}).get("gpu")
         chips = ((gpu_col.get() if gpu_col else None) or {}).get("pid_chips") or {}
 
-        for p in psutil.process_iter(["pid", "name", "memory_info", "cpu_times"]):
-            try:
-                pid = p.info.get("pid")
-                if pid is None or pid == 0:
-                    continue
-                mem_info = p.info.get("memory_info")
-                mem_mb = (mem_info.rss if mem_info else 0) / (1024 * 1024)
-
-                cpu_times = p.info.get("cpu_times")
-                total_time = (cpu_times.user + cpu_times.system) if cpu_times else 0.0
-                new_cache[pid] = (total_time, now)
-
-                cpu_pct = 0.0
-                if pid in prev_cache:
-                    prev_time, prev_at = prev_cache[pid]
-                    dt = now - prev_at
-                    if dt > 0.1:
-                        cpu_pct = max(0.0, ((total_time - prev_time) / dt) * 100.0)
-
-                procs.append({
-                    "pid": pid,
-                    "name": p.info.get("name") or "",
-                    "cpu": round(cpu_pct, 1),
-                    "mem_mb": round(mem_mb, 1),
-                    "chip": chips.get(pid),
-                })
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, AttributeError):
+        for pid, name, total_time, rss in self._process_rows():
+            if not pid:
                 continue
+            new_cache[pid] = (total_time, now)
+            cpu_pct = 0.0
+            if pid in prev_cache:
+                prev_time, prev_at = prev_cache[pid]
+                dt = now - prev_at
+                if dt > 0.1:
+                    cpu_pct = max(0.0, ((total_time - prev_time) / dt) * 100.0)
+            procs.append({"pid": pid, "name": name or "", "cpu": round(cpu_pct, 1),
+                          "mem_mb": round(rss / (1024 * 1024), 1), "chip": chips.get(pid)})
 
         self._proc_cpu_cache = new_cache
         top_cpu = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:6]
@@ -1745,7 +1762,7 @@ class Hub:
                   "broken": sorted(k for k, c in (getattr(self, "collectors", None) or {}).items() if getattr(c, "failed", False)),
                   "up_since": started, "pid": os.getpid(),
                   "cost": {"cpu": snap.self_cpu, "ram_mb": snap.self_ram_mb, "loop_ms": snap.self_latency_ms,
-                           "target_cpu": 1.5}}
+                           "target_cpu": HUD_TARGET_CPU}}
         report["level"] = health.level(report)
         return report
 
@@ -1864,6 +1881,9 @@ class Hub:
                 if time.monotonic() - self._last_deck_check >= 10 and "deck_services" in (getattr(self, "collectors", None) or {}):
                     self._last_deck_check = time.monotonic()
                     extra += self._deck_down_notices()
+                if time.monotonic() - self._last_cpu_check >= 10:
+                    self._last_cpu_check = time.monotonic()
+                    extra += self._cpu_notices(snap)
                 if time.monotonic() - self._last_digest_check >= 60:
                     self._last_digest_check = time.monotonic()
                     extra += self._weekly_digest(snap)

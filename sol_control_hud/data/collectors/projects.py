@@ -4,7 +4,7 @@ Most of it is discovered from the folder (README, git, `.claude/launch.json`); `
 be (live sites, start commands for projects without a launch config, what to hide). A folder that isn't in the
 registry still shows up.
 
-Cost: git is two short processes per repo, so it is cached per repo for GIT_TTL_S; whether something runs comes from
+Cost: git is three short processes per repo, so it only runs when the repo changed (data/gitcache.py; GIT_TTL_S at most); whether something runs comes from
 the Localhost card's listener sample (no extra port scan) plus the media card's WSL probe for things that run in WSL.
 """
 from __future__ import annotations
@@ -18,9 +18,11 @@ from pathlib import Path
 import psutil
 import yaml
 
+from .. import gitcache
+
 REGISTRY_FILE = Path(__file__).resolve().parents[2] / "launchpad.yaml"
 NO_WINDOW = 0x08000000
-GIT_TTL_S = 60.0
+GIT_TTL_S = gitcache.MAX_AGE_S      # safety net only: git re-runs sooner when the repo's files change
 README_NAMES = ("README.md", "readme.md", "README.MD", "Readme.md")
 
 # README words -> a status chip. First match wins, so the strongest word is first.
@@ -200,8 +202,13 @@ def github_url(remote: str | None) -> str | None:
 
 def git_info(folder: Path, now: float | None = None) -> dict | None:
     """Last commit, uncommitted files and how old the oldest of them is, the GitHub link. None if not a repo."""
+    return _git_info(folder, now)[0]
+
+
+def _git_info(folder: Path, now: float | None = None) -> tuple[dict | None, str]:
+    """(info, the `git status --porcelain` text it was built from)."""
     if not (folder / ".git").exists():
-        return None
+        return None, ""
     from ..snapshot import dirty_age_days
     now = time.time() if now is None else now
     log = (_git(folder, "log", "-1", "--format=%ct%x09%s") or "").strip()
@@ -209,30 +216,28 @@ def git_info(folder: Path, now: float | None = None) -> dict | None:
     remote = _git(folder, "config", "--get", "remote.origin.url")
     commit_t, _, subject = log.partition("\t")
     files = [ln for ln in porcelain.splitlines() if ln.strip()]
-    return {"last_commit": float(commit_t) if commit_t.isdigit() else None, "subject": subject[:120],
-            "dirty_files": len(files), "dirty_days": dirty_age_days(folder, porcelain, now) if files else None,
-            "github": github_url(remote)}
+    return ({"last_commit": float(commit_t) if commit_t.isdigit() else None, "subject": subject[:120],
+             "dirty_files": len(files), "dirty_days": dirty_age_days(folder, porcelain, now) if files else None,
+             "github": github_url(remote)}, porcelain)
 
 
-_git_cache: dict[str, tuple[float, dict | None]] = {}
+_git_cache = gitcache.RepoCache(GIT_TTL_S)
 
 
-def cached_git(folder: Path, ttl: float = GIT_TTL_S) -> dict | None:
-    key, now = str(folder).lower(), time.monotonic()
-    hit = _git_cache.get(key)
-    if hit and now - hit[0] < ttl:
-        return hit[1]
-    info = git_info(folder)
-    _git_cache[key] = (now, info)
-    return info
+def cached_git(folder: Path, max_age: float = GIT_TTL_S) -> dict | None:
+    """git_info(), re-run only when the repo changed (data/gitcache.py) or after `max_age` seconds."""
+    _git_cache.max_age = max_age
+    box: dict = {}
+
+    def run():
+        box["info"], box["porcelain"] = _git_info(folder)
+        return box["info"]
+    return _git_cache.get(folder, run, paths=lambda _v: gitcache.porcelain_paths(box.get("porcelain", "")),
+                          keep=lambda v: v is not None)
 
 
 def forget_git(name: str | None = None) -> None:
-    if name is None:
-        _git_cache.clear()
-    else:
-        for k in [k for k in _git_cache if k.endswith("\\" + name.lower())]:
-            _git_cache.pop(k, None)
+    _git_cache.forget(name)
 
 
 # ---------------------------------------------------------------- what runs

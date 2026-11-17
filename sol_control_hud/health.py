@@ -154,3 +154,33 @@ def level(report: dict) -> str:
     if r.get("week", 0) or report.get("stale") or report.get("broken"):
         return "warn"
     return "ok"
+
+
+class CpuWatch:
+    """One warning per episode of the HUD using far more CPU than its target: raised once the HUD's own CPU has stayed
+    above HOT_FACTOR x target for HOLD_S straight; re-armed once it has been back at or under the target for HOLD_S.
+    The clock is passed in (tests use a fake one)."""
+    HOT_FACTOR = 3.0
+    HOLD_S = 600.0
+
+    def __init__(self) -> None:
+        self.hot_since: float | None = None
+        self.cool_since: float | None = None
+        self.armed = True
+
+    def step(self, cpu: float | None, target: float, now: float) -> bool:
+        """True exactly once per episode, when it is time to warn."""
+        if cpu is None:
+            return False
+        self.hot_since = (self.hot_since if self.hot_since is not None else now) if cpu > target * self.HOT_FACTOR else None
+        if cpu <= target:
+            if self.cool_since is None:
+                self.cool_since = now
+            if not self.armed and now - self.cool_since >= self.HOLD_S:
+                self.armed = True
+        else:
+            self.cool_since = None
+        if self.armed and self.hot_since is not None and now - self.hot_since >= self.HOLD_S:
+            self.armed = False
+            return True
+        return False

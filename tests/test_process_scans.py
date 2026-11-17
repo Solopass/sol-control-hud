@@ -86,7 +86,8 @@ def test_top_processes_collector_scans_once_for_two_calls(monkeypatch):
     from sol_control_hud import hub
     scans = []
     procs = [FakeProc(5, "a.exe", rss=50 * 1024 * 1024, cpu=1.0), FakeProc(6, "b.exe", rss=5 * 1024 * 1024, cpu=2.0)]
-    monkeypatch.setattr("psutil.process_iter", lambda attrs=None: (scans.append(1) or iter(procs)))
+    from sol_control_hud.data.collectors import procsnap
+    monkeypatch.setattr(procsnap, "snapshot", lambda: (scans.append(1) or [(p.pid, p.name(), p.info["cpu_times"].user, p._rss) for p in procs]))
     h = hub.Hub.__new__(hub.Hub)
     h.collectors = {"gpu": Cached(lambda: {"pid_chips": {6: "GPU 0"}}, 0)}
     col = Cached(h._top_processes_payload, 4)
