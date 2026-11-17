@@ -1234,3 +1234,66 @@ def test_format_slides_shows_hud_task():
     run_slide = next(sl for sl in slides if sl["tag"] == "RUN")
     assert "Daily Doctor (stability check)" in run_slide["text"]
     assert "SOL HUD Task: Daily Doctor" in run_slide["detail"]
+
+
+def _tk_font(size=9):
+    import tkinter as tk
+    from tkinter import font as tkfont
+    root = tk.Tk(); root.withdraw()
+    return root, tkfont.Font(root=root, family="Segoe UI", size=size)
+
+
+def test_width_cache_matches_font_measure_and_sees_font_changes():
+    from sol_control_hud.views import ticker_widgets as tw
+    root, f = _tk_font(9)
+    try:
+        for t in ("", "abc", "GPU 24%  ·  VRAM", "…"):
+            assert tw.measure(f, t) == f.measure(t) == tw.measure(f, t)
+        before = tw.measure(f, "GPU 24%  ·  VRAM")
+        f.configure(size=16)                              # in place, same object
+        assert tw.measure(f, "GPU 24%  ·  VRAM") == f.measure("GPU 24%  ·  VRAM") > before
+    finally:
+        root.destroy()
+
+
+def test_fit_prefix_equals_old_char_by_char_cut():
+    from sol_control_hud.views import ticker_widgets as tw
+    root, f = _tk_font(9)
+    try:
+        for text in ("VRAM 6.5/16G " * 10, "short", "iiiiiiiiii WWWWWWWW", "x"):
+            for room in (-5, 0, 10, 55, 123, 400):
+                cut = text
+                while cut and f.measure(cut) > room:
+                    cut = cut[:-1]
+                assert tw.fit_prefix(f, text, room) == cut
+    finally:
+        root.destroy()
+
+
+def test_slide_in_measures_once_and_ends_in_place():
+    from sol_control_hud.views.ticker import SegmentLabel
+    import sol_control_hud.views.ticker_widgets as tw
+    root, f = _tk_font(9)
+    try:
+        lbl = SegmentLabel(root, f, bg="#000000", fg="#ffffff")
+        lbl.pack(); root.update()
+        segs = [("GPU 24%", "#e2e8f0"), ("  ·  ", "#94a3b8"), ("VRAM 6.5/16G " * 20, "#f87171")]
+        lbl.set_segments(segs, max_px=200)
+        final = [lbl.coords(i)[0] for i in lbl.find_all()]
+        tw._WIDTH_CACHE.clear()
+        calls = []
+        real = f.measure
+        def spy(t):
+            calls.append(t)
+            return real(t)
+        f.measure = spy
+        lbl.set_segments(segs, max_px=200, animate=True)
+        first = len(calls)
+        for _ in range(10):
+            root.update(); root.after(30); root.update()
+        assert len(calls) == first                         # no re-measure after the first layout
+        assert lbl._offset_x == 0 and [lbl.coords(i)[0] for i in lbl.find_all()] == final
+        names = {c for c in calls}
+        assert len(calls) == len(names)                    # each string measured once (cache)
+    finally:
+        root.destroy()

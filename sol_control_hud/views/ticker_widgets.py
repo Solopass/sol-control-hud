@@ -3,30 +3,64 @@ Split out of ticker.py on 2026-10-08 (moved verbatim); ticker.py re-exports ever
 from __future__ import annotations
 
 import tkinter as tk
+from collections import OrderedDict
 from tkinter import font as tkfont
 from .ticker_base import BG_CARD, BORDER_COLOR, TEXT_MAIN
 from .ticker_win import get_screen_and_work_area
 from ..swallow import note as _swallowed
 
 
-def truncate_text(text: str, font: tkfont.Font, max_pixels: int) -> str:
-    """Truncates text with an ellipsis ('…') so it fits within max_pixels."""
-    if font.measure(text) <= max_pixels:
-        return text
-    ellipsis = "…"
-    ellipsis_w = font.measure(ellipsis)
-    avail = max_pixels - ellipsis_w
-    if avail <= 0:
-        return ellipsis
-    low = 0
-    high = len(text)
+_WIDTH_CACHE: OrderedDict = OrderedDict()
+_WIDTH_CACHE_MAX = 2048
+
+
+def font_key(font) -> tuple:
+    """What a font actually is right now (family, size, weight...): one Tcl call. Fonts are changed in place
+    (font.configure(size=...)), so widths are keyed on this, never on the font object or its name."""
+    return tuple(sorted(font.actual().items()))
+
+
+def measure(font, text: str, key: tuple | None = None) -> int:
+    """font.measure(text) through a bounded cache. Pass `key` (font_key(font)) when measuring many strings in a row."""
+    if key is None:
+        key = font_key(font)
+    ck = (key, text)
+    w = _WIDTH_CACHE.get(ck)
+    if w is None:
+        w = font.measure(text)
+        _WIDTH_CACHE[ck] = w
+        if len(_WIDTH_CACHE) > _WIDTH_CACHE_MAX:
+            _WIDTH_CACHE.popitem(last=False)
+    else:
+        _WIDTH_CACHE.move_to_end(ck)
+    return w
+
+
+def fit_prefix(font, text: str, room: int, key: tuple | None = None) -> str:
+    """The longest prefix of text that measures <= room pixels (binary search)."""
+    if key is None:
+        key = font_key(font)
+    low, high = 0, len(text)
     while low < high:
         mid = (low + high + 1) // 2
-        if font.measure(text[:mid]) <= avail:
+        if measure(font, text[:mid], key) <= room:
             low = mid
         else:
             high = mid - 1
-    return text[:low] + ellipsis
+    return text[:low]
+
+
+def truncate_text(text: str, font: tkfont.Font, max_pixels: int) -> str:
+    """Truncates text with an ellipsis ('…') so it fits within max_pixels."""
+    key = font_key(font)
+    if measure(font, text, key) <= max_pixels:
+        return text
+    ellipsis = "…"
+    ellipsis_w = measure(font, ellipsis, key)
+    avail = max_pixels - ellipsis_w
+    if avail <= 0:
+        return ellipsis
+    return fit_prefix(font, text, avail, key) + ellipsis
 
 
 def interpolate_color(color_a: str, color_b: str, factor: float) -> str:
@@ -99,9 +133,15 @@ class SegmentLabel(tk.Canvas):
         def _step():
             nonlocal step
             if step < len(offsets):
-                self._offset_x = offsets[step]
+                if step == 0:                          # lay out once, then just slide the items
+                    self._offset_x = 0
+                    self._redraw()
+                target = offsets[step]
                 step += 1
-                self._redraw()
+                dx = target - self._offset_x
+                self._offset_x = target                # a <Configure> redraw mid-slide starts from here
+                if dx:
+                    self.move("all", dx, 0)
                 if step < len(offsets):
                     self._anim_timer = self.after(22, _step)
                 else:
@@ -112,14 +152,12 @@ class SegmentLabel(tk.Canvas):
         self.delete("all")
         width = self.max_px or self.winfo_width() or 400
         y = max(self.winfo_height(), int(self.cget("height"))) // 2
-        x, ell = getattr(self, "_offset_x", 0), self._font.measure("…")
+        key = font_key(self._font)
+        x, ell = getattr(self, "_offset_x", 0), measure(self._font, "…", key)
         for text, color in self._segments:
-            w = self._font.measure(text)
+            w = measure(self._font, text, key)
             if x + w > width:                          # doesn't fit: cut this part, end with '…', stop
-                room = width - x - ell
-                cut = text
-                while cut and self._font.measure(cut) > room:
-                    cut = cut[:-1]
+                cut = fit_prefix(self._font, text, width - x - ell, key)
                 self.create_text(x, y, anchor="w", text=cut.rstrip() + "…", fill=color or self._fg, font=self._font)
                 return
             self.create_text(x, y, anchor="w", text=text, fill=color or self._fg, font=self._font)
