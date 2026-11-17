@@ -62,9 +62,16 @@ def chain_runner_alive(path: Path = CHAINS_FILE, max_age: float = 120.0) -> bool
         return False
 
 
-def wsl_running() -> bool:
-    """WSL's VM process exists (no wsl.exe call, never starts WSL)."""
-    return any((p.info.get("name") or "").lower() in ("vmmemwsl", "vmmem") for p in psutil.process_iter(["name"]))
+_wsl_seen: list = [0.0, False]   # (checked at, running): a full process scan, and the ticker asks every 2 s
+
+
+def wsl_running(max_age: float = 10.0) -> bool:
+    """WSL's VM process exists (no wsl.exe call, never starts WSL). The scan result is reused for max_age seconds."""
+    if time.time() - _wsl_seen[0] < max_age:
+        return _wsl_seen[1]
+    _wsl_seen[:] = [time.time(), any((p.info.get("name") or "").lower() in ("vmmemwsl", "vmmem")
+                                     for p in psutil.process_iter(["name"]))]
+    return _wsl_seen[1]
 
 
 def probe_services(router_up: bool | None = None) -> dict[str, bool]:

@@ -988,6 +988,53 @@ class Hub:
         except Exception:  # noqa: BLE001 - a display nicety
             return []
 
+    def _top_processes_payload(self) -> dict:
+        """Top processes by CPU / memory / GPU. Runs as the `top_procs` collector (once per TTL, shared by every tab), so
+        the CPU% baseline in `_proc_cpu_cache` always spans one whole TTL."""
+        import psutil
+        now = time.monotonic()
+        prev_cache = getattr(self, "_proc_cpu_cache", {})   # pid -> (cpu_time, sampled_at)
+        procs = []
+        new_cache = {}
+        gpu_col = (getattr(self, "collectors", None) or {}).get("gpu")
+        chips = ((gpu_col.get() if gpu_col else None) or {}).get("pid_chips") or {}
+
+        for p in psutil.process_iter(["pid", "name", "memory_info", "cpu_times"]):
+            try:
+                pid = p.info.get("pid")
+                if pid is None or pid == 0:
+                    continue
+                mem_info = p.info.get("memory_info")
+                mem_mb = (mem_info.rss if mem_info else 0) / (1024 * 1024)
+
+                cpu_times = p.info.get("cpu_times")
+                total_time = (cpu_times.user + cpu_times.system) if cpu_times else 0.0
+                new_cache[pid] = (total_time, now)
+
+                cpu_pct = 0.0
+                if pid in prev_cache:
+                    prev_time, prev_at = prev_cache[pid]
+                    dt = now - prev_at
+                    if dt > 0.1:
+                        cpu_pct = max(0.0, ((total_time - prev_time) / dt) * 100.0)
+
+                procs.append({
+                    "pid": pid,
+                    "name": p.info.get("name") or "",
+                    "cpu": round(cpu_pct, 1),
+                    "mem_mb": round(mem_mb, 1),
+                    "chip": chips.get(pid),
+                })
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, AttributeError):
+                continue
+
+        self._proc_cpu_cache = new_cache
+        top_cpu = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:6]
+        top_mem = sorted(procs, key=lambda x: x["mem_mb"], reverse=True)[:6]
+        gpu_procs = [p for p in procs if p.get("chip")]
+        top_gpu = sorted(gpu_procs, key=lambda x: (x["mem_mb"], x["cpu"]), reverse=True)[:6]
+        return {"ok": True, "top_cpu": top_cpu, "top_mem": top_mem, "top_gpu": top_gpu}
+
     def build_app(self):
         """The dashboard's web app on this hub's data: the page + /static, /api/stream (pushed), /api/snapshot,
         /api/history, /api/meta, /api/views and /api/action (POST: our page only), /api/status (the old cards)."""
@@ -1036,6 +1083,7 @@ class Hub:
         self.collectors["network"] = Cached(network.last_status, 2)
         from .data.collectors import sol_pad
         self.collectors["sol_pad"] = Cached(sol_pad.get_sol_pad_status, 5)
+        self.collectors["top_procs"] = Cached(self._top_processes_payload, 4)   # one process scan per 4 s, however many tabs
         app = create_app(collectors=self.collectors)
         app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -1332,56 +1380,7 @@ class Hub:
 
         @app.get("/api/top-processes")
         def top_processes() -> dict:
-            import psutil
-            now = time.monotonic()
-            if not hasattr(self, "_proc_cpu_cache"):
-                self._proc_cpu_cache = {}  # pid -> (cpu_time, sampled_at)
-            
-            procs = []
-            new_cache = {}
-            chips = (self.collectors.get("gpu", None) and self.collectors["gpu"].get() or {}).get("pid_chips") or {}
-
-            for p in psutil.process_iter(["pid", "name", "memory_info", "cpu_times"]):
-                try:
-                    pid = p.info.get("pid")
-                    if pid is None or pid == 0:
-                        continue
-                    mem_info = p.info.get("memory_info")
-                    mem_mb = (mem_info.rss if mem_info else 0) / (1024 * 1024)
-                    
-                    cpu_times = p.info.get("cpu_times")
-                    total_time = (cpu_times.user + cpu_times.system) if cpu_times else 0.0
-                    new_cache[pid] = (total_time, now)
-
-                    cpu_pct = 0.0
-                    if pid in self._proc_cpu_cache:
-                        prev_time, prev_at = self._proc_cpu_cache[pid]
-                        dt = now - prev_at
-                        if dt > 0.1:
-                            cpu_pct = max(0.0, ((total_time - prev_time) / dt) * 100.0)
-
-                    procs.append({
-                        "pid": pid,
-                        "name": p.info.get("name") or "",
-                        "cpu": round(cpu_pct, 1),
-                        "mem_mb": round(mem_mb, 1),
-                        "chip": chips.get(pid),
-                    })
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError, AttributeError):
-                    continue
-
-            self._proc_cpu_cache = new_cache
-            top_cpu = sorted(procs, key=lambda x: x["cpu"], reverse=True)[:6]
-            top_mem = sorted(procs, key=lambda x: x["mem_mb"], reverse=True)[:6]
-            gpu_procs = [p for p in procs if p.get("chip")]
-            top_gpu = sorted(gpu_procs, key=lambda x: (x["mem_mb"], x["cpu"]), reverse=True)[:6]
-
-            return {
-                "ok": True,
-                "top_cpu": top_cpu,
-                "top_mem": top_mem,
-                "top_gpu": top_gpu,
-            }
+            return self.collectors["top_procs"].get()
 
         @app.get("/api/media-session")
         def get_media_session() -> dict:

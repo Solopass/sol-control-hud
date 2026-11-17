@@ -11,6 +11,8 @@ from pathlib import Path
 import httpx
 import psutil
 
+from ... import swallow
+
 DECK_URL = "http://127.0.0.1:5000"
 DECK_DIR = Path("D:/Workspace/sol-deck")
 RUN_DECK_PS1 = DECK_DIR / "run-deck.ps1"
@@ -30,30 +32,65 @@ def close_client() -> None:
     if _HTTP is not None:
         try:
             _HTTP.close()
-        except Exception:
-            pass
+        except httpx.HTTPError:
+            swallow.note("security.close_client")
         _HTTP = None
 
 
-def get_deck_process_status() -> dict:
-    """Check whether sol-deck.exe is running on Windows even if HTTP is unreachable."""
+_DECK_NAMES = ("sol-deck.exe", "sol-deck-cli.exe", "sol-deck")
+FULL_SCAN_EVERY = 30.0                    # seconds between full process scans while sol-deck isn't found
+_NOT_RUNNING = {"running": False, "pid": None, "ram_mb": 0.0, "uptime_sec": 0}
+_deck_seen: dict = {"pid": None, "create_time": 0.0, "name": "", "scan_at": None}   # scan_at: monotonic time of the last full scan
+
+
+def reset_deck_cache() -> None:
+    """Forget the remembered pid and the scan time, so the next status call rescans at once (after start/stop/restart)."""
+    _deck_seen.update(pid=None, create_time=0.0, name="", scan_at=None)
+
+
+def _deck_info(p: "psutil.Process", create_t: float) -> dict:
     try:
-        for p in psutil.process_iter(["pid", "name", "memory_info", "create_time"]):
+        ram_mb = round(p.memory_info().rss / (1024 * 1024), 1)
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        ram_mb = 0.0
+    return {"running": True, "pid": p.pid, "ram_mb": ram_mb,
+            "uptime_sec": int(time.time() - create_t) if create_t else 0}
+
+
+def get_deck_process_status() -> dict:
+    """Check whether sol-deck.exe is running on Windows even if HTTP is unreachable.
+
+    Cheap on purpose (it is called every 2 s): the last pid found is re-checked directly; a full process scan happens
+    only when that fails, and then at most every FULL_SCAN_EVERY seconds."""
+    pid = _deck_seen["pid"]
+    if pid is not None:
+        try:
+            p = psutil.Process(pid)
+            create_t = p.create_time()
+            if (p.name() or "").lower() == _deck_seen["name"] and abs(create_t - _deck_seen["create_time"]) <= 1.0:
+                return _deck_info(p, create_t)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+        _deck_seen.update(pid=None, create_time=0.0, name="")
+    now = time.monotonic()
+    last = _deck_seen["scan_at"]
+    if last is not None and now - last < FULL_SCAN_EVERY:
+        return dict(_NOT_RUNNING)
+    _deck_seen["scan_at"] = now
+    try:
+        for p in psutil.process_iter(["pid", "name"]):
             name = (p.info.get("name") or "").lower()
-            if name in ("sol-deck.exe", "sol-deck-cli.exe", "sol-deck"):
-                mem = p.info.get("memory_info")
-                ram_mb = round(mem.rss / (1024 * 1024), 1) if mem else 0.0
-                create_t = p.info.get("create_time") or 0
-                uptime = int(time.time() - create_t) if create_t else 0
-                return {
-                    "running": True,
-                    "pid": p.info.get("pid"),
-                    "ram_mb": ram_mb,
-                    "uptime_sec": uptime,
-                }
-    except Exception:
-        pass
-    return {"running": False, "pid": None, "ram_mb": 0.0, "uptime_sec": 0}
+            if name not in _DECK_NAMES:
+                continue
+            try:
+                create_t = p.create_time()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+            _deck_seen.update(pid=p.pid, create_time=create_t, name=name)
+            return _deck_info(p, create_t)
+    except (psutil.Error, OSError):
+        swallow.note("security.get_deck_process_status")
+    return dict(_NOT_RUNNING)
 
 
 def start_deck() -> dict:
@@ -78,6 +115,7 @@ def start_deck() -> dict:
             creationflags=CREATE_NO_WINDOW,
         )
         time.sleep(0.7)
+        reset_deck_cache()
         st = get_deck_process_status()
         if st["running"]:
             close_client()
@@ -111,6 +149,7 @@ def stop_deck() -> dict:
             creationflags=CREATE_NO_WINDOW,
         )
         close_client()
+        reset_deck_cache()
         return {"ok": True, "why": "sol-deck stopped"}
     except Exception as e:
         return {"ok": False, "why": f"Stop error: {e}"}
@@ -140,6 +179,7 @@ def restart_deck() -> dict:
         )
         time.sleep(0.7)
         close_client()
+        reset_deck_cache()
         st = get_deck_process_status()
         if st["running"]:
             return {"ok": True, "why": f"sol-deck restarted (PID {st['pid']})"}

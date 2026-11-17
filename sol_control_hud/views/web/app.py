@@ -1,6 +1,7 @@
 """SOL HUD v2 - M1: read-only status at a glance. Bind to 127.0.0.1 only."""
 from __future__ import annotations
 
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,16 +24,22 @@ class Cached:
         self.value: object = None
         self.at = 0.0
         self.failed = False         # the last run raised (the HUD health card lists these; "unavailable" is not failed)
+        self._lock = threading.RLock()   # request threads call get() at once: only the first miss runs fn, the rest reuse it
+
+    def _stale(self) -> bool:
+        return self.value is None or time.monotonic() - self.at >= self.ttl
 
     def get(self) -> object:
-        if self.value is None or time.monotonic() - self.at >= self.ttl:
-            try:
-                self.value = self.fn()
-                self.failed = False
-            except Exception as e:  # noqa: BLE001 - one broken collector must not take the page down
-                self.value = {"available": False, "error": f"{type(e).__name__}: {e}"}
-                self.failed = True
-            self.at = time.monotonic()
+        if self._stale():
+            with self._lock:
+                if self._stale():       # another thread may have refreshed it while we waited
+                    try:
+                        self.value = self.fn()
+                        self.failed = False
+                    except Exception as e:  # noqa: BLE001 - one broken collector must not take the page down
+                        self.value = {"available": False, "error": f"{type(e).__name__}: {e}"}
+                        self.failed = True
+                    self.at = time.monotonic()
         return self.value
 
 
