@@ -158,9 +158,12 @@ def level(report: dict) -> str:
 
 class CpuWatch:
     """One warning per episode of the HUD using far more CPU than its target: raised once the HUD's own CPU has stayed
-    above HOT_FACTOR x target for HOLD_S straight; re-armed once it has been back at or under the target for HOLD_S.
+    above HOT_FACTOR x target for HOLD_S straight; re-armed once it has been back at or under COOL_FACTOR x target for
+    HOLD_S. The target (1.5 %) is the HUD with no dashboard open; a few open dashboard tabs keep it near 5 %, which is
+    normal, so the warning line sits well above that (15 %) and normal use re-arms it (<= 6 %).
     The clock is passed in (tests use a fake one)."""
-    HOT_FACTOR = 3.0
+    HOT_FACTOR = 10.0
+    COOL_FACTOR = 4.0
     HOLD_S = 600.0
 
     def __init__(self) -> None:
@@ -173,7 +176,7 @@ class CpuWatch:
         if cpu is None:
             return False
         self.hot_since = (self.hot_since if self.hot_since is not None else now) if cpu > target * self.HOT_FACTOR else None
-        if cpu <= target:
+        if cpu <= target * self.COOL_FACTOR:
             if self.cool_since is None:
                 self.cool_since = now
             if not self.armed and now - self.cool_since >= self.HOLD_S:

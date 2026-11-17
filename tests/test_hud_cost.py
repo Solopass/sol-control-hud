@@ -204,27 +204,27 @@ def test_router_log_parsed_only_when_file_changes(tmp_path, monkeypatch):
 def test_cpu_watch_one_warning_per_episode():
     w = health.CpuWatch()
     T = 1.5
-    for t in range(0, 600, 10):                          # hot (> 4.5 %) for just under 10 min: nothing
-        assert not w.step(10.0, T, t)
-    assert w.step(10.0, T, 600) is True                  # the 10th minute: one warning
-    assert not any(w.step(10.0, T, t) for t in range(610, 4000, 10))     # staying hot: no repeat
-    for t in range(4000, 4500, 10):                      # under target for only 8 min: not re-armed
-        w.step(1.0, T, t)
+    for t in range(0, 600, 10):                          # hot (> 15 %) for just under 10 min: nothing
+        assert not w.step(20.0, T, t)
+    assert w.step(20.0, T, 600) is True                  # the 10th minute: one warning
+    assert not any(w.step(20.0, T, t) for t in range(610, 4000, 10))     # staying hot: no repeat
+    for t in range(4000, 4500, 10):                      # back to normal (<= 6 %) for only 8 min: not re-armed
+        w.step(5.0, T, t)
     assert not w.armed
-    assert not any(w.step(10.0, T, t) for t in range(4500, 6000, 10))
-    for t in range(6000, 6700, 10):                      # 10+ min under target: re-armed
-        w.step(1.0, T, t)
+    assert not any(w.step(20.0, T, t) for t in range(4500, 6000, 10))
+    for t in range(6000, 6700, 10):                      # 10+ min back to normal: re-armed
+        w.step(5.0, T, t)
     assert w.armed
-    assert not any(w.step(10.0, T, t) for t in range(6700, 7300, 10))
-    assert w.step(10.0, T, 7300) is True                 # a new episode warns again
+    assert not any(w.step(20.0, T, t) for t in range(6700, 7300, 10))
+    assert w.step(20.0, T, 7300) is True                 # a new episode warns again
 
 
 def test_cpu_watch_interrupted_hot_stretch_restarts_the_clock():
     w = health.CpuWatch()
     for t in range(0, 500, 10):
-        assert not w.step(10.0, 1.5, t)
-    assert not w.step(3.0, 1.5, 500)            # between 1x and 3x target: not hot, the 10 min start over
+        assert not w.step(20.0, 1.5, t)
+    assert not w.step(8.0, 1.5, 500)            # between normal and the 15 % line: not hot, the 10 min start over
     for t in range(510, 1110, 10):
-        assert not w.step(10.0, 1.5, t)
-    assert w.step(10.0, 1.5, 1110) is True
+        assert not w.step(20.0, 1.5, t)
+    assert w.step(20.0, 1.5, 1110) is True
     assert not health.CpuWatch().step(None, 1.5, 0)

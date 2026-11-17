@@ -36,7 +36,7 @@ from .data.snapshot import RED, TickerCollector, attention, format_multiline_row
 from .paths import DATA_DIR
 from .swallow import note as _swallowed
 
-HUD_TARGET_CPU = 1.5          # % of one core the HUD should stay under (health card; the CPU notice fires at 3x for 10 min)
+HUD_TARGET_CPU = 1.5          # % of one core the HUD should stay under (health card, no dashboard open; the CPU notice fires at 10x for 10 min)
 
 SETTINGS_FILE = DATA_DIR / "hub-settings.json"
 LOCK_FILE = DATA_DIR / "hub.lock"
