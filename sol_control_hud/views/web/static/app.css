@@ -651,7 +651,7 @@ body:not(.opt-no-card-accents) .card::before {
 body:not(.opt-no-card-accents) :is(#c-gpu, #c-vram, #c-system, #c-disks)::before {
   background:linear-gradient(90deg, var(--green), var(--cyan));
 }
-body:not(.opt-no-card-accents) :is(#c-ai, #c-ai-thinking, #c-chains, #c-overnight, #c-awayq, #c-ask, #c-ai-usage)::before {
+body:not(.opt-no-card-accents) :is(#c-ai, #c-ai-thinking, #c-chains, #c-overnight, #c-awayq, #c-ask, #c-ai-usage, #c-ai-inbox)::before {
   background:linear-gradient(90deg, var(--cyan), var(--purple));
 }
 body:not(.opt-no-card-accents) :is(#c-projects, #c-ports, #c-notes, #c-work, #c-media, #c-solang, #c-review, #c-week)::before {
@@ -1420,3 +1420,7 @@ main.grid.masonry > .card { margin-bottom:16px; }
 .card-tools { display:inline-flex; align-items:center; gap:3px; margin-left:6px; vertical-align:middle; }
 .card-tool-btn { padding:1px 5px; font-size:10px; line-height:1; background:transparent; border:1px solid transparent; border-radius:4px; color:var(--dim); }
 .card-tool-btn:hover { background:var(--badge); border-color:var(--line); color:var(--text); }
+.inbox-sec { margin-bottom:8px; }
+.inbox-h { margin:6px 0 2px; cursor:default; }
+.inbox-list { margin:2px 0 4px 16px; padding:0; }
+.inbox-list li { margin:1px 0; }

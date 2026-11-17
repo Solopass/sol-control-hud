@@ -347,3 +347,14 @@ def test_stream_route_uses_shared_payload_and_stops_with_last_client(app_hub, mo
         await asyncio.sleep(0.05)
     asyncio.run(run())
     assert len(builds) == 1                                       # the loop ended; no further builds
+
+
+def test_ai_inbox_action_passes_only_text_and_line(app_hub, monkeypatch):
+    from sol_control_hud.data.collectors import ai_inbox
+    h, c = app_hub
+    seen = []
+    monkeypatch.setattr(ai_inbox, "tick_task", lambda text, line, tasks=None: seen.append((text, line)) or {"ok": True, "why": "x"})
+    monkeypatch.setattr(ai_inbox, "open_note", lambda note_id, **k: seen.append(note_id) or {"ok": True})
+    h.do_action("ai_inbox_tick", "", {"text": "a", "line": 2, "path": "C:/evil"})
+    h.do_action("ai_inbox_open", "digest", {})
+    assert seen == [("a", 2), "digest"]

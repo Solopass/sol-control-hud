@@ -256,6 +256,10 @@ const CHIPS = {
     const first = acts[0];
     return first ? `<span style="color:${first.color || 'var(--dim)'}">${esc(first.text)}</span>` : 'no recent activity';
   },
+  'c-ai-inbox': () => {
+    const pill = lcard('inboxPill')?.textContent?.trim() || '…';
+    return `<b>${esc(pill)}</b>`;
+  },
   'c-ask': () => {
     const c = lcard('askPendingCount')?.textContent?.trim();
     return c ? `<b>${esc(c)}</b> waiting` : 'idle';
@@ -358,7 +362,7 @@ function renderLayoutButton() {
 // ---------- Quick Switcher Bar (below header): presets, category filters, card search, jump menu, compact mode
 const CARD_CATS = {
   hw: ['c-gpu', 'c-vram', 'c-system', 'c-disks'],
-  ai: ['c-ai', 'c-ai-thinking', 'c-chains', 'c-overnight', 'c-ask', 'c-awayq', 'c-ai-usage'],
+  ai: ['c-ai-inbox', 'c-ai', 'c-ai-thinking', 'c-chains', 'c-overnight', 'c-ask', 'c-awayq', 'c-ai-usage'],
   dev: ['c-projects', 'c-ports', 'c-work', 'c-notes', 'c-media', 'c-solang', 'c-review'],
   sys: ['c-security', 'c-deck', 'c-net', 'c-pad', 'c-svc', 'c-stab', 'c-health', 'c-week', 'c-activity'],
 };

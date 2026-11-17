@@ -460,6 +460,17 @@ class Hub:
             self._login = start_at_login(target == "on")
             log(f"start at login: {'on' if self._login else 'off'}")
             return {"ok": True, "why": f"start at login: {'on' if self._login else 'off'}", "start_at_login": self._login}
+        if action in ("ai_inbox_open", "ai_inbox_tick"):
+            from .data.collectors import ai_inbox
+            b = body or {}
+            if action == "ai_inbox_open":
+                return ai_inbox.open_note(target)
+            line = b.get("line")
+            r = ai_inbox.tick_task(str(b.get("text") or ""), line if isinstance(line, int) else -1)
+            if r.get("ok") and "ai_inbox" in self.collectors:
+                self.collectors["ai_inbox"].at = 0.0           # next payload re-reads the file
+            log(f"ai inbox tick: {r.get('why')}")
+            return r
         if action == "open_note":
             from .data.collectors import notes
             b = body or {}
@@ -1039,6 +1050,7 @@ class Hub:
                 "ai_ops": c["ai_ops"].get() if "ai_ops" in c else {},
                 "security": c["security"].get() if "security" in c else {},
                 "deck_services": c["deck_services"].get() if "deck_services" in c else {},
+                "ai_inbox": c["ai_inbox"].get() if "ai_inbox" in c else {},
                 "network": c["network"].get() if "network" in c else {},
                 "sol_pad": c["sol_pad"].get() if "sol_pad" in c else {},
                 "layout": {"active": self._layouts["active"], "rev": self._layouts["rev"]}}
@@ -1150,6 +1162,8 @@ class Hub:
         from .data.collectors import security
         self.collectors["security"] = Cached(security.get_security_status, 2)
         self.collectors["deck_services"] = Cached(self.deck_services_payload, 5)
+        from .data.collectors import ai_inbox          # "From your AI": reads a few note files, nothing else
+        self.collectors["ai_inbox"] = Cached(ai_inbox.collect, 30)
         from .data.collectors import network          # Pi-hole + LAN devices: its own thread probes, this only reads
         network.start_network_monitor()
         self.collectors["network"] = Cached(network.last_status, 2)
@@ -1849,6 +1863,37 @@ class Hub:
             r = self.layout_action({"action": "activate", "name": target})
             log(f"layout auto-switch -> {target} ({'ok' if r.get('ok') else r.get('why')})")
 
+    def _ai_inbox_notices(self) -> list:
+        """One ticker line when a new weekly digest (the AI's, not the machine's) lands; once per digest file.
+        Held back during quiet hours (the notifier would drop it), and the first look only records what exists."""
+        from datetime import datetime
+        from . import digest, notify
+        try:
+            cols = getattr(self, "collectors", None) or {}
+            payload = cols["ai_inbox"].get() if "ai_inbox" in cols else {}
+            name = ((payload or {}).get("digest") or {}).get("name")
+            if not name:
+                return []
+            state_file = DATA_DIR / "ai-inbox-state.json"
+            state = digest.load_state(state_file)
+            if state.get("digest") == name:
+                return []
+            first = "digest" not in state
+            if not first and notify.in_quiet_hours({**notify.DEFAULTS, **(self.settings.get("notify") or {})}.get("quiet", ""), datetime.now()):
+                return []
+            state["digest"] = name
+            digest.save_state(state, state_file)
+            if first:
+                return []
+            d = payload["digest"]
+            nxt = len(d.get("next") or [])
+            return [notify.Notice("ai_digest", "Your AI wrote your weekly digest",
+                                  f"{name}: {nxt} thing{'s' if nxt != 1 else ''} for next week. Open it from the From your AI card.",
+                                  "info", f"ai_inbox:{name}")]
+        except Exception:                                   # noqa: BLE001 - a ticker nicety never breaks the loop
+            _swallowed("hub.ai_inbox_notices")
+            return []
+
     def _weekly_digest(self, snap) -> list:
         """Sunday 20:00 (or the first minute after it, outside quiet hours): write the machine's week (digest.py) and
         return its notice for the notifier, which holds it during a game like any other."""
@@ -1914,6 +1959,7 @@ class Hub:
                     extra += self._cpu_notices(snap)
                 if time.monotonic() - self._last_digest_check >= 60:
                     self._last_digest_check = time.monotonic()
+                    extra += self._ai_inbox_notices()
                     extra += self._weekly_digest(snap)
                 for n in self.notifier.check(self._prev_snap, snap, busy, extra):
                     self.notify_now(n.title, n.text, n.level)

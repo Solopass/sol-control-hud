@@ -30,6 +30,7 @@ MAX_PRESETS = 20
 
 # card id -> (title, {size: [columns, rows]}, today's size). Order = the dashboard's order before presets.
 WIDGETS: dict[str, tuple[str, dict[str, list[int]], str]] = {
+    "c-ai-inbox": ("From your AI", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1], "XL": [3, 1]}, "L"),
     "c-gpu": ("CPU · GPU", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [1, 2], "XL": [2, 2]}, "L"),
     "c-vram": ("VRAM", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
     "c-ai": ("Local AI", {"XS": [1, 1], "S": [1, 1], "M": [1, 1], "L": [2, 1]}, "M"),
@@ -85,6 +86,7 @@ def default_presets() -> list[dict]:
             ("c-svc", "XS"),
         ], auto_when="game", ticker=["HW", "MEDIA", "SYS"]),
         _preset("AI work", "🧠", [
+            ("c-ai-inbox", "L"),
             ("c-playground", "XL"),
             ("c-ai-thinking", "XL"),
             ("c-ai", "L"),
@@ -107,6 +109,7 @@ def default_presets() -> list[dict]:
             ("c-deck", "M"),
         ], ticker=["HW", "GIT", "APPS", "NOTE", "NET"]),
         _preset("Overnight", "🌙", [
+            ("c-ai-inbox", "L"),
             ("c-overnight", "XL"),
             ("c-awayq", "L"),
             ("c-chains", "L"),
@@ -170,6 +173,18 @@ def clean_preset(p: dict) -> dict:
     return {"name": name, "icon": icon, "auto_when": auto, "ticker_slides": ticker, "widgets": widgets}
 
 
+def _inbox_first(stored: dict, cp: dict) -> None:
+    """A stored AI preset that never knew the "From your AI" card gets it shown, first."""
+    if "c-ai-inbox" in {w.get("id") for w in stored.get("widgets") or [] if isinstance(w, dict)}:
+        return
+    ws = cp["widgets"]
+    for i, w in enumerate(ws):
+        if w["id"] == "c-ai-inbox":
+            w["hidden"], w["size"] = False, "L"
+            ws.insert(0, ws.pop(i))
+            return
+
+
 def merge(data: dict) -> dict:
     """A stored file -> the current shape: every preset cleaned (cards added later appear hidden; in Everyday they
     are shown at the end), at least one preset, a valid active one."""
@@ -189,6 +204,7 @@ def merge(data: dict) -> dict:
                 w_order = {wid: i for i, wid in enumerate(WIDGETS)}
                 cp["widgets"].sort(key=lambda x: w_order.get(x["id"], 999))
             elif cp["name"] == "AI work":
+                _inbox_first(p, cp)
                 known_shown = {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict) and not w.get("hidden")}
                 if "c-ai-thinking" not in known_shown:
                     for w in cp["widgets"]:
@@ -230,6 +246,7 @@ def merge(data: dict) -> dict:
                             w["hidden"] = False
                             w["size"] = "M"
             elif cp["name"] == "Overnight":
+                _inbox_first(p, cp)
                 known_shown = {w.get("id") for w in p.get("widgets") or [] if isinstance(w, dict) and not w.get("hidden")}
                 if "c-overnight" not in known_shown:
                     for w in cp["widgets"]:
