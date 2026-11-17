@@ -427,6 +427,7 @@ $('solangForm')?.addEventListener('submit', async (e) => {
 // ---------- Solang Takeout Queue Polling & Controls
 async function updateSolangQueueStatus() {
   if (document.hidden) return;
+  if (typeof cardShown === 'function' && !cardShown('c-solang')) return;   // hidden in this layout: not polled (layouts.js)
   try {
     const r = await post('/api/action', { action: 'solang', op: 'queue_status' });
     if (r && r.status) {

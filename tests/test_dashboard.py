@@ -289,3 +289,61 @@ def test_playground_search_failure_answers_without_context(app_hub, monkeypatch)
     assert r["ok"] is True and r["text"] == "ok"
     assert seen[0]["messages"][-1]["content"] == "q"
     assert "index" in r["context_note"] and r["citations"] == []
+
+
+def test_shared_payload_builds_once_per_tick_for_many_streams():
+    import asyncio
+    from sol_control_hud.hub import SharedPayload, stream_message
+    now = [0.0]
+    calls = []
+    def build():
+        calls.append(1)
+        return {"snapshot": {"n": len(calls)}, "chains": {"a": 1}}
+    sp = SharedPayload(build, 1.8, clock=lambda: now[0])
+
+    async def run():
+        # 5 "tabs" ask at once: one build, the same payload for all
+        got = await asyncio.gather(*[sp.get() for _ in range(5)])
+        assert len(calls) == 1 and all(g is got[0] for g in got)
+        # each client diffs on its own: first message full, then only changes
+        states, msgs = [None] * 5, []
+        for i, g in enumerate(got):
+            m, states[i] = stream_message(states[i], g)
+            msgs.append(m)
+        assert all("full" in m for m in msgs)
+        now[0] = 0.5
+        await asyncio.gather(*[sp.get() for _ in range(5)])
+        assert len(calls) == 1                                    # still inside the tick
+        now[0] = 2.0
+        got = await asyncio.gather(*[sp.get() for _ in range(5)])
+        assert len(calls) == 2                                    # next tick: one more build
+        for i, g in enumerate(got):
+            m, states[i] = stream_message(states[i], g)
+            assert m == {"snap": {"n": 2}}
+        n = len(calls)
+        now[0] = 10.0                                             # nobody connected: nothing builds
+        await asyncio.sleep(0.05)
+        assert len(calls) == n
+    asyncio.run(run())
+
+
+def test_stream_route_uses_shared_payload_and_stops_with_last_client(app_hub, monkeypatch):
+    h, c = app_hub
+    builds = []
+    monkeypatch.setattr(h, "dashboard_payload", lambda: builds.append(1) or {"snapshot": {"x": 1}, "chains": {}})
+    h.shared_payload.value, h.shared_payload.at = None, -1e9
+    import asyncio
+    route = next(r for r in c.app.routes if getattr(r, "path", "") == "/api/stream")
+
+    class Req:
+        def __init__(self): self.n = 0
+        async def is_disconnected(self):
+            self.n += 1
+            return self.n > 1                                     # gone after the first message
+    async def run():
+        resp = await route.endpoint(Req())
+        chunks = [x async for x in resp.body_iterator]
+        assert len(chunks) == 1 and chunks[0].startswith("data: ") and '"full"' in chunks[0]
+        await asyncio.sleep(0.05)
+    asyncio.run(run())
+    assert len(builds) == 1                                       # the loop ended; no further builds

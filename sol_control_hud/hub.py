@@ -191,6 +191,31 @@ def stream_message(prev: dict | None, payload: dict) -> tuple[dict, dict]:
     return msg, state
 
 
+class SharedPayload:
+    """One dashboard payload build per tick for every /api/stream connection. A caller within `ttl` seconds of the last
+    build reuses it; callers arriving while a build runs wait for that build. There is no background task: with no
+    stream connected nothing builds. (Results are shared read-only: stream_message only reads them.)"""
+
+    def __init__(self, build, ttl: float, clock=time.monotonic):
+        self.build, self.ttl, self.clock = build, ttl, clock
+        self.value, self.at, self.builds = None, -1e9, 0
+        self._lock = None
+
+    async def get(self) -> dict:
+        import asyncio
+        if self.value is not None and self.clock() - self.at < self.ttl:
+            return self.value
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        async with self._lock:
+            if self.value is not None and self.clock() - self.at < self.ttl:   # built while we waited
+                return self.value
+            self.value = await asyncio.to_thread(self.build)
+            self.at = self.clock()
+            self.builds += 1
+            return self.value
+
+
 class LazyGuard:
     """The web dashboard's VRAM guard loop, started on first use and stopped when nobody has looked for a while."""
 
@@ -230,6 +255,7 @@ class Hub:
         self.cmds: queue.Queue = queue.Queue()
         self.last_web = -1e9
         self.pace = ACTIVE_PACE
+        self.shared_payload = SharedPayload(lambda: self.dashboard_payload(), ACTIVE_PACE * 0.9)   # looked up late: tests patch dashboard_payload
         self.ticker = self.server = self.tray = self.root = self.exam_hud = None
         self._login = False          # the Startup entry exists (read at start, changed through do_action)
         self.notifier = None
@@ -1178,7 +1204,7 @@ class Hub:
                 state = None
                 while not await request.is_disconnected():
                     self.last_web = time.monotonic()  # an open stream = a dashboard on screen (hidden tabs close it)
-                    payload = await asyncio.to_thread(self.dashboard_payload)
+                    payload = await self.shared_payload.get()   # one build per tick for all tabs
                     msg, state = stream_message(state, payload)   # after the first message: only what changed
                     yield f"data: {json.dumps(msg, default=str, separators=(',', ':'))}\n\n"
                     await asyncio.sleep(ACTIVE_PACE)

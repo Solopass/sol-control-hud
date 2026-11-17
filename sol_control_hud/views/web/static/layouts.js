@@ -14,7 +14,8 @@ const LC = window.LayoutCore;    // the pure parts (layouts-core.js), tested wit
 const LOADERS = { 'c-ports': 'loadPorts', 'c-notes': 'loadNotes', 'c-ai': 'loadGuard', 'c-gpu': 'loadDisplays', 'c-week': 'loadWeek',
   'c-ai-usage': 'loadAiUsage', 'c-procs': 'loadProcs', 'c-media-ctl': 'loadMediaSession',
   'c-health': 'loadHealth', 'c-projects': 'loadProjects', 'c-media': 'loadMedia', 'c-chains': 'loadControl', 'c-ask': 'loadControl',
-  'c-awayq': 'loadControl', 'c-overnight': 'loadOvernight' };
+  'c-awayq': 'loadControl', 'c-overnight': 'loadOvernight',
+  'c-solang': 'updateSolangQueueStatus' };
 
 function cardShown(id) { const el = lcard(id); return !el || !el.hidden; }      // app.js / launchpad.js ask this
 
