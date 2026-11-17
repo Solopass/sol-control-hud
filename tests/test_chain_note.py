@@ -341,3 +341,24 @@ def test_real_notes_with_json_checks_parse(tmp_path, text):
     chain = _note(tmp_path, text)
     wf = cn.to_workflow(chain)
     assert any(s.get("schema") for s in wf["steps"])
+
+
+def test_tool_step_args_with_a_reference_reach_the_tool(tmp_path):
+    """`tasks: {{Action items JSON}}` isn't valid YAML (the braces open a mapping); it used to be dropped silently, so
+    sync_tasks ran with no tasks and reported `added: 0` (Weekly digest run 185)."""
+    wf = cn.to_workflow(_note(tmp_path, REAL_DIGEST))
+    sync = wf["steps"][-1]
+    assert sync["tool"] == "sync_tasks" and sync["args"] == {"tasks": "{{ steps.action_items_json.output }}"}
+
+
+def test_sync_tasks_takes_the_json_text_a_step_produced(tmp_path):
+    from sol_control_hud.chains import file_tools as ft
+    out = ('{"tasks": [{"task": "Add a HEALPix-sharded static coverage index", "loop": "Blink data"}, '
+           '{"task": "Pursue the pass-key-server idea", "loop": "device logins"}]}')
+    tasks = tmp_path / "Tasks.md"
+    policy = ft.Policy(read_roots=[str(tmp_path)], write_roots=[str(tmp_path)])
+    for text in (out, "```json\n" + out + "\n```"):
+        tasks.unlink(missing_ok=True)
+        res = ft.sync_tasks({"file": str(tasks), "tasks": text}, policy=policy)
+        assert res["added"] == 2 and res["total_open"] == 2, text[:12]
+        assert "- [ ] Pursue the pass-key-server idea (loop: device logins)" in tasks.read_text(encoding="utf-8")

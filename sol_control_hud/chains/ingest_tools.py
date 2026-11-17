@@ -538,8 +538,11 @@ def _ingest_batch(kind: str, single: Callable, args: dict, ctx: ToolContext | No
         c.note(f"ingest interrupted ({interrupted}); {len(processed)} done, the rest stay pending")
         raise ModelUnavailable(f"ingest interrupted ({interrupted}); it runs again when the AI is free")
     given_up = res["given_up"] + sum(1 for f in failed if f["attempts"] >= MAX_ATTEMPTS)
-    return {"processed": processed, "count": len(processed), "failed": failed, "failed_count": len(failed),
-            "given_up": given_up}
+    out = {"processed": processed, "count": len(processed), "failed": failed, "failed_count": len(failed),
+           "given_up": given_up}
+    if not processed and not failed:
+        out[file_tools.IDLE_KEY] = True   # an empty inbox: the runner leaves the result note alone and nobody is told "finished"
+    return out
 
 
 def ingest_inbox_videos(args: dict, ctx: ToolContext | None = None, transcribe_fn=None, propose=None,

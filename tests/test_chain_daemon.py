@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import psutil
 import pytest
 
 from sol_control_hud.chains import chain_daemon as cd
@@ -246,8 +247,22 @@ def test_chain_run_by_hand_is_left_alone(env):
     chains, store, ctx, clock, make, _ = env
     p = note(chains, "Manual", "status: running\n")
     rid = store.create_run("chain: Manual", {}, source=str(p)); store.claim(rid); store.set_status(rid, "running")
+    other = psutil.Process(os.getppid())                      # a run owned by another live process (`chains chain ...` by hand)
+    with store._lock, store._db:
+        store._db.execute("UPDATE runs SET owner_pid=?, owner_started=? WHERE id=?", (other.pid, other.create_time(), rid))
     d = make(); d.scan()
     assert d.state["pending"] == []
+
+
+def test_stale_running_row_owned_by_this_process_does_not_block_the_chain(env):
+    """Run 184 (WIP Git Auditor) was left 'running' by the HUD process itself after an engine ReadError; the chain was
+    treated as 'running elsewhere' for ever. A row owned by this process that is not the current run is stale."""
+    chains, store, ctx, clock, make, _ = env
+    p = note(chains, "Stuck", "status: running" + chr(10))
+    rid = store.create_run("chain: Stuck", {}, source=str(p)); store.claim(rid); store.set_status(rid, "running")
+    d = make(); d.scan()
+    assert d.state["pending"][0]["reason"] == "resume after an interruption"
+    assert store.run(rid)["status"] == "interrupted"
 
 
 def test_back_to_draft_leaves_the_queue(env):

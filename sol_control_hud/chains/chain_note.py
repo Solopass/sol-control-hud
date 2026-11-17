@@ -343,6 +343,21 @@ def _translate(text: str, chain: Chain, idx: int, where: str, loop_var: str | No
     return _REF.sub(sub, text)
 
 
+def _tool_prompt_args(prompt: str):
+    """The body of a `tool:` step as arguments: YAML, or (when YAML can't read it, e.g. `tasks: {{Some step}}` where the
+    braces start a YAML mapping) plain `key: value` lines with the value kept as text."""
+    try:
+        return yaml.safe_load(prompt)
+    except yaml.YAMLError:
+        pass  # expected for `key: {{ref}}` lines: read them as plain text below
+    found = {}
+    for line in prompt.splitlines():
+        m = re.match(r"^([A-Za-z_][\w ]*?)\s*:\s*(.*?)\s*$", line)
+        if m:
+            found[m.group(1).strip().replace(" ", "_")] = m.group(2)
+    return found or None
+
+
 def to_workflow(chain: Chain) -> dict:
     meta = chain.meta
     default_model = str(meta.get("model") or DEFAULT_MODEL)
@@ -371,16 +386,13 @@ def to_workflow(chain: Chain) -> dict:
             raw_args = dict(s.settings)
             raw_args.pop("tool", None)
             if s.prompt:
-                try:
-                    loaded = yaml.safe_load(s.prompt)
-                    if isinstance(loaded, dict):
-                        if "args" in loaded and isinstance(loaded["args"], dict):
-                            raw_args.update(loaded["args"])
-                        raw_args.update(loaded)
-                    elif isinstance(loaded, str) and loaded.strip():
-                        raw_args.setdefault("input", loaded.strip())
-                except Exception:
-                    pass
+                loaded = _tool_prompt_args(s.prompt)
+                if isinstance(loaded, dict):
+                    if "args" in loaded and isinstance(loaded["args"], dict):
+                        raw_args.update(loaded["args"])
+                    raw_args.update(loaded)
+                elif isinstance(loaded, str) and loaded.strip():
+                    raw_args.setdefault("input", loaded.strip())
             translated_args = {}
             for k, v in raw_args.items():
                 if isinstance(v, str):
@@ -638,6 +650,8 @@ def render_result(chain: Chain, store: Store, run_id: int) -> tuple[str, dict]:
         done = saved.get(s.id, {})
         if WHOLE in done and s.loop:
             items = (saved.get(f"{s.id}__files") or saved.get(f"{s.id}__items") or {}).get(WHOLE) or []
+            if not isinstance(items, list):  # an over-size list is stored as a "_truncated" stub
+                items = []
             lines.append(join_items({"items": items, "outputs": done[WHOLE], "hide": s.settings.get("hide", "")}) or "_(nothing to loop over)_")
         elif WHOLE in done and s.gather:
             lines.append(_gather_summary(done[WHOLE]))
@@ -645,6 +659,8 @@ def render_result(chain: Chain, store: Store, run_id: int) -> tuple[str, dict]:
             lines.append(_as_text(done[WHOLE]))
         elif s.loop and done:
             items = (saved.get(f"{s.id}__files") or saved.get(f"{s.id}__items") or {}).get(WHOLE) or []
+            if not isinstance(items, list):  # an over-size list is stored as a "_truncated" stub
+                items = []
             got = sorted(k for k in done if k != WHOLE)
             lines.append(join_items({"items": [items[k] for k in got if k < len(items)], "outputs": [done[k] for k in got], "hide": s.settings.get("hide", "")}))
             lines.append(f"\n_… {len(got)} of {len(items)} done_")
@@ -746,17 +762,35 @@ def plan_run(chain: Chain, store: Store, new: bool = False, extra: dict | None =
     return store.create_run(wf.name, inputs, source=str(chain.path)), False, wf
 
 
+def run_was_idle(store: Store, run_id: int) -> bool:
+    """True when every tool step of the run said it had nothing to do (see file_tools.IDLE_KEY)."""
+    run = store.run(run_id) or {}
+    if run.get("status") != "succeeded":
+        return False
+    outs = [v.get(WHOLE) for k, v in store.saved_outputs(run_id).items() if WHOLE in v]
+    tool_outs = [o for o in outs if isinstance(o, dict)]
+    return bool(tool_outs) and all(o.get(file_tools.IDLE_KEY) for o in tool_outs)
+
+
 def run_chain(path: str | Path, store: Store, make_runner, new: bool = False, extra: dict | None = None) -> int:
-    """Run (or resume) a chain note now, writing Results\\<name> (result).md as it goes. make_runner(on_step) -> Runner."""
+    """Run (or resume) a chain note now, writing "<name> (result).md" in Results as it goes. make_runner(on_step) -> Runner.
+    A `kind: ingest` chain writes nothing until it has finished, and not even then when its inbox was empty: a nightly run
+    with nothing to do must not refresh the result note (the morning briefing lists every result note touched overnight)."""
     chain = load_chain(path)
     run_id, resuming, wf = plan_run(chain, store, new=new, extra=extra)
-    runner = make_runner(lambda rid, step, item, out: write_result(chain, store, rid))
+    quiet = str(chain.meta.get("kind") or "").strip().lower() == "ingest"
+    runner = make_runner(lambda rid, step, item, out: None if quiet else write_result(chain, store, rid))
     set_chain_status(chain.path, "running", last_run=run_id)
     store.set_status(run_id, "running")
-    write_result(chain, store, run_id)
+    if not quiet:
+        write_result(chain, store, run_id)
     runner.resume(run_id, wf)
     run = store.run(run_id)
     status = STATUS.get(run["status"], run["status"])
+    if quiet and run_was_idle(store, run_id):
+        store.event(run_id, "note", message="nothing to do: the result note was left as it was")
+        set_chain_status(chain.path, status, last_run=run_id)
+        return run_id
     write_result(chain, store, run_id)
     if status == "done" and chain.meta.get("save_to"):
         now = builtins_now()

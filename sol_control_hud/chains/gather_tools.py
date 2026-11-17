@@ -23,6 +23,9 @@ NO_WINDOW = ft.NO_WINDOW   # no console window per git call
 MARKERS = Path(os.environ.get("SOL_REVIEW_MARKERS", DATA_DIR / "review-markers.json"))
 MAX_CHARS = 90000            # ~30k tokens: what fits a 32k model with room to answer
 REVIEW_MAX_FILE_LINES = 800  # bigger diffs are listed as skipped (a 32k Away model must fit the diff + its answer)
+REVIEW_MAX_DIFF_CHARS = 6000   # a longer diff is cut here (~2k tokens: sol-fast's 16k context must fit prompt + answer)
+REVIEW_MAX_PER_REPO = 12       # files reviewed per repo per run; a repo with more is reviewed in part (the rest is noted)
+REVIEW_MAX_TOTAL = 40          # files reviewed per run; a repo that would go over is left for the next run (not marked reviewed)
 
 
 def _prune_file_text(text: str, filename: str) -> str:
@@ -110,8 +113,21 @@ def load_markers() -> dict:
         return {}
 
 
+def _cap_diff(diff: str, limit: int) -> str:
+    if len(diff) <= limit:
+        return diff
+    cut = diff[:limit].rsplit(chr(10), 1)[0]
+    return f"{cut}{chr(10)}...(diff cut: {len(diff) - len(cut)} more characters not shown)"
+
+
 def review_changes(args: dict, ctx=None) -> list[dict]:
+    """Changed files to review, bounded: each diff is cut at `max_diff_chars`, a repo gives at most `max_per_repo` files,
+    and a run at most `max_total`. A repo that doesn't fit in this run is skipped whole (no marker is written for it, so
+    it is reviewed next time); a repo cut to `max_per_repo` counts as reviewed and the note says how many were left out."""
     markers = load_markers()
+    max_diff = int(args.get("max_diff_chars") or REVIEW_MAX_DIFF_CHARS)
+    max_repo = int(args.get("max_per_repo") or REVIEW_MAX_PER_REPO)
+    max_total = int(args.get("max_total") or REVIEW_MAX_TOTAL)
     items, summary = [], []
     for repo in _repos(args["path"]):
         head = _git(repo, "rev-parse", "HEAD").strip()
@@ -129,10 +145,18 @@ def review_changes(args: dict, ctx=None) -> list[dict]:
         if not ch["files"]:
             continue
         skipped = [f for f in ch["files"] if "skipped" in f]
-        summary.append(f"{repo.name}: {len(ch['reviewable'])} file(s) to review, {len(skipped)} skipped")
-        for f in ch["reviewable"]:
+        # the files with the least change first: whole small diffs review better than cut big ones
+        reviewable = sorted(ch["reviewable"], key=lambda f: len(f["diff"]))
+        taken = reviewable[:max_repo]
+        if items and len(items) + len(taken) > max_total:
+            summary.append(f"{repo.name}: {len(reviewable)} file(s) left for the next run (today's limit is {max_total})")
+            continue
+        left_out = len(reviewable) - len(taken)
+        summary.append(f"{repo.name}: {len(taken)} file(s) to review, {len(skipped)} skipped"
+                       + (f", {left_out} more not reviewed (limit {max_repo} per repo)" if left_out else ""))
+        for f in taken:
             items.append({"name": f"{repo.name}: {f['file']}", "repo": repo.name, "repo_path": str(repo), "head": head,
-                          "file": f["file"], "status": f["status"], "diff": f["diff"]})
+                          "file": f["file"], "status": f["status"], "diff": _cap_diff(f["diff"], max_diff)})
     if ctx is not None:
         ctx.note("; ".join(summary) or "no repo has changes since its last review")
     return items

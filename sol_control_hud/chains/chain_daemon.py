@@ -394,7 +394,13 @@ class Daemon:
 
     def _running_elsewhere(self, key: str) -> bool:
         last = self.store.latest_run(key)
-        return bool(last and last["status"] in ("running", "queued") and owner_alive(last.get("owner_pid"), last.get("owner_started")))
+        if not (last and last["status"] in ("running", "queued") and owner_alive(last.get("owner_pid"), last.get("owner_started"))):
+            return False
+        # owned by this very process but not the run it is working on: a stale row (it would block the chain for ever)
+        if last.get("owner_pid") == os.getpid() and not (self.current and self.current.get("run") == last["id"]):
+            self.store.set_status(last["id"], "interrupted", error="left 'running' by a run that has ended")
+            return False
+        return True
 
     def _check_schedule(self, path: Path, meta: dict, info: dict, now: datetime) -> None:
         if not meta.get("schedule"):
@@ -537,7 +543,9 @@ class Daemon:
             try:
                 rid = cn.run_chain(path, self.store, make, new=job.get("new", False), extra=job.get("extra") or None)
                 run = self.store.run(rid)
-                self._log(f"{path.name}: run {rid} {run['status']}{': ' + run['error'] if run.get('error') else ''}")
+                idle = cn.run_was_idle(self.store, rid)   # an empty inbox: logged as "idle", so no "Chain finished" notice
+                self._log(f"{path.name}: run {rid} {'idle (nothing to do)' if idle else run['status']}"
+                          f"{': ' + run['error'] if run.get('error') else ''}")
                 if run["status"] == "waiting":
                     self.retry_at[str(path)] = time.time() + RETRY_WAITING
                 elif skip_wait(path):                       # one run: the next ones wait politely again

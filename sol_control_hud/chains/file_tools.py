@@ -234,6 +234,11 @@ def save_note(args: dict, ctx=None, policy: Policy | None = None) -> dict:
     return {"path": str(p)}
 
 
+# A tool that had nothing to do (an empty inbox) returns {IDLE_KEY: True}; for a `kind: ingest` chain whose steps all say
+# so, the runner leaves the result note alone and the daemon logs "idle" instead of "succeeded".
+IDLE_KEY = "nothing_to_do"
+
+
 # ---- git (code review)
 def _git(repo: Path, *a: str) -> str:
     r = subprocess.run(["git", "-C", str(repo), *a], capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -418,11 +423,19 @@ def sync_tasks(args: dict, ctx=None, policy: Policy | None = None) -> dict:
     if isinstance(raw_tasks, dict):
         raw_tasks = raw_tasks.get("tasks") or []
     elif isinstance(raw_tasks, str):
+        text = raw_tasks.strip()
+        fenced = re.fullmatch(r"```[a-zA-Z]*\s*(.*?)\s*```", text, re.S)   # a model often wraps its JSON in a code fence
+        if fenced:
+            text = fenced.group(1).strip()
         try:
-            parsed = json.loads(raw_tasks)
+            parsed = json.loads(text)
             raw_tasks = parsed.get("tasks") if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [raw_tasks])
         except (ValueError, TypeError):
+            if text[:1] in "[{":   # broken/truncated JSON: never write it into Tasks.md as a "task"
+                raise FileToolError("sync_tasks: the task list is not valid JSON (cut off?); nothing was written") from None
             raw_tasks = [raw_tasks]
+        if not isinstance(raw_tasks, list):
+            raw_tasks = []
     elif not isinstance(raw_tasks, list):
         raw_tasks = []
 

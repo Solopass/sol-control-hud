@@ -176,3 +176,56 @@ def test_save_steps_must_name_real_steps(env):
     p.write_text("---\nsave_to: 1Notebook/x.md\nsave_steps: A, Nope\n---\n## A\nSay a.\n", encoding="utf-8")
     with pytest.raises(cn.ChainError, match="no step called 'Nope'"):
         cn.to_workflow(cn.load_chain(p))
+
+
+def test_review_changes_caps_diffs_files_and_repos(env, monkeypatch):
+    chains, store, tmp = env
+    for name in ("a-repo", "b-repo", "c-repo"):
+        repo = make_repo(tmp, name)
+        for i in range(5):                       # 5 more changed files per repo; one has a huge diff
+            (repo / f"f{i}.py").write_text("x = 1\n" * (400 if i == 4 else 3))
+        git(repo, "add", "."); git(repo, "commit", "-qm", "more")
+    out = gt.review_changes({"path": str(tmp / "ws"), "max_diff_chars": 500, "max_per_repo": 4, "max_total": 9})
+    assert len(out) == 8 and {i["repo"] for i in out} == {"a-repo", "b-repo"}   # c-repo would go over 9: left for next time
+    assert all(len(i["diff"]) < 700 for i in out)
+    assert any("diff cut" in i["diff"] for i in out) is False                    # the biggest file is dropped by the per-repo cap
+    out = gt.review_changes({"path": str(tmp / "ws"), "max_diff_chars": 100, "max_per_repo": 99, "max_total": 99})
+    assert any("diff cut" in i["diff"] for i in out)
+    gt.mark_reviewed({"changes": out})                                        # all three repos fit: all marked
+    assert len(json.loads((tmp / "markers.json").read_text())) == 3
+
+
+INGEST = "---\nstatus: queued\nkind: ingest\n---\n## Ingest\ntool: fake_ingest\n"
+
+
+def _ingest_run(env, outputs):
+    chains, store, tmp = env
+    p = chains / "Inbox.md"
+    if not p.exists():
+        p.write_text(INGEST, encoding="utf-8")
+    tools = {**ft.TOOLS, **cn.TOOLS, "fake_ingest": lambda args, ctx=None: outputs}
+    rid = cn.run_chain(p, store, lambda on_step: Runner(Scripted([]), store, tools=tools, on_step=on_step))
+    return rid, chains / "Results" / "Inbox (result).md"
+
+
+def test_ingest_chain_with_an_empty_inbox_leaves_the_result_note_alone(env):
+    idle = {"processed": [], "count": 0, "failed": [], "failed_count": 0, "given_up": 0, ft.IDLE_KEY: True}
+    rid, result = _ingest_run(env, idle)
+    assert env[1].run(rid)["status"] == "succeeded" and cn.run_was_idle(env[1], rid)
+    assert not result.exists()                                    # never written: not in the briefing as "Done"
+    work = {"processed": [{"note": "x.md"}], "count": 1, "failed": [], "failed_count": 0, "given_up": 0}
+    rid2, _ = _ingest_run(env, work)
+    assert not cn.run_was_idle(env[1], rid2)
+    text = result.read_text(encoding="utf-8")                     # a run that did work writes it as before
+    assert "status: done" in text and '"count": 1' in text
+    before = result.stat().st_mtime_ns, text
+    rid3, _ = _ingest_run(env, idle)                              # a later empty run doesn't touch it
+    assert cn.run_was_idle(env[1], rid3) and (result.stat().st_mtime_ns, result.read_text(encoding="utf-8")) == before
+
+
+def test_empty_batch_is_marked_idle_only_when_nothing_happened(tmp_path):
+    from sol_control_hud.chains import ingest_tools
+    inbox = tmp_path / "pdf"; inbox.mkdir()
+    args = {"inbox": str(inbox), "ledger_file": str(tmp_path / "ledger.json")}
+    res = ingest_tools._ingest_batch("pdf", lambda *a, **k: {}, args, None, {}, None, lambda: False)
+    assert res[ft.IDLE_KEY] is True and res["count"] == 0
