@@ -72,6 +72,7 @@ function projRow(p) {
     }
   }
   if (p.auto_hunt) chips.push(`<span class="pill ok" title="Auto-hunt git hook active: commits trigger background local AI review">⚡ auto-hunt</span>`);
+  if (p.autostart) chips.push(`<span class="pill dim" title="Starts with the HUD (autostart in launchpad.yaml)">auto</span>`);
   if (p.hidden) chips.push(`<span class="pill dim" title="${esc(p.why_hidden)}">hidden</span>`);
   const acts = [];
   const isWatcher = Boolean(p.watcher || p.name === 'gatkam' || (!p.port && !p.url));

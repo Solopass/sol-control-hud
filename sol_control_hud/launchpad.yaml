@@ -4,6 +4,9 @@
 # (deprecated / retired / finished / paused), the git remote (GitHub link), the last commit, uncommitted changes, and the
 # dev-server command + port from `.claude/launch.json`. A new folder in the workspace shows up without an entry here.
 #
+# Optional per project: `autostart: true` = the HUD starts it once, ~15 s after the HUD itself starts, unless it
+# already runs or its port is taken by something else.
+#
 # The dashboard only ever sends a *name*. Commands, paths and URLs come from this file (or the project's own
 # launch.json), never from the page.
 
@@ -23,10 +26,20 @@ projects:
   sol-deck:
     title: SOL iPad Deck
     description: Ultra-fast iPad companion deck & Windows Win32 control server.
-    start: {cmd: ['D:\Workspace\sol-deck\sol-deck.exe']}
+    # the script starts the exe hidden and detached (falls back to fallback\sol-deck.exe) and exits
+    start: {cmd: ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'D:\Workspace\sol-deck\run-deck.ps1']}
     stop: {cmd: ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'D:\Workspace\sol-deck\run-deck.ps1', '-Stop']}
     port: 5000
     url: 'http://127.0.0.1:5000/deck'
+    autostart: true                # started once after the HUD starts, if it isn't running and :5000 is free
+  sol-cs2:
+    title: SOL CS2
+    description: Read-only CS2 HUD for the iPad (Game State Integration on :5010).
+    start: {cmd: ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'D:\Workspace\sol-cs2\run.ps1']}
+    stop: {cmd: ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'D:\Workspace\sol-cs2\run.ps1', '-Stop']}
+    port: 5010
+    url: 'http://127.0.0.1:5010/'
+    autostart: true
   sol-control-hud:
     self: true                     # this app: no Start / Stop
     url: 'http://127.0.0.1:7900/'

@@ -144,6 +144,32 @@ def start_project(reg: dict, name: str, rows: list[dict], tiles: list[dict] | No
     return _run_spec(reg, name, spec, _folder(reg, name), popen, opener, port=row["port"])
 
 
+def autostart_projects(reg: dict, rows: list[dict], tiles: list[dict] | None = None, start=None) -> list[dict]:
+    """Start every project marked `autostart: true` in launchpad.yaml that isn't running. Never this app itself;
+    start_project refuses when the port is taken by something else. Returns [{name, ok, why}] for the log."""
+    start = start or start_project
+    out = []
+    for name, spec in (reg.get("projects") or {}).items():
+        if not (spec or {}).get("autostart"):
+            continue
+        row = next((r for r in rows if r["name"] == name), None)
+        if row is None:
+            out.append({"name": name, "ok": False, "why": "no such project folder"})
+        elif row.get("self"):
+            continue
+        elif row.get("running"):
+            out.append({"name": name, "ok": True, "why": "already running", "started": False})
+        elif row.get("busy_by"):
+            out.append({"name": name, "ok": False, "why": f":{row.get('port')} is taken by {row['busy_by']}"})
+        else:
+            try:
+                r = start(reg, name, rows, tiles or [])
+            except (LaunchError, OSError) as e:
+                r = {"ok": False, "why": str(e)}
+            out.append({"name": name, "ok": bool(r.get("ok")), "why": r.get("why", ""), "started": bool(r.get("ok"))})
+    return out
+
+
 def _run_spec(reg: dict, name: str, spec: dict, cwd: Path | None, popen, opener, port: int | None = None) -> dict:
     where = f" on :{port}" if port else ""
     if spec.get("shortcut"):

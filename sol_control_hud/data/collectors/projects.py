@@ -402,6 +402,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "hidden": hidden,
             "why_hidden": ("you hid it" if mine.get("hidden") is True else reg["hidden"].get(name) or "") if hidden else "",
             "self": bool(spec.get("self")),
+            "autostart": bool(spec.get("autostart")),
             "media": spec.get("media"),
             "git": g,
             "github": (g or {}).get("github"),

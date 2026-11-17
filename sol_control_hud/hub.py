@@ -760,6 +760,25 @@ class Hub:
         from . import launcher
         return {**media_apis.collect(reg, listening, wsl_state, probe=probe), "notes": launcher.note_runs()}
 
+    def _start_autostart(self, delay_s: float = 15.0) -> None:
+        """Once, after the network is up: start the projects marked `autostart: true` in launchpad.yaml.
+        Only called from run(), so tests (which build the Hub without running it) never start anything."""
+        threading.Thread(target=self._autostart, args=(delay_s,), name="autostart", daemon=True).start()
+
+    def _autostart(self, delay_s: float) -> None:
+        from . import launcher
+        from .data.collectors import projects
+        time.sleep(delay_s)
+        try:
+            reg = projects.load_registry()
+            self._refresh_launchpad()
+            rows = self.projects_payload()["projects"]
+            tiles = self.media_payload()["tiles"]
+            for r in launcher.autostart_projects(reg, rows, tiles):
+                log(f"autostart {r['name']}: {'ok' if r['ok'] else 'skipped'}: {r['why']}")
+        except (launcher.LaunchError, OSError, KeyError, ValueError, TypeError):
+            _swallowed("hub.autostart")
+
     def _refresh_launchpad(self) -> None:
         """After a start / stop: look again on the next poll instead of serving the cached state."""
         for key in ("ports", "media_probe", "projects", "media", "wsl"):
@@ -869,6 +888,7 @@ class Hub:
         self._last_big_vram_change = time.monotonic()
         self._prev_others_gb = None
         self._start_web()
+        self._start_autostart()
         self.root = tk.Tk()
         self.root.report_callback_exception = lambda t, v, tb: log("error: " + "".join(traceback.format_exception(t, v, tb)))
         self.ticker = TickerApp(self.root, collector=self.collector, hub=self)

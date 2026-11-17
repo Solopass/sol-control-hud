@@ -693,3 +693,45 @@ def test_voice_jobs_lists_open_ones_with_or_without_updated_at(tmp_path):
         con.close()
         (o,) = media_apis.voice_jobs(db, now=3000.0)["open"]
         assert o == {"id": "1", "title": "s", "status": "processing", "updated": 1500.0 if with_updated else 1000.0}
+
+
+# ---------------------------------------------------------------- autostart
+def test_autostart_starts_only_marked_projects_that_are_free(tmp_path):
+    reg = {"projects": {"a": {"autostart": True}, "b": {"autostart": True}, "c": {"autostart": True},
+                        "d": {"autostart": True}, "e": {}, "gone": {"autostart": True}}}
+    rows = [{"name": "a", "self": False, "running": None, "busy_by": None, "port": 1},
+            {"name": "b", "self": False, "running": {"port": 2, "pid": 5}, "busy_by": None, "port": 2},
+            {"name": "c", "self": False, "running": None, "busy_by": "other · x", "port": 3},
+            {"name": "d", "self": True, "running": None, "busy_by": None, "port": 4},
+            {"name": "e", "self": False, "running": None, "busy_by": None, "port": 5}]
+    started = []
+    res = launcher.autostart_projects(reg, rows, [], start=lambda r, n, rw, t: started.append(n) or {"ok": True, "why": "starting"})
+    by = {r["name"]: r for r in res}
+    assert started == ["a"]                                  # not running, free, marked: only this one
+    assert by["a"]["ok"] and by["b"]["why"] == "already running" and not by["c"]["ok"] and "other" in by["c"]["why"]
+    assert "d" not in by and "e" not in by and not by["gone"]["ok"]
+
+
+def test_autostart_survives_a_start_that_raises():
+    reg = {"projects": {"a": {"autostart": True}}}
+    rows = [{"name": "a", "self": False, "running": None, "busy_by": None, "port": 1}]
+
+    def boom(*a):
+        raise launcher.LaunchError("no exe")
+    assert launcher.autostart_projects(reg, rows, start=boom) == [{"name": "a", "ok": False, "why": "no exe", "started": False}]
+
+
+def test_launchpad_yaml_autostart_and_sol_projects():
+    reg = projects.load_registry(user_file=Path("nonexistent.json"))
+    p = reg["projects"]
+    assert p["sol-deck"]["autostart"] and p["sol-cs2"]["autostart"] and not p["sol-control-hud"].get("autostart")
+    assert p["sol-deck"]["start"]["cmd"][-1].endswith("run-deck.ps1") and p["sol-cs2"]["stop"]["cmd"][-1] == "-Stop"
+    assert p["sol-cs2"]["port"] == 5010
+
+
+def test_project_rows_carry_autostart(tmp_path):
+    ws = make_ws(tmp_path)
+    reg = make_reg(ws)
+    reg["projects"]["alpha"] = {"autostart": True}
+    by = {r["name"]: r for r in rows_for(ws, reg)}
+    assert by["alpha"]["autostart"] is True and by["omni"]["autostart"] is False
