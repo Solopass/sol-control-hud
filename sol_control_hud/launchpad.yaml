@@ -66,6 +66,14 @@ projects:
     start: {cmd: [bun, run, dev]}
     port: 5195
     url: 'http://127.0.0.1:5195/'
+  sol-loci:
+    title: SOL Loci
+    description: 3D world and memory palace with live screens, a library of your notes, and flashcards on loci.
+    # the script builds if needed, starts the exe hidden and detached, opens an Edge window and exits;
+    # the server stops itself 2 minutes after its last window closes, so there is no Stop and no autostart
+    start: {cmd: ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'D:\Workspace\sol-loci\launch.ps1']}
+    port: 5197
+    url: 'http://127.0.0.1:5197/'
   gatkam:
     title: GatKam (갓캠)
     description: Next-gen YouTube Studio Suite & Unified Camera Engine (PTZ + Autopilot + Telemetry).
