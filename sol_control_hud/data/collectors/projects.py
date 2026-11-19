@@ -241,6 +241,15 @@ def forget_git(name: str | None = None) -> None:
 
 
 # ---------------------------------------------------------------- what runs
+def url_host(addrs) -> str:
+    """The host to open a running server at. Vite's default `localhost` binds only IPv6 [::1] on this PC, where
+    http://127.0.0.1 gets no answer (speed-reading's Open did nothing, 2026-11-19); `localhost` reaches either."""
+    a = set(addrs or [])
+    if not a or a & {"127.0.0.1", "0.0.0.0"}:
+        return "127.0.0.1"
+    return "localhost"
+
+
 def _norm(p: str) -> str:
     return str(p).replace("/", "\\").rstrip("\\").lower()
 
@@ -365,7 +374,8 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             mine = [r for r in own_listeners if r["port"] not in sidecar_ports]
             pick = next((r for r in mine if r["port"] == port), mine[0] if mine else None)
             if pick:
-                run = {"port": pick["port"], "pid": pick["pid"], "where": "windows", "up_seconds": pick.get("up_seconds")}
+                run = {"port": pick["port"], "pid": pick["pid"], "where": "windows", "up_seconds": pick.get("up_seconds"),
+                       "host": url_host(pick.get("addrs"))}
             elif (not port or spec.get("watcher")) and find_proc:
                 run = find_proc(folder, name)
         busy = None
@@ -418,7 +428,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "port": int(port) if port else None,
             "runs_in": runs_in,
             "running": run,
-            "url": spec.get("url") or (f"http://127.0.0.1:{run['port']}/" if run and run.get("port") else None),
+            "url": spec.get("url") or (f"http://{run.get('host') or '127.0.0.1'}:{run['port']}/" if run and run.get("port") else None),
             "busy_by": busy,
             "can_start": bool((start or (media or {}).get("start")) and not spec.get("self")),
             "can_stop": bool(run and not spec.get("self") and (run.get("pid") or spec.get("stop") or media)),

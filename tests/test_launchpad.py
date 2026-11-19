@@ -112,6 +112,18 @@ def test_listener_matches_its_folder_not_a_sibling_with_the_same_prefix(tmp_path
     assert [r["pid"] for r in found["alpha"]] == [2]
 
 
+
+def test_open_link_uses_the_address_the_server_listens_on(tmp_path):
+    """Vite's default `localhost` binds only [::1] here: http://127.0.0.1 got no answer, so Open did nothing."""
+    ws = make_ws(tmp_path)
+    reg = make_reg(ws)
+    for addrs, url in ((["::1"], "http://localhost:5173/"), (["127.0.0.1"], "http://127.0.0.1:5173/"),
+                       (["0.0.0.0", "::"], "http://127.0.0.1:5173/"), (["::"], "http://localhost:5173/")):
+        listening = [{"pid": 7, "port": 5173, "kind": "dev", "name": "bun", "label": "vite", "addrs": addrs}]
+        rows = projects.project_rows(reg, listening, {}, git=no_git, paths=lambda pid: [projects._norm(ws / "alpha")])
+        assert next(r for r in rows if r["name"] == "alpha")["url"] == url, addrs
+
+
 def test_project_rows(tmp_path):
     ws = make_ws(tmp_path)
     reg = make_reg(ws)
