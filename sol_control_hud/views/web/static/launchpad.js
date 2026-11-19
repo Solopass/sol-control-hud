@@ -243,7 +243,7 @@ $('projList').addEventListener('click', async (e) => {
     setTimeout(loadProjects, 1200);          // the listener needs a moment to appear / disappear
     return loadProjects();
   }
-  if (op === 'stop' && !confirm(`Stop ${p.title}?\n\nIt is asked to stop first, then forced if it ignores that. Anything unsaved in it is lost.`)) return;
+  if (op === 'stop' && !(await hudConfirm(`Stop ${p.title}?\n\nIt is asked to stop first, then forced if it ignores that. Anything unsaved in it is lost.`))) return;
   b.disabled = true;
   await launch('project', name, op);
   b.disabled = false;
@@ -338,7 +338,7 @@ $('mediaTiles').addEventListener('click', async (e) => {
     b.disabled = false;
     return loadMedia();
   }
-  if (op === 'stop' && !confirm(`Stop ${t.title}?\n\nIt is refused while a job runs.${t.runs_in === 'wsl' && t.project !== 'omni-tools' ? ' Its socket stays, so it starts again the next time something uses it.' : ''}`)) return;
+  if (op === 'stop' && !(await hudConfirm(`Stop ${t.title}?\n\nIt is refused while a job runs.${t.runs_in === 'wsl' && t.project !== 'omni-tools' ? ' Its socket stays, so it starts again the next time something uses it.' : ''}`))) return;
   b.disabled = true;
   await launch('media', name, op);
   b.disabled = false;
@@ -504,7 +504,7 @@ $('solangPrepareBtn')?.addEventListener('click', async () => {
 });
 
 $('solangResetBtn')?.addEventListener('click', async () => {
-  if (!confirm('Reset Takeout queue progress to 0?')) return;
+  if (!(await hudConfirm('Reset Takeout queue progress to 0?'))) return;
   const r = await post('/api/action', { action: 'solang', op: 'reset_queue' });
   toast(r.why || 'Queue reset');
   updateSolangQueueStatus();

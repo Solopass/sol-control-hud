@@ -103,7 +103,7 @@ $('settingsBody').addEventListener('click', async (e) => {
   }
   const b = e.target.closest('[data-gpu-all]');
   if (!b) return;
-  if (!confirm('Move all listed apps to the Intel chip?\n\nEach one switches the next time it starts, so restart them afterwards. Games are not affected.')) return;
+  if (!(await hudConfirm('Move all listed apps to the Intel chip?\n\nEach one switches the next time it starts, so restart them afterwards. Games are not affected.'))) return;
   b.disabled = true;
   const r = await post('/api/action', { action: 'setting', target: 'gpu:all', value: b.dataset.gpuAll });
   toast(r.why || (r.ok ? 'saved' : 'that did not work'));
@@ -114,7 +114,7 @@ $('settingsBody').addEventListener('change', (e) => {
   if (el) changeSetting(el);
 });
 async function requestRestart() {
-  if (!confirm('Restart SOL Control HUD now?')) return;
+  if (!(await hudConfirm('Restart SOL Control HUD now?'))) return;
   toast('Restarting HUD… reconnecting shortly');
   $('settingsModal').hidden = true;
   await post('/api/action', { action: 'restart' });

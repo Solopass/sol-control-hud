@@ -22,8 +22,131 @@ async function post(url, body) {
   return r.json();
 }
 function toast(text) {
-  const t = document.createElement('div'); t.className = 'toast'; t.textContent = text; document.body.append(t);
-  setTimeout(() => t.remove(), 3200);
+  const t = document.createElement('div');
+  t.className = 'toast';
+  if (typeof t.showPopover === 'function') t.setAttribute('popover', 'manual');
+  t.setAttribute('role', 'status');
+  t.textContent = text;
+  document.body.append(t);
+  if (typeof t.showPopover === 'function') { try { t.showPopover(); } catch {} }
+  setTimeout(() => {
+    if (typeof t.hidePopover === 'function') { try { t.hidePopover(); } catch {} }
+    t.remove();
+  }, 3200);
+}
+let _activeConfirmClose = null;
+function hudConfirm(text, confirmLabel = 'Confirm') {
+  if (_activeConfirmClose) _activeConfirmClose(false);
+  return new Promise((resolve) => {
+    const t = document.createElement('div');
+    t.className = 'toast toast-confirm';
+    if (typeof t.showPopover === 'function') t.setAttribute('popover', 'manual');
+    t.setAttribute('role', 'region');
+    t.setAttribute('aria-label', 'Confirmation');
+
+    const msg = document.createElement('span');
+    msg.className = 'toast-msg';
+    msg.textContent = text;
+
+    const actions = document.createElement('span');
+    actions.className = 'toast-actions';
+
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'mini go';
+    okBtn.textContent = confirmLabel;
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'mini ghost';
+    cancelBtn.textContent = 'Cancel';
+
+    actions.append(okBtn, cancelBtn);
+    t.append(msg, actions);
+    document.body.append(t);
+    if (typeof t.showPopover === 'function') { try { t.showPopover(); } catch {} }
+
+    let timer = null;
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (_activeConfirmClose === finish) _activeConfirmClose = null;
+      document.removeEventListener('keydown', onKey);
+      if (typeof t.hidePopover === 'function') { try { t.hidePopover(); } catch {} }
+      t.remove();
+      resolve(val);
+    };
+    _activeConfirmClose = finish;
+
+    const armTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => finish(false), 8000);
+    };
+    t.addEventListener('focusin', () => clearTimeout(timer));
+    t.addEventListener('focusout', armTimer);
+    t.addEventListener('mouseenter', () => clearTimeout(timer));
+    t.addEventListener('mouseleave', armTimer);
+    armTimer();
+
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+    document.addEventListener('keydown', onKey);
+
+    okBtn.onclick = () => finish(true);
+    cancelBtn.onclick = () => finish(false);
+  });
+}
+function hudPrompt(text, defaultValue = '') {
+  return new Promise((resolve) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'hud-dialog';
+    dlg.setAttribute('aria-labelledby', 'hudPromptTitle');
+
+    const form = document.createElement('form');
+    form.method = 'dialog';
+
+    const title = document.createElement('div');
+    title.id = 'hudPromptTitle';
+    title.className = 'hud-dialog-title';
+    title.textContent = text;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'hud-dialog-input';
+    input.value = defaultValue;
+    input.autofocus = true;
+
+    const btns = document.createElement('div');
+    btns.className = 'hud-dialog-btns';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'mini ghost';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => { dlg.close(); };
+
+    const okBtn = document.createElement('button');
+    okBtn.type = 'submit';
+    okBtn.className = 'mini go';
+    okBtn.value = 'ok';
+    okBtn.textContent = 'OK';
+
+    btns.append(cancelBtn, okBtn);
+    form.append(title, input, btns);
+    dlg.append(form);
+    document.body.append(dlg);
+
+    dlg.addEventListener('close', () => {
+      const val = dlg.returnValue === 'ok' ? input.value : null;
+      dlg.remove();
+      resolve(val);
+    });
+    dlg.showModal();
+    input.select();
+  });
 }
 function tween(el, to, digits = 0) {
   if (to == null || Number.isNaN(to)) { el.textContent = '–'; el._v = null; return; }
@@ -1526,7 +1649,7 @@ document.addEventListener('click', async (e) => {
         return;
       }
     }
-    if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
+    if (b.dataset.confirm && !(await hudConfirm(b.dataset.confirm))) return;
     const r = await post('/api/action', { action: b.dataset.act, target: b.dataset.target || '' });
     if (r.why) toast(r.why);
     return;
@@ -1535,7 +1658,7 @@ document.addEventListener('click', async (e) => {
   if (card && !e.target.closest('button, a, select')) post('/api/action', { action: 'open', target: card.dataset.open });
 });
 $('stopAi').onclick = async () => {
-  if (!confirm('Stop the Away work now? The running job goes back in the queue (finished work is kept).')) return;
+  if (!(await hudConfirm('Stop the Away work now? The running job goes back in the queue (finished work is kept).'))) return;
   const r = await post('/api/action', { action: 'stop_ai' }); toast(r.why || 'stopping');
 };
 $('theme').onchange = (e) => { applyTheme(e.target.value); post('/api/action', { action: 'theme', target: e.target.value }); };
@@ -2078,7 +2201,7 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-model],[data-models],[data-power]');
   if (!t || t.disabled) return;
   e.stopPropagation();
-  if (t.dataset.confirm && !confirm(t.dataset.confirm)) return;
+  if (t.dataset.confirm && !(await hudConfirm(t.dataset.confirm))) return;
   let r;
   if (t.dataset.model) {
     const cur = (payload?.models || []).find((m) => m.id === t.dataset.model);
@@ -2086,7 +2209,7 @@ document.addEventListener('click', async (e) => {
     r = await post('/api/action', { action: 'model', target: t.dataset.model, op: t.dataset.op });
   } else if (t.dataset.models) r = await post('/api/action', { action: 'models_unload_all' });
   else {
-    if (t.dataset.power === 'off' && !confirm('Turn the local AI off? Every model unloads and nothing loads until you turn it on again (chains and asks wait).')) return;
+    if (t.dataset.power === 'off' && !(await hudConfirm('Turn the local AI off? Every model unloads and nothing loads until you turn it on again (chains and asks wait).'))) return;
     r = await post('/api/action', { action: 'ai_power', target: t.dataset.power });
   }
   if (r?.why) toast(r.why);
@@ -2097,7 +2220,7 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('[data-chain],[data-remove],[data-answer],[data-result]');
   if (!t || t.disabled) return;
   e.stopPropagation();
-  if (t.dataset.confirm && !confirm(t.dataset.confirm)) return;
+  if (t.dataset.confirm && !(await hudConfirm(t.dataset.confirm))) return;
   t.disabled = true;
   try {
     let r = null;
@@ -2467,7 +2590,7 @@ if ($('qbAiPowerBtn')) {
       return;
     }
     const want = $('qbAiPowerBtn').dataset.power || 'on';
-    if (want === 'off' && !confirm('Turn the local AI off?')) return;
+    if (want === 'off' && !(await hudConfirm('Turn the local AI off?'))) return;
     $('qbAiPowerBtn').disabled = true;
     const r = await post('/api/action', { action: 'ai_power', target: want });
     $('qbAiPowerBtn').disabled = false;
@@ -2790,7 +2913,7 @@ $('portsList').addEventListener('click', async (e) => {
   const b = e.target.closest('button[data-port]');
   if (!b) return;
   const what = b.closest('.prow').querySelector('.meta').textContent.trim();
-  if (!confirm(`Close :${b.dataset.port}?\n\n${what}\n\nIt is asked to stop first, then forced if it ignores that. Anything unsaved in it is lost.`)) return;
+  if (!(await hudConfirm(`Close :${b.dataset.port}?\n\n${what}\n\nIt is asked to stop first, then forced if it ignores that. Anything unsaved in it is lost.`))) return;
   b.disabled = true;
   const r = await post('/api/action', { action: 'close_port', target: b.dataset.port, pid: Number(b.dataset.pid) });
   toast(r.why || (r.ok ? 'closed' : 'could not close it'));
@@ -2835,7 +2958,7 @@ function initOvernightEvents() {
   const btnCancel = $('btnCancelOvernight');
   if (btnCancel) {
     btnCancel.onclick = async () => {
-      if (!confirm('Cancel the overnight run?')) return;
+      if (!(await hudConfirm('Cancel the overnight run?'))) return;
       btnCancel.disabled = true;
       const r = await post('/api/action', { action: 'cancel_overnight' });
       toast(r?.why || 'Cancelled overnight run');
@@ -3150,7 +3273,7 @@ function initProcs() {
       if (!btn) return;
       const pid = parseInt(btn.dataset.killPid, 10);
       const name = btn.dataset.procName || 'process';
-      if (!confirm(`End process ${name} (PID ${pid})?`)) return;
+      if (!(await hudConfirm(`End process ${name} (PID ${pid})?`))) return;
       const r = await post('/api/action', { action: 'kill_process', target: String(pid) });
       if (r?.ok) {
         toast(`Ended ${name}`);

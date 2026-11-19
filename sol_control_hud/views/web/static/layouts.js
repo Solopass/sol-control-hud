@@ -582,7 +582,7 @@ layoutMenu.addEventListener('click', async (e) => {
   if (act === 'edit') { closeLayoutMenu(); startEdit(); }
   if (act === 'saveas') {
     closeLayoutMenu();
-    const name = prompt('Name for the new preset (a copy of the current layout):', `${LAYOUT.active} copy`);
+    const name = await hudPrompt('Name for the new preset (a copy of the current layout):', `${LAYOUT.active} copy`);
     if (!name) return;
     const base = JSON.parse(JSON.stringify(activePreset()));
     const r = await layoutPost({ action: 'save', preset: { ...base, name, auto_when: null } });
@@ -591,7 +591,7 @@ layoutMenu.addEventListener('click', async (e) => {
   if (act === 'manage') { closeLayoutMenu(); openManage(); }
   if (act === 'reset_defaults') {
     closeLayoutMenu();
-    if (confirm('Reset all presets to the curated defaults (Gaming, AI work, Dev, Overnight, Everyday, Minimal)?')) {
+    if (await hudConfirm('Reset all presets to the curated defaults (Gaming, AI work, Dev, Overnight, Everyday, Minimal)?')) {
       const r = await layoutPost({ action: 'reset_defaults' });
       if (r?.presets) toast('Reset to curated presets');
       else toast(r?.why || 'Could not reset presets');
@@ -803,7 +803,7 @@ editBar.addEventListener('click', async (e) => {
   if (!EDIT) return;
   if (e.target.id === 'leCancel') { endEdit(); applyPreset(activePreset()); }
   if (e.target.id === 'leReset') {
-    if (!confirm(`Reset “${EDIT.old}” to how it shipped?`)) return;
+    if (!(await hudConfirm(`Reset “${EDIT.old}” to how it shipped?`))) return;
     const r = await layoutPost({ action: 'reset', name: EDIT.old });
     endEdit(); applyPreset(activePreset()); toast(r?.why || '');
   }
@@ -858,7 +858,7 @@ manage.addEventListener('click', async (e) => {
       await navigator.clipboard.writeText(text);
       toast('Presets copied to clipboard as JSON');
     } catch {
-      prompt('Presets JSON:', text);
+      if (typeof openReader === 'function') openReader('Presets JSON', text); else toast('Could not copy to clipboard');
     }
     return;
   }
@@ -866,7 +866,7 @@ manage.addEventListener('click', async (e) => {
     let clip = '';
     try { clip = await navigator.clipboard.readText(); } catch {}
     const prefill = (clip && (clip.trim().startsWith('{') || clip.trim().startsWith('['))) ? clip : '';
-    const input = prompt('Paste presets JSON (single preset or array):', prefill);
+    const input = await hudPrompt('Paste presets JSON (single preset or array):', prefill);
     if (!input) return;
     try {
       const parsed = JSON.parse(input);
@@ -880,7 +880,7 @@ manage.addEventListener('click', async (e) => {
     return;
   }
   if (e.target.id === 'lmResetAll' || e.target.closest('#lmResetAll')) {
-    if (confirm('Reset all presets to the curated defaults (Gaming, AI work, Dev, Overnight, Everyday, Minimal)?')) {
+    if (await hudConfirm('Reset all presets to the curated defaults (Gaming, AI work, Dev, Overnight, Everyday, Minimal)?')) {
       const r = await layoutPost({ action: 'reset_defaults' });
       if (r?.presets) { toast('Reset to curated presets'); renderManage(); }
       else { toast(r?.why || 'Could not reset presets'); }
@@ -904,9 +904,9 @@ manage.addEventListener('click', async (e) => {
   const up = e.target.closest('[data-lup]');
   if (up) { await layoutPost({ action: 'move', name: up.dataset.lup, to: Number(up.dataset.to) }); renderManage(); }
   const rs = e.target.closest('[data-lreset]');
-  if (rs && confirm(`Reset “${rs.dataset.lreset}” to how it shipped?`)) { const r = await layoutPost({ action: 'reset', name: rs.dataset.lreset }); toast(r?.why || ''); renderManage(); }
+  if (rs && await hudConfirm(`Reset “${rs.dataset.lreset}” to how it shipped?`)) { const r = await layoutPost({ action: 'reset', name: rs.dataset.lreset }); toast(r?.why || ''); renderManage(); }
   const del = e.target.closest('[data-ldel]');
-  if (del && confirm(`Delete the preset “${del.dataset.ldel}”?`)) { const r = await layoutPost({ action: 'delete', name: del.dataset.ldel }); toast(r?.why || ''); renderManage(); }
+  if (del && await hudConfirm(`Delete the preset “${del.dataset.ldel}”?`)) { const r = await layoutPost({ action: 'delete', name: del.dataset.ldel }); toast(r?.why || ''); renderManage(); }
 });
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
