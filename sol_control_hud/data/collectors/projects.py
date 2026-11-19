@@ -164,24 +164,53 @@ def readme_status(text: str) -> str:
 
 
 # ---------------------------------------------------------------- launch.json
-def launch_config(folder: Path) -> dict | None:
-    """The first dev-server entry of the project's own `.claude/launch.json` (what preview_start uses)."""
+def _read_launch(path: Path) -> list[dict]:
     try:
-        raw = (folder / ".claude" / "launch.json").read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8")
     except OSError:
-        return None
+        return []
     try:
         data = json.loads(raw)
     except ValueError:
         try:
             data = json.loads(raw.replace("\\", "\\\\").replace("\\\\\\\\", "\\\\"))   # unescaped Windows paths
         except ValueError:
-            return None
-    for c in data.get("configurations") or []:
-        exe, port = c.get("runtimeExecutable"), c.get("port")
-        if exe and port:
-            return {"cmd": [str(exe), *[str(a) for a in c.get("runtimeArgs") or []]], "port": int(port),
-                    "name": c.get("name", "")}
+            return []
+    return [c for c in (data.get("configurations") or []) if isinstance(c, dict)]
+
+
+def _entry(c: dict) -> dict | None:
+    exe, port = c.get("runtimeExecutable"), c.get("port")
+    if exe and port:
+        return {"cmd": [str(exe), *[str(a) for a in c.get("runtimeArgs") or []]], "port": int(port),
+                "name": c.get("name", "")}
+    return None
+
+
+def _points_into(c: dict, folder: Path) -> bool:
+    """An entry of the workspace launch.json belongs to `folder` when one of its arguments is that folder or a path
+    inside it (`--cwd=D:/Workspace/x`, `--manifest-path D:/Workspace/x/Cargo.toml`)."""
+    root = _norm(folder)
+    for a in c.get("runtimeArgs") or []:
+        v = str(a).split("=", 1)[1] if str(a).startswith("--") and "=" in str(a) else str(a)
+        n = _norm(v)
+        if n == root or n.startswith(root + "\\"):
+            return True
+    return False
+
+
+def launch_config(folder: Path) -> dict | None:
+    """The first dev-server entry of the project's own `.claude/launch.json` (what preview_start uses); else the first
+    entry of the workspace's `.claude/launch.json` that points into the folder (most preview configs live there, so
+    chibi-mountain-rush, undergrid, temaricad... had no Start, 2026-11-19)."""
+    for c in _read_launch(folder / ".claude" / "launch.json"):
+        e = _entry(c)
+        if e:
+            return e
+    for c in _read_launch(folder.parent / ".claude" / "launch.json"):
+        e = _entry(c)
+        if e and _points_into(c, folder):
+            return e
     return None
 
 

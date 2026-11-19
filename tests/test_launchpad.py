@@ -747,3 +747,23 @@ def test_project_rows_carry_autostart(tmp_path):
     reg["projects"]["alpha"] = {"autostart": True}
     by = {r["name"]: r for r in rows_for(ws, reg)}
     assert by["alpha"]["autostart"] is True and by["omni"]["autostart"] is False
+
+
+def test_start_command_from_the_workspace_launch_json(tmp_path):
+    """Most preview configs live in D:\Workspace\.claude\launch.json, not the project's own folder."""
+    import json as _json
+    ws = tmp_path / "ws"
+    for n in ("game", "game-data", "rusty", "own"):
+        (ws / n / ".claude").mkdir(parents=True)
+    (ws / "own" / ".claude" / "launch.json").write_text(_json.dumps({"configurations": [
+        {"name": "own", "runtimeExecutable": "bun", "runtimeArgs": ["run", "dev"], "port": 4000}]}))
+    (ws / ".claude").mkdir()
+    (ws / ".claude" / "launch.json").write_text(_json.dumps({"configurations": [
+        {"name": "game", "runtimeExecutable": "bun", "runtimeArgs": [f"--cwd={(ws / 'game').as_posix()}/frontend", "run", "dev"], "port": 5186},
+        {"name": "game-dist", "runtimeExecutable": "bun", "runtimeArgs": [f"--cwd={(ws / 'game').as_posix()}", "run", "preview"], "port": 5187},
+        {"name": "rusty", "runtimeExecutable": "cargo", "runtimeArgs": ["run", "--manifest-path", f"{(ws / 'rusty').as_posix()}/Cargo.toml"], "port": 3040},
+        {"name": "own-elsewhere", "runtimeExecutable": "bun", "runtimeArgs": [f"--cwd={(ws / 'own').as_posix()}"], "port": 9999}]}))
+    assert projects.launch_config(ws / "game")["port"] == 5186            # the first entry for it (dev, not dist)
+    assert projects.launch_config(ws / "rusty")["cmd"][0] == "cargo"
+    assert projects.launch_config(ws / "game-data") is None              # a sibling with the same prefix isn't it
+    assert projects.launch_config(ws / "own")["port"] == 4000             # the project's own file wins
