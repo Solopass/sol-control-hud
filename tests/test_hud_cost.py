@@ -228,3 +228,41 @@ def test_cpu_watch_interrupted_hot_stretch_restarts_the_clock():
         assert not w.step(20.0, 1.5, t)
     assert w.step(20.0, 1.5, 1110) is True
     assert not health.CpuWatch().step(None, 1.5, 0)
+
+
+def test_repo_cache_background_returns_old_value_and_refreshes(tmp_path):
+    """An entry that is only too old (repo unchanged) comes back at once; git re-runs on the worker thread, so a
+    click never waits for git in every repo when the 5-minute safety net runs out (2026-11-19: 7-9 s stalls)."""
+    import threading
+    r = _repo(tmp_path)
+    clock = [0.0]
+    cache = gitcache.RepoCache(300, lambda: clock[0], background=True)
+    gate = threading.Event()
+    n = []
+
+    def compute():
+        if n:
+            gate.wait(5)                     # the refresh is slow: get() must not wait for it
+        n.append(1)
+        return len(n)
+    assert cache.get(r, compute) == 1
+    clock[0] = 301
+    assert cache.get(r, compute) == 1          # old value, refresh queued
+    assert cache.get(r, compute) == 1          # queued once, not twice
+    gate.set()
+    cache.wait_idle()
+    assert len(n) == 2
+    assert cache.get(r, compute) == 2          # the refreshed value
+
+
+def test_repo_cache_background_still_reruns_at_once_when_the_repo_changed(tmp_path):
+    r = _repo(tmp_path)
+    cache = gitcache.RepoCache(300, lambda: 0.0, background=True)
+    n = []
+
+    def compute():
+        n.append(1)
+        return len(n)
+    assert cache.get(r, compute) == 1
+    _touch(r / ".git" / "HEAD")
+    assert cache.get(r, compute) == 2          # a commit / checkout shows on this request, not the next one

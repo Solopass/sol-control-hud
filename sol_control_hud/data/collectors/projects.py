@@ -221,7 +221,7 @@ def _git_info(folder: Path, now: float | None = None) -> tuple[dict | None, str]
              "github": github_url(remote)}, porcelain)
 
 
-_git_cache = gitcache.RepoCache(GIT_TTL_S)
+_git_cache = gitcache.RepoCache(GIT_TTL_S, background=True)   # an old entry never makes a click wait for git
 
 
 def cached_git(folder: Path, max_age: float = GIT_TTL_S) -> dict | None:

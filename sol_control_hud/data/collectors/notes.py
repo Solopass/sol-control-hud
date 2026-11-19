@@ -317,7 +317,8 @@ def open_folder(vault_name: str, rel_path: str = "") -> dict[str, Any]:
 
     target_dir = target if target.is_dir() else target.parent
     try:
-        os.startfile(str(target_dir))
+        from ...explorer_open import open_folder as _open_folder
+        _open_folder(target_dir)
         return {"ok": True, "why": f"Opened folder {target_dir.name}"}
     except Exception as e:
         return {"ok": False, "why": f"Failed to open folder: {e}"}

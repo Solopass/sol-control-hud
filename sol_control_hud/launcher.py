@@ -90,6 +90,10 @@ def _wsl(script: str, distro: str) -> list[str]:
 
 
 def _open_path(path: Path) -> None:
+    if Path(path).is_dir():                       # a folder: Explorer, brought to the front (explorer_open.py)
+        from .explorer_open import open_folder
+        open_folder(path)
+        return
     os.startfile(str(path))   # noqa: S606 - a path from the registry, never from the request
 
 

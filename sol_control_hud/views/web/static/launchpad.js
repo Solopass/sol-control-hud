@@ -27,7 +27,7 @@ async function launch(kind, name, op) {
     if (r.url) openUrl(r.url);                       // it was already running
     else if (r.auto_open) pendingOpen[name] = Date.now();
   }
-  if (op === 'start' || op === 'stop') { fastUntil = Date.now() + 60000; setTimeout(refreshLaunchpad, 1200); }
+  if (op === 'start' || op === 'stop') { fastUntil = Date.now() + 60000; refreshLaunchpad(); setTimeout(refreshLaunchpad, 1200); }   // now (a stop is usually done already), then once the listener settles
   return r;
 }
 function openWhenUp(name, running, url) {

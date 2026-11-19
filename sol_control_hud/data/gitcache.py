@@ -64,11 +64,19 @@ def porcelain_paths(porcelain: str) -> tuple[str, ...]:
 class RepoCache:
     """folder -> (fingerprint, paths, taken_at, value)."""
 
-    def __init__(self, max_age: float = MAX_AGE_S, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, max_age: float = MAX_AGE_S, clock: Callable[[], float] = time.monotonic, background: bool = False):
+        """`background`: when an entry is only too old (the repo looks unchanged), return it at once and re-run git on
+        one worker thread. Without it every entry taken in the same pass expires together, and the request that finds
+        them (a dashboard poll, or the Start / Stop click that forces a fresh list) waited for git in all ~45 repos:
+        7-9 s, every 5 minutes (2026-11-19)."""
         self.max_age = max_age
         self._clock = clock
         self._items: dict[str, tuple[tuple, tuple, float, object]] = {}
         self._lock = threading.Lock()
+        self.background = background
+        self._queue: list[tuple[str, Path, Callable, Callable, Callable]] = []
+        self._queued: set[str] = set()
+        self._worker: threading.Thread | None = None
 
     def get(self, folder: Path, compute: Callable[[], object], paths: Callable[[object], tuple] = lambda v: (),
             keep: Callable[[object], bool] = lambda v: True):
@@ -78,8 +86,15 @@ class RepoCache:
         now = self._clock()
         with self._lock:
             hit = self._items.get(key)
-        if hit and now - hit[2] < self.max_age and fingerprint(folder, hit[1]) == hit[0]:
-            return hit[3]
+        if hit and fingerprint(folder, hit[1]) == hit[0]:
+            if now - hit[2] < self.max_age:
+                return hit[3]
+            if self.background:
+                self._enqueue(key, folder, compute, paths, keep)
+                return hit[3]
+        return self._run(key, folder, compute, paths, keep, now)
+
+    def _run(self, key: str, folder: Path, compute, paths, keep, now: float):
         before = fingerprint(folder)                  # taken before running git: a change during it re-runs next time
         value = compute()
         if before is not None and keep(value):
@@ -89,6 +104,41 @@ class RepoCache:
                 with self._lock:
                     self._items[key] = (fp, extra, now, value)
         return value
+
+    def _enqueue(self, key: str, folder: Path, compute, paths, keep) -> None:
+        with self._lock:
+            if key in self._queued:
+                return
+            self._queued.add(key)
+            self._queue.append((key, folder, compute, paths, keep))
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(target=self._drain, name="gitcache-refresh", daemon=True)
+                self._worker.start()
+
+    def _drain(self) -> None:
+        while True:
+            with self._lock:
+                if not self._queue:
+                    self._worker = None
+                    return
+                key, folder, compute, paths, keep = self._queue.pop(0)
+            try:
+                self._run(key, folder, compute, paths, keep, self._clock())
+            except Exception:  # noqa: BLE001 - the stale value stays; the next request queues it again
+                from ..swallow import note
+                note("gitcache.refresh")
+            finally:
+                with self._lock:
+                    self._queued.discard(key)
+
+    def wait_idle(self, timeout: float = 10.0) -> None:
+        """Tests: wait until the background refreshes queued so far are done."""
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            with self._lock:
+                if not self._queue and not self._queued:
+                    return
+            time.sleep(0.01)
 
     def forget(self, suffix: str | None = None) -> None:
         with self._lock:
