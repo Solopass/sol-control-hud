@@ -53,7 +53,7 @@ projects:
   VideoForge-1.0.0:
     title: VideoForge
     description: Private browser-based video converter and compressor (React, Vite, FFmpeg WebAssembly).
-    start: {cmd: [bun, --cwd, videoforge, run, dev, --, --host, '127.0.0.1', --port, '5176', --strictPort]}
+    start: {cmd: [bun, run, --cwd, videoforge, dev, --, --host, '127.0.0.1', --port, '5176', --strictPort]}
     port: 5176
     url: 'http://127.0.0.1:5176/'
   solang:
