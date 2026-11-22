@@ -1074,9 +1074,38 @@ const NET_STATE = {
   ok: ['OK', 'ok'], slow: ['SLOW', 'warn'], degraded: ['ONE IP DOWN', 'warn'], 'dns-off': ['DNS OFF', 'bad'],
   'no-upstream': ['NO UPSTREAM', 'bad'], 'not-blocking': ['NOT BLOCKING', 'warn'], down: ['DOWN', 'bad'], unknown: ['…', 'dim'],
 };
+const TS_SVG_UP = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.5"/><circle cx="8" cy="3" r="1.5" opacity=".35"/><circle cx="13" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5" opacity=".35"/><circle cx="8" cy="13" r="1.5"/><circle cx="13" cy="13" r="1.5" opacity=".35"/></svg>';
+const TS_SVG_WARN = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.5" opacity=".35"/><circle cx="8" cy="3" r="1.5" opacity=".35"/><circle cx="13" cy="3" r="1.5" opacity=".35"/><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5" opacity=".35"/><circle cx="8" cy="13" r="1.5" opacity=".35"/><circle cx="13" cy="13" r="1.5" opacity=".35"/><path d="M2 14L14 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+
+function renderHeaderTailscale(ts) {
+  const el = $('hdrTs');
+  if (!el) return;
+  if (!ts.running && !ts.up) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  if (ts.up) {
+    el.className = 'hdr-ts up';
+    let rem = '';
+    if (ts.remaining_s != null) {
+      const mins = Math.ceil(ts.remaining_s / 60);
+      const h = Math.floor(mins / 60), m = mins % 60;
+      rem = ` · closes in ${h > 0 ? `${h}h ${m}m` : `${m}m`}`;
+    }
+    el.title = `Tailscale UP (remote connections allowed)${rem} — click to jump to Network`;
+    setHTML(el, `${TS_SVG_UP}<span>TS</span>`);
+  } else {
+    el.className = 'hdr-ts warn';
+    el.title = 'Tailscale is ON, but tunnel is DOWN (cannot remote in) — click to jump to Network';
+    setHTML(el, `${TS_SVG_WARN}<span>TS!</span>`);
+  }
+}
+
 function renderNetwork(p) {
-  if (typeof cardShown === 'function' && !cardShown('c-net')) return;
   const net = p.network || {}, ph = net.pihole || {}, lan = net.lan || {};
+  renderHeaderTailscale(net.tailscale || {});
+  if (typeof cardShown === 'function' && !cardShown('c-net')) return;
   const [label, cls] = NET_STATE[ph.state] || NET_STATE.unknown;
   const pill = $('netPill'); if (!pill) return;
   pill.textContent = label; pill.className = `pill ${cls}`; pill.title = ph.alert || '';

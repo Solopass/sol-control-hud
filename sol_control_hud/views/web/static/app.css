@@ -44,6 +44,12 @@ header { position:sticky; top:0; z-index:12; display:flex; align-items:center; g
 @keyframes beat { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--green) 70%, transparent); } 100% { box-shadow:0 0 0 10px transparent; } }
 .mode { font-size:11px; font-weight:700; letter-spacing:.16em; padding:3px 10px; border-radius:20px; border:1px solid currentColor; color:var(--muted); }
 .mode.away { color:var(--cyan); } .mode.off { color:var(--amber); }
+.hdr-ts { display:inline-flex; align-items:center; gap:4px; padding:3px 7px; border-radius:20px; font-size:10px; font-weight:700;
+  letter-spacing:.04em; background:transparent; border:1px solid var(--line); flex:none; }
+.hdr-ts[hidden] { display:none; }
+.hdr-ts svg { width:13px; height:13px; display:block; }
+.hdr-ts.up { color:var(--green); border-color:color-mix(in srgb, var(--green) 50%, transparent); background:color-mix(in srgb, var(--green) 10%, transparent); }
+.hdr-ts.warn { color:var(--amber); border-color:color-mix(in srgb, var(--amber) 55%, transparent); background:color-mix(in srgb, var(--amber) 12%, transparent); }
 .headline { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:13px; }
 .hdr-metrics { display:flex; align-items:center; gap:4px; flex:none; font-variant-numeric:tabular-nums; }
 .hdr-chip { background:color-mix(in srgb, var(--badge) 65%, transparent); border:1px solid var(--line); border-radius:7px;
