@@ -650,9 +650,10 @@
       </span>
     </div>
     <div class="row" id="netTailscaleRow">
-      <span>Tailscale · <span id="netTailscaleState" class="dim">–</span></span>
+      <span>Tailscale · <span id="netTailscaleState" class="dim">–</span> <span id="netTailscaleTimer" class="dim small" hidden></span></span>
       <span>
         <button class="mini go" id="netTsOpenBtn" data-act="tailscale_open" title="Start Tailscale on demand (service + tray)">▶ Open</button>
+        <button class="mini go" id="netTsUpBtn" data-act="tailscale_up" title="Run tailscale up to allow remote connections (auto-closes after 12h)" hidden>▲ Up (12h)</button>
         <button class="mini danger" id="netTsCloseBtn" data-act="tailscale_close" data-confirm="Close Tailscale tray app and stop the background service?" title="Close Tailscale tray app and stop service" hidden>■ Close</button>
       </span>
     </div>

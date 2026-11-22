@@ -377,9 +377,14 @@ class Hub:
             res = network.pihole_pause(300) if action == "pihole_pause" else network.pihole_resume()
             log(f"network: {action} -> {res.get('why')}")
             return res
-        if action in ("tailscale_open", "tailscale_close"):
+        if action in ("tailscale_open", "tailscale_close", "tailscale_up"):
             from .data.collectors import network
-            res = network.tailscale_open() if action == "tailscale_open" else network.tailscale_close()
+            if action == "tailscale_open":
+                res = network.tailscale_open()
+            elif action == "tailscale_up":
+                res = network.tailscale_up(hours=float(body.get("hours") or 12.0))
+            else:
+                res = network.tailscale_close()
             log(f"network: {action} -> {res.get('why')}")
             return res
         if action in ("security_toggle", "security_test", "security_ack", "deck_start", "deck_stop", "deck_restart"):

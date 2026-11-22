@@ -320,6 +320,7 @@ def test_tailscale_open_and_close(tmp_path, monkeypatch):
 
     monkeypatch.setattr(n, "TAILSCALE_ON_DEMAND", open_ps1)
     monkeypatch.setattr(n, "TAILSCALE_CLOSE", close_bat)
+    monkeypatch.setattr(n, "TAILSCALE_TIMER_FILE", tmp_path / "ts-timer.json")
 
     launched = []
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: launched.append(cmd))
@@ -348,3 +349,40 @@ def test_tailscale_open_and_close(tmp_path, monkeypatch):
     res_close_2 = n.tailscale_close()
     assert res_close_2["ok"] is True and "already stopped" in res_close_2["why"]
     assert len(launched) == 2
+
+
+def test_tailscale_up_and_auto_close_timer(tmp_path, monkeypatch):
+    import subprocess
+    ts_exe = tmp_path / "tailscale.exe"
+    ts_exe.write_text("exe", encoding="utf-8")
+    timer_file = tmp_path / "ts-timer.json"
+    monkeypatch.setattr(n, "TAILSCALE_EXE", ts_exe)
+    monkeypatch.setattr(n, "TAILSCALE_TIMER_FILE", timer_file)
+
+    # Service stopped -> refuses up
+    monkeypatch.setattr(n, "tailscale_status", lambda: {"installed": True, "running": False, "tray": False, "up": False, "state": "stopped"})
+    r_stopped = n.tailscale_up()
+    assert r_stopped["ok"] is False and "Open Tailscale first" in r_stopped["why"]
+
+    # Service running -> runs `tailscale up` and arms 12h timer
+    monkeypatch.setattr(n, "tailscale_status", lambda: {"installed": True, "running": True, "tray": True, "up": False, "state": "running"})
+    runs = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: runs.append(cmd) or type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})())
+
+    r_up = n.tailscale_up(hours=12.0)
+    assert r_up["ok"] is True
+    assert "auto-closes in 12h" in r_up["why"]
+    assert runs[-1] == [str(ts_exe), "up"]
+    assert timer_file.exists()
+    deadline = n._read_ts_deadline()
+    assert deadline is not None and deadline > n.time.time() + 11 * 3600
+
+    # Not expired yet -> check_tailscale_timer returns False
+    assert n.check_tailscale_timer() is False
+
+    # Force expired -> check_tailscale_timer calls tailscale_auto_close
+    closed = []
+    monkeypatch.setattr(n, "tailscale_auto_close", lambda: closed.append(1) or {"ok": True})
+    n._write_ts_deadline(n.time.time() - 10)
+    assert n.check_tailscale_timer() is True
+    assert closed == [1]

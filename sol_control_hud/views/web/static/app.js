@@ -1113,10 +1113,28 @@ function renderNetwork(p) {
     tsRow.hidden = ts.installed === false;
     const tsState = $('netTailscaleState');
     if (tsState) {
-      if (ts.running) setHTML(tsState, `<span style="color:var(--green)">running${ts.tray ? ' · tray' : ''}</span>`);
+      if (ts.up) setHTML(tsState, `<span style="color:var(--green)">up${ts.tray ? ' · tray' : ''}</span>`);
+      else if (ts.running) setHTML(tsState, '<span style="color:var(--amber)">running (no tunnel)</span>');
       else setHTML(tsState, '<span class="dim">stopped</span>');
     }
+    const tsTimer = $('netTailscaleTimer');
+    if (tsTimer) {
+      if (ts.up && ts.remaining_s != null) {
+        const mins = Math.ceil(ts.remaining_s / 60);
+        const h = Math.floor(mins / 60), m = mins % 60;
+        tsTimer.textContent = `· closes in ${h > 0 ? `${h}h ${m}m` : `${m}m`}`;
+        tsTimer.hidden = false;
+      } else {
+        tsTimer.hidden = true;
+      }
+    }
     if ($('netTsOpenBtn')) $('netTsOpenBtn').hidden = Boolean(ts.running && ts.tray);
+    const upBtn = $('netTsUpBtn');
+    if (upBtn) {
+      upBtn.hidden = !ts.running;
+      upBtn.textContent = ts.up ? '↻ +12h' : '▲ Up (12h)';
+      upBtn.title = ts.up ? 'Reset the auto-close timer to 12 hours' : 'Run tailscale up to allow remote connections (auto-closes after 12h)';
+    }
     if ($('netTsCloseBtn')) $('netTsCloseBtn').hidden = !ts.running && !ts.tray;
   }
   const devs = lan.devices || [];

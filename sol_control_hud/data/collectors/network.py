@@ -500,18 +500,95 @@ def last_status() -> dict:
 # ---------------------------------------------------------------------------------------------------- Tailscale on-demand
 TAILSCALE_ON_DEMAND = Path(r"D:\Workspace\LaPie James\tailscale_on_demand.ps1")
 TAILSCALE_CLOSE = Path(r"D:\Workspace\LaPie James\close_tailscale.bat")
+TAILSCALE_EXE = Path(r"C:\Program Files\Tailscale\tailscale.exe")
+TAILSCALE_TIMER_FILE = DATA_DIR / "tailscale-timer.json"
+TAILSCALE_DEFAULT_HOURS = 12.0
+
+_ts_lock = threading.Lock()
+_ts_backend_cache = {"at": 0.0, "up": False}
+
+
+def _read_ts_deadline() -> float | None:
+    try:
+        data = json.loads(TAILSCALE_TIMER_FILE.read_text(encoding="utf-8"))
+        val = data.get("up_until")
+        return float(val) if val is not None else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _write_ts_deadline(until: float | None) -> None:
+    try:
+        if until is None:
+            TAILSCALE_TIMER_FILE.unlink(missing_ok=True)
+            return
+        TAILSCALE_TIMER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = TAILSCALE_TIMER_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"up_until": until}), encoding="utf-8")
+        os.replace(tmp, TAILSCALE_TIMER_FILE)
+    except OSError:
+        _swallowed("network.tailscale.timer_write")
+
+
+def _tailscale_backend_up(force: bool = False) -> bool:
+    import subprocess
+    now = time.time()
+    with _ts_lock:
+        if not force and now - _ts_backend_cache["at"] < 6.0:
+            return _ts_backend_cache["up"]
+    up = False
+    if TAILSCALE_EXE.is_file():
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            r = subprocess.run(
+                [str(TAILSCALE_EXE), "status", "--json"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=3, creationflags=flags,
+            )
+            if r.returncode == 0 and r.stdout.strip():
+                up = json.loads(r.stdout).get("BackendState") == "Running"
+        except Exception:
+            pass
+    with _ts_lock:
+        _ts_backend_cache["at"] = now
+        _ts_backend_cache["up"] = up
+    return up
 
 
 def tailscale_status() -> dict:
-    """Service + tray status for Tailscale via psutil (no subprocess)."""
+    """Service + tray + tunnel status for Tailscale, plus auto-close countdown when up."""
     try:
         import psutil
         svc = psutil.win_service_get("Tailscale")
         running = svc.status() == "running"
         tray = any((p.info.get("name") or "").lower() == "tailscale-ipn.exe" for p in psutil.process_iter(["name"]))
-        return {"installed": True, "running": running, "tray": tray, "state": "running" if running else "stopped"}
     except Exception:
-        return {"installed": False, "running": False, "tray": False, "state": "not_installed"}
+        return {"installed": False, "running": False, "tray": False, "up": False, "state": "not_installed",
+                "up_until": None, "remaining_s": None}
+
+    up = _tailscale_backend_up() if running else False
+    deadline = _read_ts_deadline()
+    if up:
+        if deadline is None:
+            deadline = time.time() + TAILSCALE_DEFAULT_HOURS * 3600.0
+            _write_ts_deadline(deadline)
+        remaining_s = max(0, int(deadline - time.time()))
+    else:
+        if not running and deadline is not None:
+            _write_ts_deadline(None)
+        deadline = None
+        remaining_s = None
+
+    state = "up" if up else ("running" if running else "stopped")
+    return {
+        "installed": True,
+        "running": running,
+        "tray": tray,
+        "up": up,
+        "state": state,
+        "up_until": deadline,
+        "remaining_s": remaining_s,
+    }
 
 
 def tailscale_open() -> dict:
@@ -530,9 +607,41 @@ def tailscale_open() -> dict:
     return {"ok": True, "why": "Opening Tailscale (approve UAC if prompted)…"}
 
 
+def tailscale_up(hours: float = TAILSCALE_DEFAULT_HOURS) -> dict:
+    """Bring the Tailscale tunnel up (`tailscale up`) and arm the auto-close timer (default 12h)."""
+    import subprocess
+    if not TAILSCALE_EXE.is_file():
+        return {"ok": False, "why": f"missing executable: {TAILSCALE_EXE}"}
+    st = tailscale_status()
+    if not st["running"]:
+        return {"ok": False, "why": "Open Tailscale first so the background service is running"}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        r = subprocess.run(
+            [str(TAILSCALE_EXE), "up"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=15, creationflags=flags,
+        )
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "unknown error").strip()[:200]
+            return {"ok": False, "why": f"tailscale up failed: {err}"}
+    except Exception as e:
+        return {"ok": False, "why": f"tailscale up failed: {e}"}
+
+    deadline = time.time() + max(0.05, float(hours)) * 3600.0
+    _write_ts_deadline(deadline)
+    with _ts_lock:
+        _ts_backend_cache["at"] = 0.0
+    label = f"{hours:g}h" if hours >= 1 else f"{int(hours * 60)}m"
+    return {"ok": True, "why": f"Tailscale is UP (auto-closes in {label})", "up_until": deadline}
+
+
 def tailscale_close() -> dict:
     """Launch close_tailscale.bat (closes tray app and stops the Tailscale service)."""
     import subprocess
+    _write_ts_deadline(None)
+    with _ts_lock:
+        _ts_backend_cache["at"] = 0.0
     if not TAILSCALE_CLOSE.is_file():
         return {"ok": False, "why": f"missing script: {TAILSCALE_CLOSE}"}
     st = tailscale_status()
@@ -544,6 +653,52 @@ def tailscale_close() -> dict:
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
     )
     return {"ok": True, "why": "Closing Tailscale (approve UAC if prompted)…"}
+
+
+def tailscale_auto_close() -> dict:
+    """Called when the 12h timer expires: runs `tailscale down`, exits tray (triggers elevated watcher),
+    and falls back to close_tailscale.bat if the service stays up."""
+    import subprocess
+    _write_ts_deadline(None)
+    with _ts_lock:
+        _ts_backend_cache["at"] = 0.0
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if TAILSCALE_EXE.is_file():
+        try:
+            subprocess.run([str(TAILSCALE_EXE), "down"], capture_output=True, timeout=10, creationflags=flags)
+        except Exception:
+            pass
+    try:
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            if (p.info.get("name") or "").lower() == "tailscale-ipn.exe":
+                p.terminate()
+    except Exception:
+        pass
+
+    # Wait briefly for tailscale_on_demand.ps1's elevated watcher to stop the service
+    deadline = time.time() + 4.0
+    while time.time() < deadline:
+        st = tailscale_status()
+        if not st["running"]:
+            return {"ok": True, "why": "Tailscale auto-closed after timer expired"}
+        time.sleep(0.5)
+
+    if TAILSCALE_CLOSE.is_file():
+        subprocess.Popen(
+            ["cmd.exe", "/c", str(TAILSCALE_CLOSE)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
+        )
+    return {"ok": True, "why": "Tailscale auto-closed after timer expired"}
+
+
+def check_tailscale_timer() -> bool:
+    """If the Tailscale auto-close deadline has passed, shut Tailscale down. Returns True if triggered."""
+    deadline = _read_ts_deadline()
+    if deadline is not None and time.time() >= deadline:
+        tailscale_auto_close()
+        return True
+    return False
 
 
 _thread: threading.Thread | None = None
@@ -562,5 +717,9 @@ def start_network_monitor() -> None:
 
 def _monitor_loop() -> None:
     while True:
+        try:
+            check_tailscale_timer()
+        except Exception:
+            _swallowed("network.tailscale.timer")
         network_status(max_age=0)
         time.sleep(UP_EVERY)
