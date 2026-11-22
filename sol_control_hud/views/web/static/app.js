@@ -1184,6 +1184,13 @@ function renderAiInbox(p) {
       + '</div>';
     if (fresh('needs', d.needs)) news++;
   }
+  if (d.work_summary) {
+    const w = d.work_summary;
+    html += `<div class="inbox-sec">${head('work_summary', w, `Daily work · ${w.date || w.name}`, open('work_summary', 'Open summary'))}`
+      + (w.completed.length ? `<div class="dim">Completed</div>${ul(w.completed)}` : '')
+      + (w.open.length ? `<div class="dim">Still open</div>${ul(w.open)}` : '') + '</div>';
+    if (fresh('work_summary', w)) news++;
+  }
   if (d.digest) {
     const g = d.digest;
     html += `<div class="inbox-sec">${head('digest', g, `This week · ${g.date || g.name}`, open('digest', 'Open digest'))}`

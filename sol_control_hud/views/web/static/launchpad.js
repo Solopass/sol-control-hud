@@ -3,7 +3,7 @@
 // The page sends a project or service *name*; the server looks up what that means (launchpad.yaml, launch.json).
 // After a Start the cards poll every 2 s for a minute and open the page once its port answers.
 'use strict';
-let projAll = false, projCache = [], mediaCache = [], fastUntil = 0;
+let projAll = false, projInFlight = false, projCache = [], mediaCache = [], fastUntil = 0;
 const pendingOpen = {};          // name -> started at (ms): open its page once it runs
 const liveOpen = {};             // media name -> last Live answer
 const OPEN_WAIT_MS = 300000;    // a start can include a build (OmniTools: ~1.5 min after its code changed)
@@ -163,6 +163,7 @@ async function loadProjects() {
   projCache = d.projects;
   const q = ($('projSearch').value || '').toLowerCase().trim();
   const rows = d.projects.filter((p) => (projAll || !p.hidden)
+    && (!projInFlight || p.running || (p.git && p.git.dirty_files) || p.session || p.handoff)
     && (!q || `${p.name} ${p.title} ${p.description}`.toLowerCase().includes(q)));
   const c = d.counts || {};
   $('projSummary').textContent = `${c.shown} projects · ${c.running} running${c.dirty ? ` · ${c.dirty} with uncommitted changes` : ''}`;
@@ -171,6 +172,12 @@ async function loadProjects() {
   for (const p of d.projects) openWhenUp(p.name, p.running, p.url);
 }
 $('projSearch').oninput = () => loadProjects();
+if ($('projInFlight')) $('projInFlight').onclick = () => {
+  projInFlight = !projInFlight;
+  $('projInFlight').setAttribute('aria-pressed', String(projInFlight));
+  $('projInFlight').classList.toggle('on', projInFlight);
+  loadProjects();
+};
 $('projHidden').onclick = () => { projAll = !projAll; $('projHidden').setAttribute('aria-pressed', String(projAll)); loadProjects(); };
 $('projRefresh').onclick = () => loadProjects();
 $('projList').addEventListener('click', async (e) => {
@@ -267,7 +274,16 @@ $('projList').addEventListener('click', async (e) => {
     setTimeout(loadProjects, 1200);          // the listener needs a moment to appear / disappear
     return loadProjects();
   }
-  if (op === 'stop' && !(await hudConfirm(`Stop ${p.title}?\n\nIt is asked to stop first, then forced if it ignores that. Anything unsaved in it is lost.`))) return;
+  if (op === 'stop') {
+    if (!b.dataset.armed) {
+      b.dataset.armed = '1';
+      const orig = b.textContent;
+      b.textContent = '■ Sure?';
+      setTimeout(() => { if (b.isConnected && b.dataset.armed) { delete b.dataset.armed; b.textContent = orig; } }, 3000);
+      return;
+    }
+    delete b.dataset.armed;
+  }
   b.disabled = true;
   await launch('project', name, op);
   b.disabled = false;

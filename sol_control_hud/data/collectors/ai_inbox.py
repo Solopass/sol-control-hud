@@ -28,6 +28,7 @@ BUGHUNT_FRESH_DAYS = 14
 NEEDS_STATUSES = ("needs-you", "needs_user", "failed")
 
 DIGEST_RE = re.compile(r"^\d{4}-W\d{2}\.md$")          # not "2026-W46 machine.md"
+WORK_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-work\.md$")
 _HEADING = re.compile(r"^##\s+(.+?)\s*#*\s*$")
 _BULLET = re.compile(r"^\s*[-*]\s+(?:\[[ xX]\]\s+)?(.+?)\s*$")
 _OPEN_TASK = re.compile(r"^(\s*)- \[ \] (.*)$")
@@ -139,6 +140,20 @@ def _read(p: Path) -> str | None:
         return None
 
 
+def parse_work_summary(text: str) -> dict:
+    return {"completed": section_bullets(text, "Completed today"),
+            "open": section_bullets(text, "Next / still open"),
+            "date": front_value(text, "started")[:10]}
+
+
+def newest_work_summary(d: Path) -> Path | None:
+    try:
+        names = sorted(f.name for f in d.iterdir() if WORK_RE.match(f.name) and f.is_file())
+    except OSError:
+        return None
+    return d / names[-1] if names else None
+
+
 def newest_digest(d: Path) -> Path | None:
     try:
         names = sorted(f.name for f in d.iterdir() if DIGEST_RE.match(f.name) and f.is_file())
@@ -195,6 +210,12 @@ def collect(digests: Path | None = None, tasks: Path | None = None, briefings: P
         d = parse_digest(text)
         out["digest"] = {**d, "name": dp.stem, "mtime": _mtime(dp), "date": d["date"] or time.strftime("%Y-%m-%d", time.localtime(_mtime(dp) or now))}
 
+    wp = newest_work_summary(digests)
+    wtext = _read(wp) if wp else None
+    if wp and wtext is not None:
+        w = parse_work_summary(wtext)
+        out["work_summary"] = {**w, "name": wp.stem, "mtime": _mtime(wp), "date": w["date"] or wp.stem[:-5]}
+
     text = _read(tasks)
     if text is not None:
         allt = parse_tasks(text)
@@ -226,6 +247,8 @@ def resolve(note_id: str, digests: Path | None = None, tasks: Path | None = None
     """The file behind a known id, or None."""
     if note_id == "digest":
         return newest_digest(digests or DIGESTS_DIR)
+    if note_id == "work_summary":
+        return newest_work_summary(digests or DIGESTS_DIR)
     if note_id == "briefing":
         return newest_briefing(briefings or BRIEFINGS_DIR)
     if note_id == "tasks":
