@@ -356,7 +356,8 @@ def _media_entry(reg: dict, name: str) -> dict | None:
 
 def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict[int, bool] | None = None,
                  workspace: Path | None = None, git=cached_git, paths=_proc_paths,
-                 find_proc=find_project_proc) -> list[dict]:
+                 find_proc=find_project_proc, handoffs: dict[str, dict] | None = None,
+                 sessions: dict[str, dict] | None = None) -> list[dict]:
     """One row per folder in the workspace, most recently worked on first."""
     ws = Path(workspace or reg["workspace"])
     try:
@@ -463,6 +464,8 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "can_stop": bool(run and not spec.get("self") and (run.get("pid") or spec.get("stop") or media)),
             "watcher": bool(spec.get("watcher") or not port),
             "sidecars": sidecars,
+            "session": (sessions or {}).get(name),
+            "handoff": (handoffs or {}).get(name),
         })
     rows.sort(key=lambda r: (r["hidden"], not r["running"], -((r["git"] or {}).get("last_commit") or 0), r["name"].lower()))
     return rows
@@ -470,8 +473,10 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
 
 def collect(listening: list[dict] | None = None, wsl_ports: dict[int, bool] | None = None,
             registry: dict | None = None) -> dict:
+    from . import sessions as _sessions
     reg = registry or load_registry()
-    rows = project_rows(reg, listening, wsl_ports)
+    handoffs, sess = _sessions.collect_for_projects()
+    rows = project_rows(reg, listening, wsl_ports, handoffs=handoffs, sessions=sess)
     shown = [r for r in rows if not r["hidden"]]
     return {"available": True, "generated_at": time.time(), "projects": rows,
             "counts": {"shown": len(shown), "hidden": len(rows) - len(shown),

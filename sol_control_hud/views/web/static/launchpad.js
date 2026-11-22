@@ -72,6 +72,15 @@ function projRow(p) {
     }
   }
   if (p.auto_hunt) chips.push(`<span class="pill ok" title="Auto-hunt git hook active: commits trigger background local AI review">⚡ auto-hunt</span>`);
+  if (p.session) {
+    const s = p.session;
+    const label = s.active ? `${s.provider === 'claude' ? 'Claude' : 'AG'} active` : `${s.provider === 'claude' ? 'Claude' : 'AG'}`;
+    chips.push(`<span class="pill ${s.active ? 'ok' : 'dim'}" title="${esc(s.title || s.updated_at || '')}">${s.active ? '🟢 ' : '💬 '}${esc(label)}</span>`);
+  }
+  if (p.handoff) {
+    const n = (p.handoff.next_steps || []).length;
+    chips.push(`<span class="pill ok" title="${esc(p.handoff.summary || '')}">📌 handoff${n ? ` · ${n} next` : ''}</span>`);
+  }
   if (p.autostart) chips.push(`<span class="pill dim" title="Starts with the HUD (autostart in launchpad.yaml)">auto</span>`);
   if (p.hidden) chips.push(`<span class="pill dim" title="${esc(p.why_hidden)}">hidden</span>`);
   const acts = [];
@@ -96,6 +105,7 @@ function projRow(p) {
   if (p.github) acts.push(`<button class="mini ghost" data-p="github" title="${esc(p.github)}">GitHub</button>`);
   const huntClass = (p.review && p.review.unreviewed_commits) ? 'mini warn' : 'mini ghost';
   acts.push(`<button class="${huntClass}" data-p="bughunt" title="Run Bug Hunt chain on ${esc(p.name)}">🐞 Hunt</button>`);
+  if (p.handoff || p.session) acts.push(`<button class="mini ghost" data-p="resume" title="Copy resume prompt for Antigravity or Claude">📋 Resume</button>`);
   acts.push(`<button class="mini ghost" data-p="editor" title="Open in VS Code">‹/›</button>`);
   acts.push(`<button class="mini ghost" data-p="folder" title="Open the folder">📁</button>`);
   acts.push(`<button class="mini ghost${menuFor === p.name ? ' on' : ''}" data-p="menu" title="Tag or hide">⋯</button>`);
@@ -191,6 +201,20 @@ $('projList').addEventListener('click', async (e) => {
   if (op === 'review') {
     const r = await post('/api/action', { action: 'open_project_review', target: name });
     if (!r.ok) toast(r.why || 'No review note found yet');
+    return;
+  }
+  if (op === 'resume') {
+    const h = p.handoff;
+    const lines = [`Resume ${p.name}: call nomore_project_brief("${p.name}") first.`];
+    if (h && h.summary) lines.push(`Last handoff: ${h.summary}`);
+    if (h && h.next_steps && h.next_steps.length) lines.push(`Next: ${h.next_steps.join('; ')}`);
+    const text = lines.join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`Copied resume prompt for ${p.name}`);
+    } catch {
+      toast(text);
+    }
     return;
   }
   if (op === 'review-tasks') {
