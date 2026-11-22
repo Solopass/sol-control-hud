@@ -649,6 +649,13 @@
         <button class="mini ghost" id="netResumeBtn" data-act="pihole_resume" title="Turn ad blocking back on now" hidden>▶ Resume</button>
       </span>
     </div>
+    <div class="row" id="netTailscaleRow">
+      <span>Tailscale · <span id="netTailscaleState" class="dim">–</span></span>
+      <span>
+        <button class="mini go" id="netTsOpenBtn" data-act="tailscale_open" title="Start Tailscale on demand (service + tray)">▶ Open</button>
+        <button class="mini danger" id="netTsCloseBtn" data-act="tailscale_close" data-confirm="Close Tailscale tray app and stop the background service?" title="Close Tailscale tray app and stop service" hidden>■ Close</button>
+      </span>
+    </div>
     <h3 class="net-sub">Devices <span class="dim" id="netCount"></span></h3>
     <div class="net-devs" id="netDevs"></div>
   </article>

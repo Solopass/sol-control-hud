@@ -485,14 +485,65 @@ def network_status(max_age: float = 30.0) -> dict:
         except Exception:
             _swallowed("network.network_status.lan")
             lan = (_last or {}).get("lan") or {"devices": [], "online": 0, "new": 0, "alert": ""}
-        _last = {"pihole": pihole, "lan": lan}
+        _last = {"pihole": pihole, "lan": lan, "tailscale": tailscale_status()}
         _last_at = time.time()
         return _last
 
 
 def last_status() -> dict:
     """What the last probe found, without probing (the ticker and the dashboard read this)."""
-    return _last
+    if not _last:
+        return {"tailscale": tailscale_status()}
+    return {**_last, "tailscale": tailscale_status()}
+
+
+# ---------------------------------------------------------------------------------------------------- Tailscale on-demand
+TAILSCALE_ON_DEMAND = Path(r"D:\Workspace\LaPie James\tailscale_on_demand.ps1")
+TAILSCALE_CLOSE = Path(r"D:\Workspace\LaPie James\close_tailscale.bat")
+
+
+def tailscale_status() -> dict:
+    """Service + tray status for Tailscale via psutil (no subprocess)."""
+    try:
+        import psutil
+        svc = psutil.win_service_get("Tailscale")
+        running = svc.status() == "running"
+        tray = any((p.info.get("name") or "").lower() == "tailscale-ipn.exe" for p in psutil.process_iter(["name"]))
+        return {"installed": True, "running": running, "tray": tray, "state": "running" if running else "stopped"}
+    except Exception:
+        return {"installed": False, "running": False, "tray": False, "state": "not_installed"}
+
+
+def tailscale_open() -> dict:
+    """Launch tailscale_on_demand.ps1 (starts elevated watcher + Tailscale service + tray app)."""
+    import subprocess
+    if not TAILSCALE_ON_DEMAND.is_file():
+        return {"ok": False, "why": f"missing script: {TAILSCALE_ON_DEMAND}"}
+    st = tailscale_status()
+    if st["running"] and st["tray"]:
+        return {"ok": True, "why": "Tailscale is already running"}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", str(TAILSCALE_ON_DEMAND)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
+    )
+    return {"ok": True, "why": "Opening Tailscale (approve UAC if prompted)…"}
+
+
+def tailscale_close() -> dict:
+    """Launch close_tailscale.bat (closes tray app and stops the Tailscale service)."""
+    import subprocess
+    if not TAILSCALE_CLOSE.is_file():
+        return {"ok": False, "why": f"missing script: {TAILSCALE_CLOSE}"}
+    st = tailscale_status()
+    if not st["running"] and not st["tray"]:
+        return {"ok": True, "why": "Tailscale is already stopped"}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.Popen(
+        ["cmd.exe", "/c", str(TAILSCALE_CLOSE)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
+    )
+    return {"ok": True, "why": "Closing Tailscale (approve UAC if prompted)…"}
 
 
 _thread: threading.Thread | None = None

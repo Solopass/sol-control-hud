@@ -1108,6 +1108,17 @@ function renderNetwork(p) {
       acts.hidden = true;
     }
   }
+  const ts = net.tailscale || {}, tsRow = $('netTailscaleRow');
+  if (tsRow) {
+    tsRow.hidden = ts.installed === false;
+    const tsState = $('netTailscaleState');
+    if (tsState) {
+      if (ts.running) setHTML(tsState, `<span style="color:var(--green)">running${ts.tray ? ' · tray' : ''}</span>`);
+      else setHTML(tsState, '<span class="dim">stopped</span>');
+    }
+    if ($('netTsOpenBtn')) $('netTsOpenBtn').hidden = Boolean(ts.running && ts.tray);
+    if ($('netTsCloseBtn')) $('netTsCloseBtn').hidden = !ts.running && !ts.tray;
+  }
   const devs = lan.devices || [];
   $('netCount').textContent = devs.length ? `${lan.online || 0} online · ${devs.length} known${lan.new ? ` · ${lan.new} new` : ''}` : '';
   setHTML($('netDevs'), devs.map((d) => {

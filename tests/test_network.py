@@ -309,3 +309,42 @@ def test_pause_and_resume_go_through_sol_deck(monkeypatch):
     assert n.pihole_pause() == {"ok": False, "why": "sol-deck isn't running"}
     monkeypatch.setattr(n, "_deck_json", lambda *a, **k: {"ok": False, "error": "PIHOLE_APP_PASSWORD not configured in .env"})
     assert "app password" in n.pihole_resume()["why"]
+
+
+def test_tailscale_open_and_close(tmp_path, monkeypatch):
+    import subprocess
+    open_ps1 = tmp_path / "tailscale_on_demand.ps1"
+    close_bat = tmp_path / "close_tailscale.bat"
+    open_ps1.write_text("# open", encoding="utf-8")
+    close_bat.write_text("@echo off", encoding="utf-8")
+
+    monkeypatch.setattr(n, "TAILSCALE_ON_DEMAND", open_ps1)
+    monkeypatch.setattr(n, "TAILSCALE_CLOSE", close_bat)
+
+    launched = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: launched.append(cmd))
+
+    # Stopped -> open launches powershell
+    monkeypatch.setattr(n, "tailscale_status", lambda: {"installed": True, "running": False, "tray": False, "state": "stopped"})
+    res_open = n.tailscale_open()
+    assert res_open["ok"] is True
+    assert "Opening Tailscale" in res_open["why"]
+    assert str(open_ps1) in launched[-1]
+
+    # Already running -> no duplicate launch
+    monkeypatch.setattr(n, "tailscale_status", lambda: {"installed": True, "running": True, "tray": True, "state": "running"})
+    res_open_2 = n.tailscale_open()
+    assert res_open_2["ok"] is True and "already running" in res_open_2["why"]
+    assert len(launched) == 1
+
+    # Running -> close launches bat
+    res_close = n.tailscale_close()
+    assert res_close["ok"] is True
+    assert "Closing Tailscale" in res_close["why"]
+    assert str(close_bat) in launched[-1]
+
+    # Already stopped -> no launch
+    monkeypatch.setattr(n, "tailscale_status", lambda: {"installed": True, "running": False, "tray": False, "state": "stopped"})
+    res_close_2 = n.tailscale_close()
+    assert res_close_2["ok"] is True and "already stopped" in res_close_2["why"]
+    assert len(launched) == 2
