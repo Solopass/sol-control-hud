@@ -135,6 +135,8 @@ def restart_pad() -> dict:
 POPOS_HOST = "popos.lan"
 POPOS_IP = "popos.lan"
 POPOS_MAC = "00:00:00:00:00:00"
+POPOS_DROPBEAR_PORT = 2222
+POPOS_LUKS_FILE = Path(__file__).resolve().parents[2] / "data" / "popos_luks.txt"
 MOONLIGHT_EXE = Path(r"C:\Users\cohen\AppData\Local\Programs\Moonlight\Moonlight.exe")
 _popos_cache: dict = {"at": 0.0, "data": {}}
 
@@ -173,25 +175,82 @@ def _fetch_popos_telemetry() -> dict:
 
 
 def get_popos_status() -> dict:
-    """Return awake/sleeping status and cached telemetry for the Pop!_OS node."""
+    """Return awake/locked/sleeping status and cached telemetry for the Pop!_OS node."""
     if not _tcp_up(POPOS_IP, 22, timeout=0.25):
         _popos_cache["at"] = 0.0
         _popos_cache["data"] = {}
-        return {"online": False, "state": "sleeping"}
+        if _tcp_up(POPOS_IP, POPOS_DROPBEAR_PORT, timeout=0.2):
+            return {"online": False, "locked": True, "state": "locked"}
+        return {"online": False, "locked": False, "state": "sleeping"}
     now = time.monotonic()
     if now - _popos_cache["at"] > 25.0 or not _popos_cache["data"]:
         data = _fetch_popos_telemetry()
         if data:
             _popos_cache["data"] = data
             _popos_cache["at"] = now
-    return {"online": True, "state": "awake", **_popos_cache["data"]}
+    return {"online": True, "locked": False, "state": "awake", **_popos_cache["data"]}
+
+
+def unlock_popos_luks(host: str = POPOS_IP, port: int = POPOS_DROPBEAR_PORT) -> dict:
+    """Send the LUKS passphrase to Pop!_OS Dropbear pre-boot SSH to decrypt root."""
+    if not POPOS_LUKS_FILE.exists():
+        return {"ok": False, "why": f"missing LUKS passphrase file: {POPOS_LUKS_FILE.name}"}
+    pw = POPOS_LUKS_FILE.read_text(encoding="utf-8").strip()
+    if not pw:
+        return {"ok": False, "why": "LUKS passphrase file is empty"}
+    key = Path.home() / ".ssh" / "id_ed25519"
+    cmd = [
+        "ssh",
+        "-p",
+        str(port),
+        "-i",
+        str(key),
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "UserKnownHostsFile=/dev/null",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=3",
+        f"root@{host}",
+    ]
+    try:
+        r = subprocess.run(
+            cmd,
+            input=f"{pw}\n",
+            capture_output=True,
+            text=True,
+            timeout=8.0,
+            creationflags=0x08000000,
+        )
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout or "unlock failed").strip()
+            return {"ok": False, "why": f"Pop!_OS LUKS unlock failed: {msg}"}
+        return {"ok": True, "why": "unlocked Pop!_OS disk encryption — booting"}
+    except Exception as exc:
+        return {"ok": False, "why": f"Pop!_OS LUKS unlock failed: {exc}"}
+
+
+def _wake_and_unlock(wait_sec: float = 35.0) -> None:
+    deadline = time.monotonic() + wait_sec
+    while time.monotonic() < deadline:
+        if _tcp_up(POPOS_IP, 22, timeout=0.35):
+            return
+        if _tcp_up(POPOS_IP, POPOS_DROPBEAR_PORT, timeout=0.35):
+            unlock_popos_luks()
+            return
+        time.sleep(0.75)
 
 
 def wake_popos(mac: str = POPOS_MAC) -> dict:
-    """Send a Wake-on-LAN magic packet to Pop!_OS without launching RDP."""
+    """Wake Pop!_OS via WoL (or unlock LUKS directly if sitting at pre-boot Dropbear)."""
     try:
+        if _tcp_up(POPOS_IP, POPOS_DROPBEAR_PORT, timeout=0.25):
+            return unlock_popos_luks()
         send_wol(mac)
-        return {"ok": True, "why": f"sent Wake-on-LAN packet to {POPOS_HOST}"}
+        threading.Thread(target=_wake_and_unlock, daemon=True).start()
+        return {"ok": True, "why": f"waking {POPOS_HOST} (auto-unlocks disk if cold boot)"}
     except OSError as exc:
         return {"ok": False, "why": f"WoL failed: {exc}"}
 
@@ -302,12 +361,17 @@ def _launch_desktop_client(host: str) -> str:
     return "Remote Desktop"
 
 
-def _wake_and_open(host: str, mac: str, port: int = 47989, wait_sec: float = 20.0) -> None:
+def _wake_and_open(host: str, mac: str, port: int = 47989, wait_sec: float = 65.0) -> None:
     deadline = time.monotonic() + wait_sec
+    last_unlock = 0.0
     while time.monotonic() < deadline:
         if _tcp_up(host, port, timeout=0.5):
             _launch_desktop_client(host)
             return
+        now = time.monotonic()
+        if now - last_unlock > 10.0 and _tcp_up(POPOS_IP, POPOS_DROPBEAR_PORT, timeout=0.35):
+            unlock_popos_luks()
+            last_unlock = now
         time.sleep(0.5)
     try:
         _launch_desktop_client(host)
@@ -316,12 +380,16 @@ def _wake_and_open(host: str, mac: str, port: int = 47989, wait_sec: float = 20.
 
 
 def open_popos_rdp(host: str = POPOS_HOST, mac: str = POPOS_MAC) -> dict:
-    """Wake Pop!_OS via WoL if sleeping, then launch Moonlight Desktop (or RDP fallback)."""
+    """Wake Pop!_OS via WoL if sleeping, auto-unlock LUKS if cold booting, then launch Moonlight."""
     port = 47989 if MOONLIGHT_EXE.exists() else 3389
     try:
         if _tcp_up(host, port, timeout=0.35):
             client = _launch_desktop_client(host)
             return {"ok": True, "why": f"opened {client} -> {host}"}
+        if _tcp_up(POPOS_IP, POPOS_DROPBEAR_PORT, timeout=0.25):
+            unlock_popos_luks()
+            threading.Thread(target=_wake_and_open, args=(host, mac, port), daemon=True).start()
+            return {"ok": True, "why": f"unlocking {host} disk — stream will open when booted"}
         send_wol(mac)
         threading.Thread(target=_wake_and_open, args=(host, mac, port), daemon=True).start()
         return {"ok": True, "why": f"waking {host} (WoL) — stream will open when ready"}

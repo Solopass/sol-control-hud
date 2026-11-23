@@ -79,18 +79,37 @@ def test_open_popos_rdp(monkeypatch, tmp_path):
     assert "not found" in err["why"]
 
 
-def test_popos_status_wake_and_sleep(monkeypatch):
+def test_popos_status_wake_and_sleep(monkeypatch, tmp_path):
     sol_pad._popos_cache["at"] = 0.0
     sol_pad._popos_cache["data"] = {}
     monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=22, timeout=0.25: False)
     st_off = sol_pad.get_popos_status()
-    assert st_off == {"online": False, "state": "sleeping"}
+    assert st_off == {"online": False, "locked": False, "state": "sleeping"}
+
+    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=22, timeout=0.25: port == sol_pad.POPOS_DROPBEAR_PORT)
+    st_locked = sol_pad.get_popos_status()
+    assert st_locked == {"online": False, "locked": True, "state": "locked"}
+
+    luks_file = tmp_path / "popos_luks.txt"
+    luks_file.write_text("testpass\n", encoding="utf-8")
+    monkeypatch.setattr(sol_pad, "POPOS_LUKS_FILE", luks_file)
 
     class FakeProc:
         def __init__(self, rc=0, stdout="", stderr=""):
             self.returncode = rc
             self.stdout = stdout
             self.stderr = stderr
+
+    unlock_inputs = []
+    monkeypatch.setattr(
+        sol_pad.subprocess,
+        "run",
+        lambda cmd, **kw: (unlock_inputs.append((cmd, kw.get("input"))), FakeProc(0, "", ""))[1],
+    )
+    ul = sol_pad.unlock_popos_luks()
+    assert ul["ok"] is True
+    assert unlock_inputs[0][1] == "testpass\n"
+    assert str(sol_pad.POPOS_DROPBEAR_PORT) in unlock_inputs[0][0]
 
     monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=22, timeout=0.25: True)
     monkeypatch.setattr(
@@ -105,8 +124,10 @@ def test_popos_status_wake_and_sleep(monkeypatch):
     assert st_on["gpu_temp_c"] == 29
     assert st_on["docker_running"] == 2
 
+    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=22, timeout=0.25: False)
     wols = []
     monkeypatch.setattr(sol_pad, "send_wol", lambda mac=sol_pad.POPOS_MAC: wols.append(mac))
+    monkeypatch.setattr(sol_pad.threading, "Thread", lambda *a, **kw: type("T", (), {"start": lambda self: None})())
     w = sol_pad.wake_popos()
     assert w["ok"] is True and wols == [sol_pad.POPOS_MAC]
 

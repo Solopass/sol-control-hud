@@ -34,13 +34,18 @@ function renderSolPad(p) {
       if (po.docker_running != null) bits.push(`${po.docker_running} Docker`);
       const extra = bits.length ? ` <span class="dim">· ${esc(bits.join(' · '))}</span>` : '';
       poEl.innerHTML = `<span style="color:var(--green)">Awake</span>${extra}`;
+    } else if (po.state === 'locked') {
+      poEl.innerHTML = `<span style="color:var(--amber)">Locked (Boot)</span>`;
     } else if (po.online === false) {
       poEl.innerHTML = `<span style="color:var(--amber)">Sleeping</span>`;
     } else {
       poEl.textContent = '–';
     }
   }
-  if ($('padPoposWakeBtn')) $('padPoposWakeBtn').hidden = Boolean(po.online);
+  if ($('padPoposWakeBtn')) {
+    $('padPoposWakeBtn').hidden = Boolean(po.online);
+    $('padPoposWakeBtn').textContent = po.state === 'locked' ? '🔓 Unlock' : '☀ Wake';
+  }
   if ($('padPoposSleepBtn')) $('padPoposSleepBtn').hidden = po.online === false;
   if ($('padPoposPowerBtn')) $('padPoposPowerBtn').hidden = po.online === false;
   if ($('padPoposStopServersBtn')) $('padPoposStopServersBtn').hidden = po.online === false || po.docker_running === 0;
