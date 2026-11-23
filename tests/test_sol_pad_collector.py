@@ -66,3 +66,40 @@ def test_open_popos_rdp(monkeypatch):
     err = sol_pad.open_popos_rdp()
     assert err["ok"] is False
     assert "not found" in err["why"]
+
+
+def test_popos_status_wake_and_sleep(monkeypatch):
+    sol_pad._popos_cache["at"] = 0.0
+    sol_pad._popos_cache["data"] = {}
+    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=22, timeout=0.25: False)
+    st_off = sol_pad.get_popos_status()
+    assert st_off == {"online": False, "state": "sleeping"}
+
+    class FakeProc:
+        def __init__(self, rc=0, stdout="", stderr=""):
+            self.returncode = rc
+            self.stdout = stdout
+            self.stderr = stderr
+
+    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=22, timeout=0.25: True)
+    monkeypatch.setattr(
+        sol_pad.subprocess,
+        "run",
+        lambda *a, **kw: FakeProc(0, "0.25\n8.3\n29\n2\n", ""),
+    )
+    st_on = sol_pad.get_popos_status()
+    assert st_on["online"] is True
+    assert st_on["state"] == "awake"
+    assert st_on["mem_avail_gb"] == 8.3
+    assert st_on["gpu_temp_c"] == 29
+    assert st_on["docker_running"] == 2
+
+    wols = []
+    monkeypatch.setattr(sol_pad, "send_wol", lambda mac=sol_pad.POPOS_MAC: wols.append(mac))
+    w = sol_pad.wake_popos()
+    assert w["ok"] is True and wols == [sol_pad.POPOS_MAC]
+
+    monkeypatch.setattr(sol_pad.subprocess, "run", lambda *a, **kw: FakeProc(0, "", ""))
+    s = sol_pad.sleep_popos()
+    assert s["ok"] is True
+    assert "sleep" in s["why"]

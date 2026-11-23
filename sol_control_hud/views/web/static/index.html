@@ -682,9 +682,11 @@
       </span>
     </div>
     <div class="row">
-      <span class="dim">Pop!_OS Remote (popos.lan)</span>
+      <span class="dim">Pop!_OS · <span id="padPoposStatus">–</span></span>
       <span>
-        <button class="mini go" id="padPoposRdpBtn" data-act="pad_rdp_popos" title="Open Windows Remote Desktop to Pop!_OS (popos.lan / popos.lan)">🖥 Connect Pop!_OS</button>
+        <button class="mini go" id="padPoposRdpBtn" data-act="pad_rdp_popos" title="Wake if sleeping &amp; open Windows Remote Desktop to Pop!_OS (popos.lan / popos.lan)">🖥 Connect Pop!_OS</button>
+        <button class="mini ghost" id="padPoposWakeBtn" data-act="pad_popos_wake" title="Send Wake-on-LAN packet to Pop!_OS">☀ Wake</button>
+        <button class="mini danger ghost" id="padPoposSleepBtn" data-act="pad_popos_sleep" title="Suspend Pop!_OS to sleep">💤 Sleep</button>
       </span>
     </div>
   </article>

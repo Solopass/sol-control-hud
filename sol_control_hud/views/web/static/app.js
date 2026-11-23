@@ -1323,6 +1323,25 @@ function renderSolPad(p) {
   if ($('padStartBtn')) $('padStartBtn').hidden = Boolean(sp.stream_running && sp.dock_running);
   if ($('padRestartBtn')) $('padRestartBtn').hidden = !running;
   if ($('padStopBtn')) $('padStopBtn').hidden = !running;
+
+  const po = sp.popos || {};
+  const poEl = $('padPoposStatus');
+  if (poEl) {
+    if (po.online) {
+      const bits = [];
+      if (po.mem_avail_gb != null) bits.push(`${po.mem_avail_gb}G free`);
+      if (po.gpu_temp_c != null) bits.push(`GPU ${po.gpu_temp_c}°C`);
+      if (po.docker_running != null) bits.push(`${po.docker_running} Docker`);
+      const extra = bits.length ? ` <span class="dim">· ${esc(bits.join(' · '))}</span>` : '';
+      poEl.innerHTML = `<span style="color:var(--green)">Awake</span>${extra}`;
+    } else if (po.online === false) {
+      poEl.innerHTML = `<span style="color:var(--amber)">Sleeping</span>`;
+    } else {
+      poEl.textContent = '–';
+    }
+  }
+  if ($('padPoposWakeBtn')) $('padPoposWakeBtn').hidden = Boolean(po.online);
+  if ($('padPoposSleepBtn')) $('padPoposSleepBtn').hidden = po.online === false;
 }
 // lag p50/p95, transport, errors. Empty when sol-deck sends none.
 function deckHealthHtml(client) {

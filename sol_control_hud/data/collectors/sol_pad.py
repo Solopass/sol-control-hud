@@ -85,6 +85,7 @@ def get_sol_pad_status() -> dict:
         "dock_running": dock_up,
         "state": state,
         "installed": STREAM_EXE.exists() and DOCK_EXE.exists(),
+        "popos": get_popos_status(),
     }
 
 
@@ -132,7 +133,86 @@ def restart_pad() -> dict:
 
 
 POPOS_HOST = "popos.lan"
+POPOS_IP = "popos.lan"
 POPOS_MAC = "00:00:00:00:00:00"
+_popos_cache: dict = {"at": 0.0, "data": {}}
+
+
+def _fetch_popos_telemetry() -> dict:
+    """Query lightweight CPU load, free RAM, GPU temp, and Docker count over SSH."""
+    cmd = (
+        "awk '{print $1}' /proc/loadavg; "
+        "awk '/MemAvailable/{printf \"%.1f\\n\", $2/1048576}' /proc/meminfo; "
+        "nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader 2>/dev/null || echo ''; "
+        "docker ps -q 2>/dev/null | wc -l"
+    )
+    try:
+        r = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=1", "popos", cmd],
+            capture_output=True,
+            text=True,
+            timeout=2.5,
+            creationflags=0x08000000,
+        )
+        if r.returncode != 0:
+            return {}
+        lines = [ln.strip() for ln in r.stdout.splitlines()]
+        out: dict = {}
+        if len(lines) >= 1 and lines[0]:
+            out["load1"] = lines[0]
+        if len(lines) >= 2 and lines[1]:
+            out["mem_avail_gb"] = float(lines[1])
+        if len(lines) >= 3 and lines[2].isdigit():
+            out["gpu_temp_c"] = int(lines[2])
+        if len(lines) >= 4 and lines[3].isdigit():
+            out["docker_running"] = int(lines[3])
+        return out
+    except Exception:
+        return {}
+
+
+def get_popos_status() -> dict:
+    """Return awake/sleeping status and cached telemetry for the Pop!_OS node."""
+    if not _tcp_up(POPOS_IP, 22, timeout=0.25):
+        _popos_cache["at"] = 0.0
+        _popos_cache["data"] = {}
+        return {"online": False, "state": "sleeping"}
+    now = time.monotonic()
+    if now - _popos_cache["at"] > 25.0 or not _popos_cache["data"]:
+        data = _fetch_popos_telemetry()
+        if data:
+            _popos_cache["data"] = data
+            _popos_cache["at"] = now
+    return {"online": True, "state": "awake", **_popos_cache["data"]}
+
+
+def wake_popos(mac: str = POPOS_MAC) -> dict:
+    """Send a Wake-on-LAN magic packet to Pop!_OS without launching RDP."""
+    try:
+        send_wol(mac)
+        return {"ok": True, "why": f"sent Wake-on-LAN packet to {POPOS_HOST}"}
+    except OSError as exc:
+        return {"ok": False, "why": f"WoL failed: {exc}"}
+
+
+def sleep_popos() -> dict:
+    """Suspend the Pop!_OS PC over SSH."""
+    try:
+        r = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2", "popos", "sudo -n systemctl suspend"],
+            capture_output=True,
+            text=True,
+            timeout=4.0,
+            creationflags=0x08000000,
+        )
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout or "suspend failed").strip()
+            return {"ok": False, "why": f"Pop!_OS sleep failed: {msg}"}
+        _popos_cache["at"] = 0.0
+        _popos_cache["data"] = {}
+        return {"ok": True, "why": "Pop!_OS is going to sleep"}
+    except Exception as exc:
+        return {"ok": False, "why": f"Pop!_OS sleep failed: {exc}"}
 
 
 def _tcp_up(host: str, port: int = 3389, timeout: float = 0.35) -> bool:

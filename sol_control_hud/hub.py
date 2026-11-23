@@ -406,7 +406,7 @@ class Hub:
                 self.collectors["security"].value = None
             log(f"security: {action} target={target} -> {res.get('why')}")
             return res
-        if action in ("pad_start", "pad_stop", "pad_restart", "pad_rdp_popos"):
+        if action in ("pad_start", "pad_stop", "pad_restart", "pad_rdp_popos", "pad_popos_wake", "pad_popos_sleep"):
             from .data.collectors import sol_pad
             if action == "pad_start":
                 res = sol_pad.start_pad()
@@ -414,6 +414,10 @@ class Hub:
                 res = sol_pad.stop_pad()
             elif action == "pad_rdp_popos":
                 res = sol_pad.open_popos_rdp()
+            elif action == "pad_popos_wake":
+                res = sol_pad.wake_popos()
+            elif action == "pad_popos_sleep":
+                res = sol_pad.sleep_popos()
             else:
                 res = sol_pad.restart_pad()
             if hasattr(self, "collectors") and "sol_pad" in self.collectors:
