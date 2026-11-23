@@ -132,10 +132,26 @@ def restart_pad() -> dict:
     return start_pad()
 
 
-POPOS_HOST = "popos.lan"
-POPOS_IP = "popos.lan"
-POPOS_MAC = "00:00:00:00:00:00"
-POPOS_DROPBEAR_PORT = 2222
+def _popos_config() -> dict:
+    """The Pop!_OS box's network details live in data/sol-pad.json (git-ignored machine state), not in this public
+    repo: {"popos": {"host": "popos.lan", "ip": "...", "mac": "aa:bb:cc:dd:ee:ff", "broadcast": "...",
+    "dropbear_port": 2222}}. Missing keys fall back to the host name (ip) or leave Wake-on-LAN off (mac)."""
+    import json
+    from ...paths import DATA_DIR
+    try:
+        data = json.loads((DATA_DIR / "sol-pad.json").read_text(encoding="utf-8"))
+        popos = data.get("popos") if isinstance(data, dict) else None
+        return popos if isinstance(popos, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+_POPOS = _popos_config()
+POPOS_HOST = str(_POPOS.get("host") or "popos.lan")
+POPOS_IP = str(_POPOS.get("ip") or POPOS_HOST)
+POPOS_MAC = str(_POPOS.get("mac") or "")
+POPOS_BROADCAST = str(_POPOS.get("broadcast") or "255.255.255.255")
+POPOS_DROPBEAR_PORT = int(_POPOS.get("dropbear_port") or 2222)
 POPOS_LUKS_FILE = Path(__file__).resolve().parents[2] / "data" / "popos_luks.txt"
 MOONLIGHT_EXE = Path(r"C:\Users\cohen\AppData\Local\Programs\Moonlight\Moonlight.exe")
 _popos_cache: dict = {"at": 0.0, "data": {}}
@@ -335,9 +351,11 @@ def _tcp_up(host: str, port: int = 3389, timeout: float = 0.35) -> bool:
         return False
 
 
-def send_wol(mac: str = POPOS_MAC, broadcast: str = "192.168.0.255") -> None:
+def send_wol(mac: str = POPOS_MAC, broadcast: str = POPOS_BROADCAST) -> None:
     """Broadcast a Wake-on-LAN magic packet for the target MAC address."""
-    hw = bytes.fromhex(mac.replace(":", "").replace("-", ""))
+    hw = bytes.fromhex(mac.replace(":", "").replace("-", "")) if mac else b""
+    if len(hw) != 6:
+        raise OSError("no Pop!_OS MAC address: set popos.mac in data/sol-pad.json")
     pkt = b"\xff" * 6 + hw * 16
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

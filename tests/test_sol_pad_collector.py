@@ -163,3 +163,22 @@ def test_popos_status_wake_and_sleep(monkeypatch, tmp_path):
     rb = sol_pad.reboot_popos()
     assert rb["ok"] is True and "rebooted" in rb["why"]
     assert "systemctl reboot" in pwr_calls[-1][-1]
+
+
+def test_popos_details_come_from_the_ignored_config(tmp_path, monkeypatch):
+    """IP / MAC stay out of this public repo: data/sol-pad.json (2026-11-23)."""
+    import json
+    from sol_control_hud.data.collectors import sol_pad
+    monkeypatch.setattr("sol_control_hud.paths.DATA_DIR", tmp_path)
+    assert sol_pad._popos_config() == {}
+    (tmp_path / "sol-pad.json").write_text("[1, 2]")
+    assert sol_pad._popos_config() == {}                       # wrong shape: ignored, not a crash
+    (tmp_path / "sol-pad.json").write_text(json.dumps({"popos": {"mac": "aa:bb:cc:dd:ee:ff"}}))
+    assert sol_pad._popos_config() == {"mac": "aa:bb:cc:dd:ee:ff"}
+
+
+def test_wake_without_a_mac_says_how_to_fix_it(monkeypatch):
+    from sol_control_hud.data.collectors import sol_pad
+    import pytest
+    with pytest.raises(OSError, match="sol-pad.json"):
+        sol_pad.send_wol("")
