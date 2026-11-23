@@ -384,9 +384,10 @@ class Hub:
         except (launcher.LaunchError, OSError, KeyError, ValueError, TypeError):
             _swallowed("hub.autostart")
 
-    def _refresh_launchpad(self) -> None:
-        """After a start / stop: look again on the next poll instead of serving the cached state."""
-        for key in ("ports", "media_probe", "projects", "media", "wsl"):
+    def _refresh_launchpad(self, wsl: bool = True) -> None:
+        """After a start / stop: look again on the next poll instead of serving the cached state. `wsl=False` (a
+        Windows project) keeps the WSL probes: re-running wsl.exe cost every click ~0.3 s (2026-11-22)."""
+        for key in ("ports", "projects", "media", *(("media_probe", "wsl") if wsl else ())):
             if hasattr(self, "collectors") and key in self.collectors:
                 self.collectors[key].value = None
 
@@ -965,12 +966,17 @@ class Hub:
         for step in (lambda: self.tray and self.tray.stop(), lambda: setattr(self.server, "should_exit", True),
                      lambda: self.metrics and self.metrics.close(),
                      self._stop_review, self.collector.stop, self.guard.stop,
-                     lambda: self.ticker and self.ticker._save_settings(), self.root.destroy):
+                     lambda: self.ticker and self.ticker._save_settings(), _save_git_cache, self.root.destroy):
             try:
                 step()
             except Exception:  # noqa: BLE001 - leave no matter what
                 _swallowed("hub.Hub._shutdown")
         os._exit(0)
+
+
+def _save_git_cache() -> None:
+    from .data.collectors import projects
+    projects.save_git_cache()
 
 
 def tell_running_hub(port: int, show: str | None) -> bool:

@@ -591,7 +591,7 @@ def test_launchpad_summary_never_boots_wsl(tmp_path, monkeypatch):
     reg = make_reg(ws)
     monkeypatch.setattr(projects, "load_registry", lambda path=None: json.loads(json.dumps(reg)))
     from sol_control_hud.data.collectors import ports
-    monkeypatch.setattr(ports, "_rows", lambda own_pid=None: [])
+    monkeypatch.setattr(ports, "_rows", lambda own_pid=None, cached=False: [])
 
     def run(*a, **k):
         raise AssertionError("no wsl.exe while WSL is off")

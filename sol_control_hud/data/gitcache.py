@@ -19,6 +19,7 @@ from typing import Callable
 
 MAX_AGE_S = 300.0  # a clean repo whose files you just edited shows as changed within this (the edit touches nothing in .git);
                    # 60 s cost ~2.5% of a core re-checking ~40 repos
+SAVE_EVERY_S = 30.0             # at most this often to disk (and once more at exit)
 _BASE = 6                       # length of the fingerprint's repo part (the rest is the dirty files' times)
 
 
@@ -77,6 +78,10 @@ class RepoCache:
         self._queue: list[tuple[str, Path, Callable, Callable, Callable]] = []
         self._queued: set[str] = set()
         self._worker: threading.Thread | None = None
+        self.persist: Path | None = None          # set by the owner: saved here, loaded on first use
+        self._loaded = False
+        self._saved_at = -1e9
+        self._unsaved = False
 
     def get(self, folder: Path, compute: Callable[[], object], paths: Callable[[object], tuple] = lambda v: (),
             keep: Callable[[object], bool] = lambda v: True):
@@ -84,6 +89,9 @@ class RepoCache:
         is returned but not remembered."""
         key = str(folder).lower()
         now = self._clock()
+        if self.persist and not self._loaded:
+            self.load()
+        self._maybe_save()
         with self._lock:
             hit = self._items.get(key)
         if hit and fingerprint(folder, hit[1]) == hit[0]:
@@ -103,7 +111,50 @@ class RepoCache:
             if fp is not None and fp[:_BASE] == before:
                 with self._lock:
                     self._items[key] = (fp, extra, now, value)
+                self._unsaved = True
+                self._maybe_save()
         return value
+
+    def _maybe_save(self) -> None:
+        """Save new entries at most every SAVE_EVERY_S; ones that arrive in between go out on a later call."""
+        if self.persist and self._unsaved and self._clock() - self._saved_at > SAVE_EVERY_S:
+            self.save()
+
+    # ---- kept across restarts: the first Projects card after a restart read git in ~47 repos (~8 s, 2026-11-22)
+    def save(self) -> None:
+        import json
+        if not self.persist:
+            return
+        now_m, now_w = self._clock(), time.time()
+        with self._lock:
+            rows = [{"key": k, "fp": list(v[0]), "extra": list(v[1]), "at": now_w - (now_m - v[2]), "value": v[3]}
+                    for k, v in self._items.items()]
+        try:
+            tmp = self.persist.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"version": 1, "items": rows}), encoding="utf-8")
+            tmp.replace(self.persist)
+            self._saved_at, self._unsaved = now_m, False
+        except (OSError, TypeError, ValueError):
+            from ..swallow import note
+            note("gitcache.save")
+
+    def load(self) -> None:
+        """Entries come back with their real age; each is still checked against the repo's fingerprint before use."""
+        import json
+        self._loaded = True
+        try:
+            data = json.loads(self.persist.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict) or data.get("version") != 1:
+            return
+        now_m, now_w = self._clock(), time.time()
+        with self._lock:
+            for r in data.get("items") or []:
+                try:
+                    self._items.setdefault(r["key"], (tuple(r["fp"]), tuple(r["extra"]), now_m - max(0.0, now_w - float(r["at"])), r["value"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
 
     def _enqueue(self, key: str, folder: Path, compute, paths, keep) -> None:
         with self._lock:

@@ -485,7 +485,7 @@ def network_status(max_age: float = 30.0) -> dict:
         except Exception:
             _swallowed("network.network_status.lan")
             lan = (_last or {}).get("lan") or {"devices": [], "online": 0, "new": 0, "alert": ""}
-        _last = {"pihole": pihole, "lan": lan, "tailscale": tailscale_status()}
+        _last = {"pihole": pihole, "lan": lan, "tailscale": tailscale_status_cached()}
         _last_at = time.time()
         return _last
 
@@ -493,8 +493,21 @@ def network_status(max_age: float = 30.0) -> dict:
 def last_status() -> dict:
     """What the last probe found, without probing (the ticker and the dashboard read this)."""
     if not _last:
-        return {"tailscale": tailscale_status()}
-    return {**_last, "tailscale": tailscale_status()}
+        return {"tailscale": tailscale_status_cached()}
+    return {**_last, "tailscale": tailscale_status_cached()}
+
+
+TS_CACHE_S = 10.0
+_ts_status_cache: dict = {"at": -1e9, "value": None}
+
+
+def tailscale_status_cached(max_age: float = TS_CACHE_S, clock=time.monotonic) -> dict:
+    """tailscale_status() at most every `max_age` s for the readers (ticker, dashboard): each call scanned every
+    process for the tray app, ~4% of the HUD's busy time (2026-11-22). The buttons still ask fresh."""
+    hit = _ts_status_cache
+    if hit["value"] is not None and clock() - hit["at"] < max_age:
+        return hit["value"]
+    return tailscale_status()
 
 
 # ---------------------------------------------------------------------------------------------------- Tailscale on-demand
@@ -580,7 +593,7 @@ def tailscale_status() -> dict:
         remaining_s = None
 
     state = "up" if up else ("running" if running else "stopped")
-    return {
+    out = {
         "installed": True,
         "running": running,
         "tray": tray,
@@ -589,6 +602,8 @@ def tailscale_status() -> dict:
         "up_until": deadline,
         "remaining_s": remaining_s,
     }
+    _ts_status_cache.update(at=time.monotonic(), value=out)      # every fresh answer refreshes the readers' copy
+    return out
 
 
 def tailscale_open() -> dict:

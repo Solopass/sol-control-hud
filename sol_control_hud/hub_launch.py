@@ -64,7 +64,14 @@ def _launch(self, kind: str, name: str, op: str, body: dict | None = None) -> di
         filename = str(b.get("filename") or "watch-history.html")
         r = solang_tools.save_takeout_upload(content, filename)
         return {"ok": True, "why": f"Loaded Takeout file: {filename}", "status": r.get("status")}
-    self._refresh_launchpad()                     # act on the current state, not a cached one
+    if kind == "project" and op in ("folder", "editor", "file"):
+        try:                                      # opening needs no card state: no rebuild, so the window comes at once
+            return launcher.open_project(reg, name, op)
+        except launcher.LaunchError as e:
+            return {"ok": False, "why": str(e)}
+    spec = (reg.get("projects") or {}).get(name) or {}
+    in_wsl = kind != "project" or spec.get("runs_in") == "wsl" or bool(spec.get("media"))
+    self._refresh_launchpad(wsl=in_wsl)           # act on the current state, not a cached one
     try:
         rows = self.projects_payload()["projects"]
         tiles = self.media_payload()["tiles"]
@@ -94,5 +101,5 @@ def _launch(self, kind: str, name: str, op: str, body: dict | None = None) -> di
     if op in ("start", "stop", "sidecar_start", "sidecar_stop"):
         _hub.log(f"{kind} {op} {name}{' ' + str(b.get('sidecar')) if op.startswith('sidecar') else ''}: {r.get('why')}")
         projects.forget_git(name)
-        self._refresh_launchpad()
+        self._refresh_launchpad(wsl=in_wsl)
     return r

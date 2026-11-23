@@ -9,9 +9,11 @@ the Localhost card's listener sample (no extra port scan) plus the media card's 
 """
 from __future__ import annotations
 
+import copy
 import json
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -41,15 +43,19 @@ MD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 # ---------------------------------------------------------------- registry
 def load_registry(path: Path | str = REGISTRY_FILE, user_file: Path | str | None = None) -> dict:
-    try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        data = {}
+    data = copy.deepcopy(_by_stat("yaml", Path(path), _parse_yaml) or {})    # parsed once per change; callers edit it
     data.setdefault("workspace", r"D:\Workspace")
     for key in ("hidden", "projects", "media"):
         data[key] = {str(k): (v if v is not None else {}) for k, v in (data.get(key) or {}).items()}
     data["user"] = load_user(user_file)
     return data
+
+
+def _parse_yaml(path: Path) -> dict:
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
 
 
 # ---------------------------------------------------------------- your own tags and hides (from the card)
@@ -120,6 +126,42 @@ def _readme(folder: Path) -> str:
     return ""
 
 
+_file_cache: dict[tuple, tuple] = {}       # (kind, path) -> (mtime_ns, size, value)
+_file_lock = threading.Lock()
+
+
+def _by_stat(kind: str, path: Path, load):
+    """load(path), re-run only when the file's modified time or size changed (or it appeared / went away).
+    README and launch.json reads were 79 ms of every 200 ms Projects card build (2026-11-22)."""
+    try:
+        st = path.stat()
+        sig = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        sig = None
+    key = (kind, str(path))
+    with _file_lock:
+        hit = _file_cache.get(key)
+    if hit and hit[0] == sig:
+        return hit[1]
+    value = load(path) if sig else None
+    with _file_lock:
+        _file_cache[key] = (sig, value)
+    return value
+
+
+def readme_info_for(folder: Path) -> dict:
+    """readme_info() of the folder's README, cached until that file changes."""
+    for name in README_NAMES:
+        info = _by_stat("readme", folder / name, lambda p: readme_info(_readme_file(p)))
+        if info is not None:
+            return info
+    return readme_info("")
+
+
+def _readme_file(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")[:20000]
+
+
 def _plain(line: str) -> str:
     """Markdown -> plain words for a one-line description."""
     line = MD_LINK_RE.sub(r"\1", line)
@@ -177,6 +219,10 @@ def open_file_for(folder: Path, spec: dict, has_start: bool | None = None) -> st
 
 # ---------------------------------------------------------------- launch.json
 def _read_launch(path: Path) -> list[dict]:
+    return _by_stat("launch", path, _parse_launch) or []
+
+
+def _parse_launch(path: Path) -> list[dict]:
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
@@ -236,6 +282,24 @@ def _git(folder: Path, *args: str) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
+REMOTE_RE = re.compile(r'^\s*\[remote\s+"origin"\]\s*$(?P<body>.*?)(?=^\s*\[|\Z)', re.M | re.S)
+
+
+def origin_url(folder: Path) -> str | None:
+    """remote.origin.url, read from .git/config (no git process); asks git when the config includes other files."""
+    try:
+        text = (folder / ".git" / "config").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return _git(folder, "config", "--get", "remote.origin.url")
+    if re.search(r"^\s*\[include", text, re.M | re.I):
+        return _git(folder, "config", "--get", "remote.origin.url")
+    m = REMOTE_RE.search(text)
+    if not m:
+        return None
+    u = re.search(r"^\s*url\s*=\s*(.+?)\s*$", m.group("body"), re.M)
+    return u.group(1) if u else None
+
+
 def github_url(remote: str | None) -> str | None:
     m = GITHUB_RE.search((remote or "").strip())
     return f"https://github.com/{m.group('path')}" if m else None
@@ -253,8 +317,9 @@ def _git_info(folder: Path, now: float | None = None) -> tuple[dict | None, str]
     from ..snapshot import dirty_age_days
     now = time.time() if now is None else now
     log = (_git(folder, "log", "-1", "--format=%ct%x09%s") or "").strip()
-    porcelain = _git(folder, "status", "--porcelain") or ""
-    remote = _git(folder, "config", "--get", "remote.origin.url")
+    from ..snapshot import repo_porcelain          # the ticker's dirty check runs the same `git status`: share it
+    porcelain = repo_porcelain(folder) or ""
+    remote = origin_url(folder)
     commit_t, _, subject = log.partition("\t")
     files = [ln for ln in porcelain.splitlines() if ln.strip()]
     return ({"last_commit": float(commit_t) if commit_t.isdigit() else None, "subject": subject[:120],
@@ -268,6 +333,9 @@ _git_cache = gitcache.RepoCache(GIT_TTL_S, background=True)   # an old entry nev
 def cached_git(folder: Path, max_age: float = GIT_TTL_S) -> dict | None:
     """git_info(), re-run only when the repo changed (data/gitcache.py) or after `max_age` seconds."""
     _git_cache.max_age = max_age
+    if _git_cache.persist is None and not _git_cache._loaded:
+        from ...paths import DATA_DIR
+        _git_cache.persist = DATA_DIR / "gitcache.json"      # git-ignored machine state; tests use their own DATA_DIR
     box: dict = {}
 
     def run():
@@ -279,6 +347,11 @@ def cached_git(folder: Path, max_age: float = GIT_TTL_S) -> dict | None:
 
 def forget_git(name: str | None = None) -> None:
     _git_cache.forget(name)
+
+
+def save_git_cache() -> None:
+    """At exit: keep what git said for the next start."""
+    _git_cache.save()
 
 
 # ---------------------------------------------------------------- what runs
@@ -344,20 +417,39 @@ def find_project_proc(folder: Path, name: str) -> dict | None:
                 pass
 
     marker = _norm(str(folder))
-    for p in psutil.process_iter(["pid", "name"]):
-        try:
-            p_name = (p.name() or "").lower()
-            if not any(k in p_name for k in ("bun", "node", "powershell", "cmd", "python")):
-                continue
-            cwd = _norm(p.cwd()) if p.cwd() else ""
-            if cwd == marker or cwd.startswith(marker + "\\"):
-                cmd = [str(x).lower() for x in p.cmdline() if x]
-                if any("build.ts" in x or "dev" in x or "watch" in x for x in cmd):
-                    up_s = max(1, int(time.time() - p.create_time()))
-                    return {"port": None, "pid": p.pid, "where": "windows", "up_seconds": up_s, "kind": "watcher"}
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    for pid, cwd, cmd, created in watcher_candidates():
+        if cwd == marker or cwd.startswith(marker + "\\"):
+            if any("build.ts" in x or "dev" in x or "watch" in x for x in cmd):
+                up_s = max(1, int(time.time() - created))
+                return {"port": None, "pid": pid, "where": "windows", "up_seconds": up_s, "kind": "watcher"}
     return None
+
+
+WATCHER_NAMES = ("bun", "node", "powershell", "cmd", "python")
+CANDIDATES_TTL_S = 2.0
+_cand_lock = threading.Lock()
+_cand: tuple[float, list] = (-1e9, [])
+
+
+def watcher_candidates(clock=time.monotonic) -> list[tuple[int, str, list[str], float]]:
+    """(pid, working folder, lower-case command line, start time) of every process that could be a project's watcher,
+    from ONE process scan shared by all folders for CANDIDATES_TTL_S. It used to be one scan (reading every matching
+    process's cwd) per portless project: 20% of the HUD's busy time with the dashboard open (py-spy, 2026-11-22)."""
+    global _cand
+    with _cand_lock:
+        if clock() - _cand[0] < CANDIDATES_TTL_S:
+            return _cand[1]
+        out = []
+        for p in psutil.process_iter(["pid", "name"]):
+            try:
+                if not any(k in (p.info.get("name") or "").lower() for k in WATCHER_NAMES):
+                    continue
+                cwd = p.cwd()
+                out.append((p.pid, _norm(cwd) if cwd else "", [str(x).lower() for x in p.cmdline() if x], p.create_time()))
+            except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+                continue
+        _cand = (clock(), out)
+        return out
 
 
 # ---------------------------------------------------------------- the card
@@ -387,7 +479,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
         is_repo = (folder / ".git").exists()
         # a loose folder (no git, not in the registry): listed under "hidden" so it can still be found and shown
         loose = not is_repo and name not in reg["projects"] and name not in reg["hidden"]
-        info = readme_info(_readme(folder))
+        info = readme_info_for(folder)
         launch = launch_config(folder)
         start = spec.get("start") or ({"cmd": launch["cmd"]} if launch else None)
         port = spec.get("port") or (launch or {}).get("port") or (media or {}).get("port")

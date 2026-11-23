@@ -318,7 +318,7 @@ def launchpad_summary(wsl_up: bool, run=subprocess.run) -> dict:
     same systemd/ss probe as the card."""
     from . import ports, projects
     reg = projects.load_registry()
-    listening = ports._rows()
+    listening = ports._rows(cached=True)     # what each listener is: the card's 2026-11-22 cache, not 170 ms of fresh process reads
     probe = wsl_probe(reg["media"], wsl_port_list(reg), reg.get("wsl_distro", "Ubuntu-24.04"),
                       "Running" if wsl_up else None, run=run)
     rows = projects.project_rows(reg, listening, running_ports(reg, probe), git=lambda folder: None)
