@@ -110,7 +110,15 @@ def test_popos_status_wake_and_sleep(monkeypatch):
     w = sol_pad.wake_popos()
     assert w["ok"] is True and wols == [sol_pad.POPOS_MAC]
 
-    monkeypatch.setattr(sol_pad.subprocess, "run", lambda *a, **kw: FakeProc(0, "", ""))
+    sleep_calls = []
+
+    def fake_sleep_run(cmd, **kwargs):
+        sleep_calls.append(cmd)
+        return FakeProc(0, "", "")
+
+    monkeypatch.setattr(sol_pad.subprocess, "run", fake_sleep_run)
     s = sol_pad.sleep_popos()
     assert s["ok"] is True
     assert "sleep" in s["why"]
+    assert sleep_calls[0][:2] == ["taskkill", "/IM"] and "Moonlight.exe" in sleep_calls[0]
+    assert sleep_calls[1][0] == "ssh" and "systemctl suspend" in sleep_calls[1][-1]

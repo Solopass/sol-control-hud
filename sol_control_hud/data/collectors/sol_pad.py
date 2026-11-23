@@ -197,13 +197,26 @@ def wake_popos(mac: str = POPOS_MAC) -> dict:
 
 
 def sleep_popos() -> dict:
-    """Suspend the Pop!_OS PC over SSH."""
+    """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, and suspend."""
+    subprocess.run(
+        ["taskkill", "/IM", "Moonlight.exe", "/T", "/F"],
+        capture_output=True,
+        text=True,
+        creationflags=0x08000000,
+    )
+    remote_cmd = (
+        "if pgrep -u jake -x steam >/dev/null 2>&1; then "
+        "steam -shutdown >/dev/null 2>&1 || true; "
+        "for _ in $(seq 1 10); do pgrep -u jake -x steam >/dev/null 2>&1 || break; sleep 0.3; done; "
+        "fi; "
+        "sudo -n systemctl suspend"
+    )
     try:
         r = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2", "popos", "sudo -n systemctl suspend"],
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2", "popos", remote_cmd],
             capture_output=True,
             text=True,
-            timeout=4.0,
+            timeout=8.0,
             creationflags=0x08000000,
         )
         if r.returncode != 0:
@@ -211,7 +224,7 @@ def sleep_popos() -> dict:
             return {"ok": False, "why": f"Pop!_OS sleep failed: {msg}"}
         _popos_cache["at"] = 0.0
         _popos_cache["data"] = {}
-        return {"ok": True, "why": "Pop!_OS is going to sleep"}
+        return {"ok": True, "why": "disconnected Moonlight, closed Steam, and put Pop!_OS to sleep"}
     except Exception as exc:
         return {"ok": False, "why": f"Pop!_OS sleep failed: {exc}"}
 
