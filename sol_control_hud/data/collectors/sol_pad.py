@@ -128,3 +128,13 @@ def restart_pad() -> dict:
     stop_pad()
     time.sleep(0.35)
     return start_pad()
+
+
+def open_popos_rdp(host: str = "popos.lan") -> dict:
+    """Launch Windows Remote Desktop (mstsc.exe) connected to the local Pop!_OS PC."""
+    try:
+        flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        subprocess.Popen(["mstsc.exe", f"/v:{host}"], creationflags=flags)
+        return {"ok": True, "why": f"opened Remote Desktop -> {host}"}
+    except OSError as exc:
+        return {"ok": False, "why": f"failed to open mstsc.exe: {exc}"}
