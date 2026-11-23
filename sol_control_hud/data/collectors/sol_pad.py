@@ -240,7 +240,11 @@ def send_wol(mac: str = POPOS_MAC, broadcast: str = "192.168.0.255") -> None:
 def _launch_desktop_client(host: str) -> str:
     flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
     if MOONLIGHT_EXE.exists():
-        subprocess.Popen([str(MOONLIGHT_EXE), "stream", host, "Desktop", "--windowed"], creationflags=flags)
+        subprocess.Popen(
+            [str(MOONLIGHT_EXE), "--display-mode", "windowed", "stream", host, "Desktop"],
+            cwd=str(MOONLIGHT_EXE.parent),
+            creationflags=flags,
+        )
         return "Moonlight"
     subprocess.Popen(["mstsc.exe", f"/v:{host}"], creationflags=flags)
     return "Remote Desktop"
