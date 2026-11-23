@@ -14,6 +14,13 @@ Do **not** `Stop-Process` / `taskkill` the `pythonw.exe -m sol_control_hud` proc
 crash: the HUD health card counts it ("ended without Exit"), three in a day turn it red (TROUBLE), and a kill can
 land in the middle of a save. On 2026-10-10 three restarts by killing, one after each commit, did exactly that.
 
+## The chain runner is a separate process
+`python -m sol_control_hud.chains daemon` runs the chains (schedules, watches, lanes) in its own process, kept alive by
+sol-net's watcher (`bin\sol-watch.exe`). Restarting the HUD does **not** reload chain code (`chains/*.py`, including
+`file_tools.Policy`): the daemon has to restart too. When it exits, the watcher starts it again within seconds, and a run it
+interrupted is recovered. Agents: ask Jake before stopping it, and check `python -m sol_control_hud.chains runs` first
+so nothing is mid-run.
+
 ## Before you commit
 The pre-commit hook (`.githooks/pre-commit`) runs, in order: `scripts/check_names.py` (no new undefined names in
 staged Python), `node --check` on staged `.js` files (via WSL), then the whole test suite. Don't skip it
