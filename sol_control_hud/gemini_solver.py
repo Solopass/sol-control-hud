@@ -313,22 +313,53 @@ def chat_text(
     timeout: float = 60.0,
     client: httpx.Client | None = None,
 ) -> str:
-    """Plain text chat with Gemini (the Playground). Returns the reply text; raises GeminiError.
+    """Plain text chat with Gemini (the Playground). Returns the reply text; raises GeminiError."""
+    return chat_text_model(prompt, system=system, model=model, api_key=api_key, timeout=timeout, client=client)[0]
+
+
+TRANSIENT = ("503", "500", "502", "504", "unavailable", "timeout", "timed out", "rate limit", "429")
+
+
+def chat_text_model(
+    prompt: str,
+    system: str = "",
+    model: str | None = None,
+    api_key: str | None = None,
+    timeout: float = 60.0,
+    client: httpx.Client | None = None,
+) -> tuple[str, str]:
+    """(reply text, the model that answered). Tries the asked-for model, then the saved one (settings `gemini_model`),
+    then FALLBACK_MODELS: when a model is overloaded (503) it moves on at once instead of retrying it, which made the
+    Playground wait ~1 min and then fail (2026-11-22). Raises GeminiError.
     The key goes in the x-goog-api-key header, not the URL, so it can't show up in an httpx error message."""
     key = api_key or get_api_key()
     if not key:
         raise GeminiError("no Gemini API key set")
     if not str(prompt).strip():
         raise GeminiError("empty prompt")
-    use_model = (model or "").strip() or get_model()
+    models: list[str] = []
+    for m in ((model or "").strip(), get_model(), *FALLBACK_MODELS):
+        if m and m not in models:
+            models.append(m)
     payload: dict = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.7, "maxOutputTokens": 2048},
     }
     if system.strip():
         payload["systemInstruction"] = {"parts": [{"text": system}]}
-    url = API_URL_TEMPLATE.format(model=use_model)
     headers = {"x-goog-api-key": key}
+    for i, use_model in enumerate(models):
+        last = i == len(models) - 1
+        try:
+            return _chat_once(use_model, payload, headers, timeout, client, retries=2 if last else 1), use_model
+        except GeminiError as e:
+            if last or not any(t in str(e).lower() for t in TRANSIENT):
+                raise GeminiError(_scrub(str(e), key)) from None
+    raise GeminiError("no Gemini model to try")
+
+
+def _chat_once(use_model: str, payload: dict, headers: dict, timeout: float, client, retries: int) -> str:
+    url = API_URL_TEMPLATE.format(model=use_model)
 
     def _execute() -> str:
         local_client = client or httpx.Client(timeout=timeout)
@@ -348,11 +379,11 @@ def chat_text(
                 local_client.close()
 
     try:
-        return call_with_retry(_execute, max_retries=2)
-    except GeminiError as e:
-        raise GeminiError(_scrub(str(e), key)) from None
+        return call_with_retry(_execute, max_retries=retries, base_delay=1.5)
+    except GeminiError:
+        raise
     except httpx.HTTPError as e:
-        raise GeminiError(_scrub(f"{type(e).__name__}: {e}", key)) from None
+        raise GeminiError(f"{type(e).__name__}: {e}") from None
 
 
 def _clean_and_parse_json(text: str) -> dict:

@@ -219,3 +219,29 @@ def test_chat_text_blocked_answer():
     client.post.return_value = _resp(payload={"candidates": []})
     with pytest.raises(gemini_solver.GeminiError, match="no answer"):
         gemini_solver.chat_text("hi", api_key="k", client=client)
+
+
+def test_chat_overloaded_model_falls_through_to_the_next_at_once(monkeypatch):
+    """A 503 on the asked-for model moves straight on (saved model, then fallbacks): no minute of retries."""
+    slept = []
+    monkeypatch.setattr(gemini_solver.time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(gemini_solver, "get_model", lambda *a, **k: "gemini-saved")
+    ok = _resp(payload={"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+    client = MagicMock()
+    client.post.side_effect = lambda url, **k: _resp(status=503) if "gemini-busy" in url else ok
+    text, used = gemini_solver.chat_text_model("hi", model="gemini-busy", api_key="SECRETKEY123", client=client)
+    assert (text, used) == ("OK", "gemini-saved")
+    assert slept == [] and client.post.call_count == 2
+
+
+def test_chat_every_model_overloaded_reports_it_without_the_key(monkeypatch):
+    monkeypatch.setattr(gemini_solver.time, "sleep", lambda s: None)
+    monkeypatch.setattr(gemini_solver, "get_model", lambda *a, **k: "gemini-saved")
+    client = MagicMock()
+    client.post.side_effect = lambda url, **k: _resp(status=503)
+    with pytest.raises(gemini_solver.GeminiError, match="503") as ei:
+        gemini_solver.chat_text_model("hi", model="gemini-busy", api_key="SECRETKEY123", client=client)
+    assert "SECRETKEY123" not in str(ei.value)
+    tried = [c.args[0].rsplit("/", 1)[1] for c in client.post.call_args_list]
+    assert tried[0].startswith("gemini-busy") and tried[1].startswith("gemini-saved")
+    assert any(t.startswith(gemini_solver.FALLBACK_MODELS[-1]) for t in tried)

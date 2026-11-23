@@ -212,9 +212,9 @@ def test_playground_cloud_model_never_gets_local_context(app_hub, monkeypatch):
     searched, sent = [], []
     monkeypatch.setattr(index_tools, "search", lambda *a, **k: searched.append(a) or [])
     monkeypatch.setattr(gemini_solver, "get_api_key", lambda *a, **k: "fake")
-    monkeypatch.setattr(gemini_solver, "chat_text", lambda prompt, **k: sent.append(prompt) or "hi")
+    monkeypatch.setattr(gemini_solver, "chat_text_model", lambda prompt, **k: (sent.append(prompt) or "hi", "gemini-3.6-flash"))
     r = _pg(c, model="gemini-3.8-flash", prompt="my private question", use_context=True)
-    assert r["ok"] is True and r["text"] == "hi"
+    assert r["ok"] is True and r["text"] == "hi" and r["model"] == "gemini-3.6-flash"   # the model that answered
     assert searched == []
     assert sent == ["my private question"]
     assert r["context_skipped"] is True and "cloud" in r["context_note"]
@@ -225,7 +225,7 @@ def test_playground_gemini_without_key_says_so(app_hub, monkeypatch):
     from sol_control_hud import gemini_solver
     h, c = app_hub
     monkeypatch.setattr(gemini_solver, "get_api_key", lambda *a, **k: None)
-    monkeypatch.setattr(gemini_solver, "chat_text", lambda *a, **k: pytest.fail("no key: no call"))
+    monkeypatch.setattr(gemini_solver, "chat_text_model", lambda *a, **k: pytest.fail("no key: no call"))
     assert _pg(c, model="gemini-3.8-flash", prompt="hi") == {"ok": False, "why": "no Gemini API key set"}
 
 
@@ -236,7 +236,7 @@ def test_playground_gemini_error_never_shows_the_key(app_hub, monkeypatch):
 
     def boom(*a, **k):
         raise gemini_solver.GeminiError("failed for https://x/y?key=SECRETKEY123 with SECRETKEY123")
-    monkeypatch.setattr(gemini_solver, "chat_text", boom)
+    monkeypatch.setattr(gemini_solver, "chat_text_model", boom)
     r = _pg(c, model="gemini-3.8-flash", prompt="hi")
     assert r["ok"] is False and "SECRETKEY123" not in json.dumps(r)
 

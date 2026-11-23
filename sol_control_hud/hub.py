@@ -1590,11 +1590,11 @@ class Hub:
                 if not key:
                     return {"ok": False, "why": "no Gemini API key set"}
                 try:
-                    text = gemini_solver.chat_text(augmented_prompt, system=system, model=model, api_key=key)
+                    text, used = gemini_solver.chat_text_model(augmented_prompt, system=system, model=model, api_key=key)
                     dt = time.monotonic() - t0
                     return {
                         "ok": True,
-                        "model": model,
+                        "model": used,                     # a fallback when the asked-for one was overloaded
                         "text": text,
                         "elapsed_s": round(dt, 2),
                         "tok_s": round(len(text) / 4.0 / max(dt, 0.001), 1),
