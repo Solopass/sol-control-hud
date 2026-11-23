@@ -628,3 +628,12 @@ def test_sync_tasks_creates_and_deduplicates(tmp_path):
 
 
 
+
+
+def test_default_policy_reads_claude_log_but_never_writes_it():
+    """The Daily work summary chain gathers D:\AI\Cache\claude-log (allowed 2026-11-23); the rest of AI\Cache stays out."""
+    from sol_control_hud.chains import file_tools as ft
+    pol = ft.Policy()
+    assert ft._under(Path(r"D:\AI\Cache\claude-log\2026-11-23.jsonl"), pol.read_roots)
+    assert not ft._under(Path(r"D:\AI\Cache\other\x.txt"), pol.read_roots)
+    assert not ft._under(Path(r"D:\AI\Cache\claude-log\x.md"), pol.write_roots)

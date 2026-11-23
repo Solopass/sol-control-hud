@@ -39,7 +39,10 @@ class FileToolError(Exception):
 @dataclass
 class Policy:
     read_roots: list[str] = field(default_factory=lambda: [r"D:\OBVLT", r"D:\Polymatica Vault", r"D:\Workspace", r"D:\Output",
-                                                           r"D:\AI\Vault"])
+                                                           r"D:\AI\Vault",
+                                                           # Claude Code session logs, read-only, for the Daily work
+                                                           # summary chain (Jake allowed it 2026-11-23); not all of AI\Cache
+                                                           r"D:\AI\Cache\claude-log"])
     write_roots: list[str] = field(default_factory=lambda: [r"D:\OBVLT\1Notebook", r"D:\Output\chains", r"D:\AI\Vault\Chains"])
     repo_roots: list[str] = field(default_factory=lambda: [r"D:\Workspace"])
 
