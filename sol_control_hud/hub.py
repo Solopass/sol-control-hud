@@ -28,7 +28,7 @@ import traceback
 import webbrowser
 from pathlib import Path
 
-from fastapi import Request   # module level: annotations are strings here, FastAPI resolves them from globals
+from fastapi import Request  # noqa: F401 - used by hub_web.py as _hub.Request (route annotations)
 
 from . import deck_services, health, heal, models_ctl
 from .data.collectors import engines, vram
