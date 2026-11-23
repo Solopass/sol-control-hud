@@ -24,6 +24,11 @@ More than one agent works in this repo at the same time; on 2026-10-19 a launchp
 another agent's half-finished dashboard work into it under the wrong message. Check `git status` before committing
 and leave changes you didn't make alone.
 
+Even `git add <paths>` isn't enough: the index is shared, and the hook's 2-minute test run is a wide window in which
+another agent's plain `git commit` takes your staged files under its message (happened twice on 2026-11-22). Commit
+by path instead: `git add -N <new files>` (registers them without staging content), then
+`git commit -m "..." -- <your paths>`. Path commits work since tests/conftest.py drops the hook's `GIT_*` variables.
+
 ## Things that look harmless but aren't
 - **Never send HTTP to media-api (:8080) or speedman (:8081) just to look.** They are systemd socket-activated in
   WSL: any request starts them. Read their state from systemd / their files (see `data/collectors/media_apis.py`).
