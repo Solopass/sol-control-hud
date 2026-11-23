@@ -38,3 +38,12 @@ class FakeCollector:
 def no_real_collector_in_the_ticker(monkeypatch):
     import sol_control_hud.views.ticker as ticker
     monkeypatch.setattr(ticker, "TickerCollector", FakeCollector)
+
+
+@pytest.fixture(autouse=True)
+def no_git_hook_environment(monkeypatch):
+    """The pre-commit hook runs these tests with GIT_INDEX_FILE (and for some commits GIT_DIR...) exported. A test that
+    runs `git` in its own temp repo then wrote into the commit's index: `git commit -- <paths>` failed with "invalid
+    object ... public/lib.js" (test_chains_engine's repo, 2026-11-22). Tests never get the hook's git variables."""
+    for k in [k for k in os.environ if k.startswith("GIT_") and k not in ("GIT_EDITOR",)]:
+        monkeypatch.delenv(k, raising=False)
