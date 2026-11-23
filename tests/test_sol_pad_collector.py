@@ -37,7 +37,7 @@ def test_open_popos_rdp(monkeypatch, tmp_path):
     res = sol_pad.open_popos_rdp()
     assert res["ok"] is True
     assert "opened Moonlight" in res["why"]
-    assert calls[0][0] == [str(fake_moonlight), "--display-mode", "windowed", "stream", "popos.lan", "Desktop"]
+    assert calls[0][0] == [str(fake_moonlight), "--display-mode", "windowed", "--absolute-mouse", "stream", "popos.lan", "Desktop"]
     assert calls[0][1]["cwd"] == str(tmp_path)
 
     # Fallback to mstsc.exe if Moonlight is missing

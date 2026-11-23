@@ -352,7 +352,7 @@ def _launch_desktop_client(host: str) -> str:
     flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
     if MOONLIGHT_EXE.exists():
         subprocess.Popen(
-            [str(MOONLIGHT_EXE), "--display-mode", "windowed", "stream", host, "Desktop"],
+            [str(MOONLIGHT_EXE), "--display-mode", "windowed", "--absolute-mouse", "stream", host, "Desktop"],
             cwd=str(MOONLIGHT_EXE.parent),
             creationflags=flags,
         )
