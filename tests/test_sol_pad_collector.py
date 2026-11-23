@@ -23,18 +23,28 @@ def test_get_sol_pad_status_states(monkeypatch):
     assert st4["state"] == "offline"
 
 
-def test_open_popos_rdp(monkeypatch):
+def test_open_popos_rdp(monkeypatch, tmp_path):
     calls = []
 
     def fake_popen(cmd, **kwargs):
         calls.append((cmd, kwargs))
 
+    fake_moonlight = tmp_path / "Moonlight.exe"
+    fake_moonlight.write_text("", encoding="utf-8")
+    monkeypatch.setattr(sol_pad, "MOONLIGHT_EXE", fake_moonlight)
     monkeypatch.setattr(sol_pad.subprocess, "Popen", fake_popen)
-    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=3389, timeout=0.35: True)
+    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=47989, timeout=0.35: True)
     res = sol_pad.open_popos_rdp()
     assert res["ok"] is True
-    assert "opened Remote Desktop" in res["why"]
-    assert calls[0][0] == ["mstsc.exe", "/v:popos.lan"]
+    assert "opened Moonlight" in res["why"]
+    assert calls[0][0] == [str(fake_moonlight), "stream", "popos.lan", "Desktop", "--windowed"]
+
+    # Fallback to mstsc.exe if Moonlight is missing
+    monkeypatch.setattr(sol_pad, "MOONLIGHT_EXE", tmp_path / "missing.exe")
+    res_rdp = sol_pad.open_popos_rdp()
+    assert res_rdp["ok"] is True
+    assert "opened Remote Desktop" in res_rdp["why"]
+    assert calls[1][0] == ["mstsc.exe", "/v:popos.lan"]
 
     # When sleeping, sends WoL and starts background waiter thread
     wols = []

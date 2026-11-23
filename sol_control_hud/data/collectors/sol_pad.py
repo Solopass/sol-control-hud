@@ -135,6 +135,7 @@ def restart_pad() -> dict:
 POPOS_HOST = "popos.lan"
 POPOS_IP = "popos.lan"
 POPOS_MAC = "00:00:00:00:00:00"
+MOONLIGHT_EXE = Path(r"C:\Users\cohen\AppData\Local\Programs\Moonlight\Moonlight.exe")
 _popos_cache: dict = {"at": 0.0, "data": {}}
 
 
@@ -236,33 +237,37 @@ def send_wol(mac: str = POPOS_MAC, broadcast: str = "192.168.0.255") -> None:
                 pass
 
 
-def _launch_mstsc(host: str) -> None:
+def _launch_desktop_client(host: str) -> str:
     flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    if MOONLIGHT_EXE.exists():
+        subprocess.Popen([str(MOONLIGHT_EXE), "stream", host, "Desktop", "--windowed"], creationflags=flags)
+        return "Moonlight"
     subprocess.Popen(["mstsc.exe", f"/v:{host}"], creationflags=flags)
+    return "Remote Desktop"
 
 
-def _wake_and_open(host: str, mac: str, wait_sec: float = 20.0) -> None:
+def _wake_and_open(host: str, mac: str, port: int = 47989, wait_sec: float = 20.0) -> None:
     deadline = time.monotonic() + wait_sec
     while time.monotonic() < deadline:
-        if _tcp_up(host, 3389, timeout=0.5):
-            _launch_mstsc(host)
+        if _tcp_up(host, port, timeout=0.5):
+            _launch_desktop_client(host)
             return
         time.sleep(0.5)
-    # Fallback: launch anyway so the user sees the RDP dialog if host just came up
     try:
-        _launch_mstsc(host)
+        _launch_desktop_client(host)
     except OSError:
         pass
 
 
 def open_popos_rdp(host: str = POPOS_HOST, mac: str = POPOS_MAC) -> dict:
-    """Wake Pop!_OS via WoL if sleeping, then launch Windows Remote Desktop."""
+    """Wake Pop!_OS via WoL if sleeping, then launch Moonlight Desktop (or RDP fallback)."""
+    port = 47989 if MOONLIGHT_EXE.exists() else 3389
     try:
-        if _tcp_up(host, 3389, timeout=0.35):
-            _launch_mstsc(host)
-            return {"ok": True, "why": f"opened Remote Desktop -> {host}"}
+        if _tcp_up(host, port, timeout=0.35):
+            client = _launch_desktop_client(host)
+            return {"ok": True, "why": f"opened {client} -> {host}"}
         send_wol(mac)
-        threading.Thread(target=_wake_and_open, args=(host, mac), daemon=True).start()
-        return {"ok": True, "why": f"waking {host} (WoL) — Remote Desktop will open when ready"}
+        threading.Thread(target=_wake_and_open, args=(host, mac, port), daemon=True).start()
+        return {"ok": True, "why": f"waking {host} (WoL) — stream will open when ready"}
     except OSError as exc:
-        return {"ok": False, "why": f"failed to open mstsc.exe: {exc}"}
+        return {"ok": False, "why": f"failed to open remote client: {exc}"}
