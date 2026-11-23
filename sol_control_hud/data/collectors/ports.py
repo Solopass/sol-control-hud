@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -104,6 +105,9 @@ INFO_TTL_S = 60.0
 _info: dict[tuple[int, int], tuple[float, dict]] = {}
 
 
+_info_lock = threading.Lock()
+
+
 def _rows(own_pid: int | None = None, now: float | None = None, cached: bool = False) -> list[dict]:
     """One row per (process, port) listening on this machine. IPv4 and IPv6 on the same port are one row.
     cached: reuse what each listener is from the last INFO_TTL_S (the card's polling; never for closing)."""
@@ -120,7 +124,7 @@ def _rows(own_pid: int | None = None, now: float | None = None, cached: bool = F
         if key in by_key:
             by_key[key]["addrs"].append(c.laddr.ip)
             continue
-        hit = _info.get(key) if cached else None
+        hit = _info.get(key) if cached else None      # .get is atomic; writes and the prune below take _info_lock
         if hit and now - hit[0] < INFO_TTL_S:
             started = hit[1]["started"]
             by_key[key] = {**hit[1], "up_seconds": None if started is None else max(0.0, now - started), "addrs": [c.laddr.ip]}
@@ -137,12 +141,14 @@ def _rows(own_pid: int | None = None, now: float | None = None, cached: bool = F
                            "started": started, "up_seconds": None if started is None else max(0.0, now - started),
                            "addrs": [c.laddr.ip]}
             if cached:
-                _info[key] = (now, {k: v for k, v in by_key[key].items() if k not in ("up_seconds", "addrs")})
+                with _info_lock:
+                    _info[key] = (now, {k: v for k, v in by_key[key].items() if k not in ("up_seconds", "addrs")})
         except (psutil.NoSuchProcess, psutil.Error, OSError):
             continue
     if cached:
-        for gone in [k for k in _info if k not in by_key]:   # that process stopped listening: forget it
-            del _info[gone]
+        with _info_lock:                     # the card and the ticker's APPS summary both prune (2026-11-22)
+            for gone in [k for k in list(_info) if k not in by_key]:   # that process stopped listening: forget it
+                _info.pop(gone, None)
     rows = list(by_key.values())
     for r in rows:
         r["addrs"] = sorted(set(r["addrs"]))

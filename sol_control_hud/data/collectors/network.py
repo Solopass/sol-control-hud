@@ -576,8 +576,10 @@ def tailscale_status() -> dict:
         running = svc.status() == "running"
         tray = any((p.info.get("name") or "").lower() == "tailscale-ipn.exe" for p in psutil.process_iter(["name"]))
     except Exception:
-        return {"installed": False, "running": False, "tray": False, "up": False, "state": "not_installed",
-                "up_until": None, "remaining_s": None}
+        out = {"installed": False, "running": False, "tray": False, "up": False, "state": "not_installed",
+               "up_until": None, "remaining_s": None}
+        _ts_status_cache.update(at=time.monotonic(), value=out)
+        return out
 
     up = _tailscale_backend_up() if running else False
     deadline = _read_ts_deadline()

@@ -387,6 +387,8 @@ class Hub:
     def _refresh_launchpad(self, wsl: bool = True) -> None:
         """After a start / stop: look again on the next poll instead of serving the cached state. `wsl=False` (a
         Windows project) keeps the WSL probes: re-running wsl.exe cost every click ~0.3 s (2026-11-22)."""
+        from .data.collectors import projects
+        projects.reset_candidates()                  # a stopped watcher must not show from the 2 s process list
         for key in ("ports", "projects", "media", *(("media_probe", "wsl") if wsl else ())):
             if hasattr(self, "collectors") and key in self.collectors:
                 self.collectors[key].value = None

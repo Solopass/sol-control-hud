@@ -82,6 +82,7 @@ class RepoCache:
         self._loaded = False
         self._saved_at = -1e9
         self._unsaved = False
+        self._save_lock = threading.Lock()
 
     def get(self, folder: Path, compute: Callable[[], object], paths: Callable[[object], tuple] = lambda v: (),
             keep: Callable[[object], bool] = lambda v: True):
@@ -125,6 +126,15 @@ class RepoCache:
         import json
         if not self.persist:
             return
+        if not self._save_lock.acquire(blocking=False):     # another thread is writing it right now
+            return
+        try:
+            self._save()
+        finally:
+            self._save_lock.release()
+
+    def _save(self) -> None:
+        import json
         now_m, now_w = self._clock(), time.time()
         with self._lock:
             rows = [{"key": k, "fp": list(v[0]), "extra": list(v[1]), "at": now_w - (now_m - v[2]), "value": v[3]}

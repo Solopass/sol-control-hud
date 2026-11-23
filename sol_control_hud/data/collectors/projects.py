@@ -152,14 +152,17 @@ def _by_stat(kind: str, path: Path, load):
 def readme_info_for(folder: Path) -> dict:
     """readme_info() of the folder's README, cached until that file changes."""
     for name in README_NAMES:
-        info = _by_stat("readme", folder / name, lambda p: readme_info(_readme_file(p)))
+        info = _by_stat("readme", folder / name, lambda p: (lambda t: None if t is None else readme_info(t))(_readme_file(p)))
         if info is not None:
             return info
     return readme_info("")
 
 
-def _readme_file(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")[:20000]
+def _readme_file(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[:20000]
+    except OSError:                    # locked, or a folder called README.md: the next name, as before
+        return None
 
 
 def _plain(line: str) -> str:
@@ -318,6 +321,7 @@ def _git_info(folder: Path, now: float | None = None) -> tuple[dict | None, str]
     now = time.time() if now is None else now
     log = (_git(folder, "log", "-1", "--format=%ct%x09%s") or "").strip()
     from ..snapshot import repo_porcelain          # the ticker's dirty check runs the same `git status`: share it
+    gitcache.PORCELAIN.forget(folder.name)         # ...but fresh: this runs because the repo changed or got old
     porcelain = repo_porcelain(folder) or ""
     remote = origin_url(folder)
     commit_t, _, subject = log.partition("\t")
@@ -429,6 +433,13 @@ WATCHER_NAMES = ("bun", "node", "powershell", "cmd", "python")
 CANDIDATES_TTL_S = 2.0
 _cand_lock = threading.Lock()
 _cand: tuple[float, list] = (-1e9, [])
+
+
+def reset_candidates() -> None:
+    """A start / stop just happened: the next lookup scans again."""
+    global _cand
+    with _cand_lock:
+        _cand = (-1e9, [])
 
 
 def watcher_candidates(clock=time.monotonic) -> list[tuple[int, str, list[str], float]]:

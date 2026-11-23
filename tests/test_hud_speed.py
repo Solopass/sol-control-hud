@@ -128,3 +128,14 @@ def test_entries_after_a_save_go_out_later(tmp_path):
     clock[0] = 31
     cache.get(a, lambda: 1)                      # any later read flushes it
     assert len(json.loads(cache.persist.read_text())["items"]) == 2
+
+
+def test_unreadable_readme_never_breaks_the_card(tmp_path):
+    (tmp_path / "README.md").mkdir()                     # stats fine, can't be read (names are one file on Windows)
+    assert projects.readme_info_for(tmp_path) == projects.readme_info("")
+
+
+def test_a_stop_forgets_the_watcher_list(monkeypatch):
+    monkeypatch.setattr(projects, "_cand", (10**12, [(1, "x", [], 0.0)]))
+    projects.reset_candidates()
+    assert projects._cand[1] == []
