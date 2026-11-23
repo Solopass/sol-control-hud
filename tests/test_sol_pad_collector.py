@@ -132,3 +132,13 @@ def test_popos_status_wake_and_sleep(monkeypatch):
     st_none = sol_pad.stop_popos_servers()
     assert st_none["ok"] is True
     assert "no Pop!_OS servers" in st_none["why"]
+
+    pwr_calls = []
+    monkeypatch.setattr(sol_pad.subprocess, "run", lambda cmd, **kw: (pwr_calls.append(cmd), FakeProc(0, "", ""))[1])
+    po = sol_pad.poweroff_popos()
+    assert po["ok"] is True and "powered off" in po["why"]
+    assert "systemctl poweroff" in pwr_calls[-1][-1]
+
+    rb = sol_pad.reboot_popos()
+    assert rb["ok"] is True and "rebooted" in rb["why"]
+    assert "systemctl reboot" in pwr_calls[-1][-1]

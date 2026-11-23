@@ -196,8 +196,8 @@ def wake_popos(mac: str = POPOS_MAC) -> dict:
         return {"ok": False, "why": f"WoL failed: {exc}"}
 
 
-def sleep_popos() -> dict:
-    """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, and suspend."""
+def _popos_power(action: str, verb: str) -> dict:
+    """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, and run power action."""
     subprocess.run(
         ["taskkill", "/IM", "Moonlight.exe", "/T", "/F"],
         capture_output=True,
@@ -209,7 +209,7 @@ def sleep_popos() -> dict:
         "steam -shutdown >/dev/null 2>&1 || true; "
         "for _ in $(seq 1 10); do pgrep -u jake -x steam >/dev/null 2>&1 || break; sleep 0.3; done; "
         "fi; "
-        "sudo -n systemctl suspend"
+        f"sudo -n systemctl {action}"
     )
     try:
         r = subprocess.run(
@@ -220,13 +220,28 @@ def sleep_popos() -> dict:
             creationflags=0x08000000,
         )
         if r.returncode != 0:
-            msg = (r.stderr or r.stdout or "suspend failed").strip()
-            return {"ok": False, "why": f"Pop!_OS sleep failed: {msg}"}
+            msg = (r.stderr or r.stdout or f"{action} failed").strip()
+            return {"ok": False, "why": f"Pop!_OS {verb} failed: {msg}"}
         _popos_cache["at"] = 0.0
         _popos_cache["data"] = {}
-        return {"ok": True, "why": "disconnected Moonlight, closed Steam, and put Pop!_OS to sleep"}
+        return {"ok": True, "why": f"disconnected Moonlight, closed Steam, and {verb} Pop!_OS"}
     except Exception as exc:
-        return {"ok": False, "why": f"Pop!_OS sleep failed: {exc}"}
+        return {"ok": False, "why": f"Pop!_OS {verb} failed: {exc}"}
+
+
+def sleep_popos() -> dict:
+    """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, and suspend."""
+    return _popos_power("suspend", "put to sleep")
+
+
+def poweroff_popos() -> dict:
+    """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, and power off."""
+    return _popos_power("poweroff", "powered off")
+
+
+def reboot_popos() -> dict:
+    """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, and reboot."""
+    return _popos_power("reboot", "rebooted")
 
 
 def stop_popos_servers() -> dict:
