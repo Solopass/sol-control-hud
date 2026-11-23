@@ -42,6 +42,7 @@ function renderSolPad(p) {
   }
   if ($('padPoposWakeBtn')) $('padPoposWakeBtn').hidden = Boolean(po.online);
   if ($('padPoposSleepBtn')) $('padPoposSleepBtn').hidden = po.online === false;
+  if ($('padPoposStopServersBtn')) $('padPoposStopServersBtn').hidden = po.online === false || po.docker_running === 0;
 }
 // lag p50/p95, transport, errors. Empty when sol-deck sends none.
 function deckHealthHtml(client) {

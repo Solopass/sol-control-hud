@@ -122,3 +122,13 @@ def test_popos_status_wake_and_sleep(monkeypatch):
     assert "sleep" in s["why"]
     assert sleep_calls[0][:2] == ["taskkill", "/IM"] and "Moonlight.exe" in sleep_calls[0]
     assert sleep_calls[1][0] == "ssh" and "systemctl suspend" in sleep_calls[1][-1]
+
+    monkeypatch.setattr(sol_pad.subprocess, "run", lambda *a, **kw: FakeProc(0, "4\n", ""))
+    st_srv = sol_pad.stop_popos_servers()
+    assert st_srv["ok"] is True
+    assert "stopped 4 Pop!_OS server(s)" in st_srv["why"]
+
+    monkeypatch.setattr(sol_pad.subprocess, "run", lambda *a, **kw: FakeProc(0, "0\n", ""))
+    st_none = sol_pad.stop_popos_servers()
+    assert st_none["ok"] is True
+    assert "no Pop!_OS servers" in st_none["why"]

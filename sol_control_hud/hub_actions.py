@@ -110,7 +110,7 @@ def do_action(self, action: str, target: str = "", body: dict | None = None) -> 
             self.collectors["security"].value = None
         _hub.log(f"security: {action} target={target} -> {res.get('why')}")
         return res
-    if action in ("pad_start", "pad_stop", "pad_restart", "pad_rdp_popos", "pad_popos_wake", "pad_popos_sleep"):
+    if action in ("pad_start", "pad_stop", "pad_restart", "pad_rdp_popos", "pad_popos_wake", "pad_popos_sleep", "pad_popos_stop_servers"):
         from .data.collectors import sol_pad
         if action == "pad_start":
             res = sol_pad.start_pad()
@@ -122,6 +122,8 @@ def do_action(self, action: str, target: str = "", body: dict | None = None) -> 
             res = sol_pad.wake_popos()
         elif action == "pad_popos_sleep":
             res = sol_pad.sleep_popos()
+        elif action == "pad_popos_stop_servers":
+            res = sol_pad.stop_popos_servers()
         else:
             res = sol_pad.restart_pad()
         if hasattr(self, "collectors") and "sol_pad" in self.collectors:

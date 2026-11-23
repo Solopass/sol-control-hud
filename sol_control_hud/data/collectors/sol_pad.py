@@ -229,6 +229,30 @@ def sleep_popos() -> dict:
         return {"ok": False, "why": f"Pop!_OS sleep failed: {exc}"}
 
 
+def stop_popos_servers() -> dict:
+    """Stop all running Docker containers on Pop!_OS cleanly."""
+    remote_cmd = "ids=$(docker ps -q); if [ -n \"$ids\" ]; then docker stop $ids | wc -l; else echo 0; fi"
+    try:
+        r = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=2", "popos", remote_cmd],
+            capture_output=True,
+            text=True,
+            timeout=15.0,
+            creationflags=0x08000000,
+        )
+        if r.returncode != 0:
+            msg = (r.stderr or r.stdout or "stop failed").strip()
+            return {"ok": False, "why": f"Pop!_OS stop servers failed: {msg}"}
+        _popos_cache["at"] = 0.0
+        _popos_cache["data"] = {}
+        count = (r.stdout or "0").strip().splitlines()[-1]
+        if count == "0":
+            return {"ok": True, "why": "no Pop!_OS servers running"}
+        return {"ok": True, "why": f"stopped {count} Pop!_OS server(s)"}
+    except Exception as exc:
+        return {"ok": False, "why": f"Pop!_OS stop servers failed: {exc}"}
+
+
 def _tcp_up(host: str, port: int = 3389, timeout: float = 0.35) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
