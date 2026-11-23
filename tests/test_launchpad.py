@@ -131,7 +131,7 @@ def test_project_rows(tmp_path):
     rows = projects.project_rows(reg, listening, {8082: True}, git=no_git,
                                  paths=lambda pid: [projects._norm(ws / "alpha")])
     by = {r["name"]: r for r in rows}
-    assert "loose" not in by                               # not a repo, not in the registry: not a project
+    assert by["loose"]["hidden"] and by["loose"]["why_hidden"] == "not a git repo"   # listed, folded away
     a = by["alpha"]
     assert (a["title"], a["description"], a["port"]) == ("Alpha App", "Alpha does a useful thing for the tests.", 5173)
     assert a["running"]["pid"] == 7 and a["url"] == "http://127.0.0.1:5173/" and a["can_stop"]
@@ -139,7 +139,7 @@ def test_project_rows(tmp_path):
     assert by["retired-one"]["hidden"] and by["retired-one"]["status"] == "retired"
     assert by["beta"]["self"] and not by["beta"]["can_start"]
     assert by["media"]["can_start"] and by["media"]["port"] == 8080    # from its media entry
-    assert rows[-1]["name"] == "retired-one"                # hidden last
+    assert [r["name"] for r in rows[-2:]] == ["retired-one", "loose"]    # hidden last; no commits at the very end
     assert [r["name"] for r in rows[:2]] == ["alpha", "omni"]       # running first
 
 
@@ -475,7 +475,7 @@ def test_projects_and_media_endpoints(client_and_hub):
     client, h, ws = client_and_hub
     d = client.get("/api/projects").json()
     assert d["ok"] and {p["name"] for p in d["projects"]} >= {"alpha", "omni", "retired-one"}
-    assert d["counts"]["hidden"] == 1
+    assert d["counts"]["hidden"] == 2                     # retired-one + the loose folder
     m = client.get("/api/media").json()
     assert m["ok"] and m["tiles"][0]["state"] == "asleep" and m["wsl"] == "Stopped"
     assert client.get("/api/media-live?name=svc").json()["ok"] is False
@@ -767,3 +767,15 @@ def test_start_command_from_the_workspace_launch_json(tmp_path):
     assert projects.launch_config(ws / "rusty")["cmd"][0] == "cargo"
     assert projects.launch_config(ws / "game-data") is None              # a sibling with the same prefix isn't it
     assert projects.launch_config(ws / "own")["port"] == 4000             # the project's own file wins
+
+
+def test_a_plain_web_page_gets_an_open_file(tmp_path):
+    page, app, both = tmp_path / "page", tmp_path / "app", tmp_path / "both"
+    for d in (page, app, both):
+        d.mkdir()
+        (d / "index.html").write_text("<p>x</p>")
+    (app / "package.json").write_text("{}")                      # a Vite app: index.html isn't the thing to open
+    assert projects.open_file_for(page, {}) == "index.html"
+    assert projects.open_file_for(app, {}) is None
+    assert projects.open_file_for(both, {"start": {"cmd": ["x"]}}) is None    # it has a Start: that opens it
+    assert projects.open_file_for(app, {"open_file": "docs/a.html"}) == "docs/a.html"

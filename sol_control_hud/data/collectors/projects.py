@@ -163,6 +163,18 @@ def readme_status(text: str) -> str:
     return next((st for word, st in STATUS_WORDS if word in blob), "")
 
 
+def open_file_for(folder: Path, spec: dict, has_start: bool | None = None) -> str | None:
+    """The file the row's Open button opens: `open_file` from launchpad.yaml, else a plain web page (index.html with
+    no package.json, e.g. sologo, Icon Generator) when the project has no start command."""
+    if spec.get("open_file"):
+        return spec["open_file"]
+    if has_start is None:
+        has_start = bool(spec.get("start") or launch_config(folder))
+    if not has_start and (folder / "index.html").is_file() and not (folder / "package.json").exists():
+        return "index.html"
+    return None
+
+
 # ---------------------------------------------------------------- launch.json
 def _read_launch(path: Path) -> list[dict]:
     try:
@@ -373,8 +385,8 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
         spec = reg["projects"].get(name) or {}
         media = _media_entry(reg, name)
         is_repo = (folder / ".git").exists()
-        if not is_repo and name not in reg["projects"] and name not in reg["hidden"]:
-            continue                                   # a loose folder, not a project
+        # a loose folder (no git, not in the registry): listed under "hidden" so it can still be found and shown
+        loose = not is_repo and name not in reg["projects"] and name not in reg["hidden"]
         info = readme_info(_readme(folder))
         launch = launch_config(folder)
         start = spec.get("start") or ({"cmd": launch["cmd"]} if launch else None)
@@ -437,7 +449,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
                 pass
 
         mine = (reg.get("user") or {}).get(name) or {}
-        hidden = mine["hidden"] if isinstance(mine.get("hidden"), bool) else name in reg["hidden"]
+        hidden = mine["hidden"] if isinstance(mine.get("hidden"), bool) else (name in reg["hidden"] or loose)
         rows.append({
             "name": name,
             "title": spec.get("title") or info["title"] or name,
@@ -445,7 +457,8 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "status": mine.get("tag") or info["status"],
             "status_from": "you" if mine.get("tag") else ("readme" if info["status"] else ""),
             "hidden": hidden,
-            "why_hidden": ("you hid it" if mine.get("hidden") is True else reg["hidden"].get(name) or "") if hidden else "",
+            "why_hidden": ("you hid it" if mine.get("hidden") is True
+                           else reg["hidden"].get(name) or ("not a git repo" if loose else "")) if hidden else "",
             "self": bool(spec.get("self")),
             "autostart": bool(spec.get("autostart")),
             "media": spec.get("media"),
@@ -454,7 +467,7 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
             "review": rev,
             "auto_hunt": auto_hunt,
             "live": spec.get("live"),
-            "open_file": spec.get("open_file"),
+            "open_file": open_file_for(folder, spec, has_start=bool(start or (media or {}).get("start"))),
             "port": int(port) if port else None,
             "runs_in": runs_in,
             "running": run,

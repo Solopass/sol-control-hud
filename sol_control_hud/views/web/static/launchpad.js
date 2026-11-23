@@ -37,6 +37,17 @@ function openWhenUp(name, running, url) {
 }
 
 // ---------- Projects
+// A Start / Stop just clicked: the row says "starting…" / "stopping…" until the card sees the new state (a dev server
+// takes ~5 s, a first cargo build much longer), so a click never looks like it did nothing.
+const pendingOp = {};            // name -> { op: 'start' | 'stop', at: ms }
+const PENDING_MS = { start: 120000, stop: 20000 };
+function pendingFor(p) {
+  const o = pendingOp[p.name];
+  if (!o) return null;
+  const done = o.op === 'start' ? Boolean(p.running) : !p.running;
+  if (done || Date.now() - o.at > PENDING_MS[o.op]) { delete pendingOp[p.name]; return null; }
+  return o.op;
+}
 function projDot(p) {
   const g = p.git || {};
   if (p.running) return 'run';
@@ -47,6 +58,8 @@ function projDot(p) {
 function projRow(p) {
   const g = p.git || {};
   const chips = [];
+  const pend = pendingFor(p);
+  if (pend) chips.push(`<span class="pill run" title="Waiting for it to ${pend === 'start' ? 'answer on its port' : 'close'}">${pend === 'start' ? 'starting…' : 'stopping…'}</span>`);
   if (p.status) chips.push(`<span class="pill ${p.status === 'paused' ? 'warn' : p.status === 'active' ? 'ok' : 'dim'}" title="${p.status_from === 'you' ? 'your tag' : 'from its README'}">${esc(p.status)}${p.status_from === 'you' ? ' ✎' : ''}</span>`);
   if (p.running) {
     if (p.running.port) {
@@ -82,17 +95,18 @@ function projRow(p) {
     chips.push(`<span class="pill ok" title="${esc(p.handoff.summary || '')}">📌 handoff${n ? ` · ${n} next` : ''}</span>`);
   }
   if (p.autostart) chips.push(`<span class="pill dim" title="Starts with the HUD (autostart in launchpad.yaml)">auto</span>`);
-  if (p.hidden) chips.push(`<span class="pill dim" title="${esc(p.why_hidden)}">hidden</span>`);
+  if (p.hidden) chips.push(`<span class="pill dim" title="${esc(p.why_hidden)}">hidden${p.why_hidden ? ` · ${esc(p.why_hidden)}` : ''}</span>`);
   const acts = [];
   const isWatcher = Boolean(p.watcher || p.name === 'gatkam' || (!p.port && !p.url));
   if (p.running && p.url) acts.push(`<button class="mini" data-p="open" title="${esc(p.url)}">↗ Open</button>`);
   else if (p.open_file) acts.push(`<button class="mini" data-p="file" title="${esc(p.open_file)}">↗ Open</button>`);
-  if (!p.running && p.can_start) {
+  if (pend) acts.push(`<button class="mini" disabled>${pend === 'start' ? '▶ …' : '■ …'}</button>`);
+  else if (!p.running && p.can_start) {
     const btnTitle = isWatcher ? `Start ${esc(p.title)} compiler & dev watcher` : (p.port ? `Start it on :${p.port}` : 'Start it');
     const btnLabel = isWatcher ? '▶ Watcher' : '▶ Start';
     acts.push(`<button class="mini go" data-p="start" title="${btnTitle}">${btnLabel}</button>`);
   }
-  if (p.running && p.can_stop) {
+  if (!pend && p.running && p.can_stop) {
     const btnTitle = isWatcher ? `Stop ${esc(p.title)} dev watcher` : 'Stop it';
     const btnLabel = isWatcher ? '■ Watcher' : '■';
     acts.push(`<button class="mini danger" data-p="stop" title="${btnTitle}">${btnLabel}</button>`);
@@ -285,7 +299,9 @@ $('projList').addEventListener('click', async (e) => {
     delete b.dataset.armed;
   }
   b.disabled = true;
-  await launch('project', name, op);
+  if (op === 'start' || op === 'stop') { pendingOp[name] = { op, at: Date.now() }; b.closest('.jrow').outerHTML = projRow(p); }   // show it now, not at the next poll
+  const r = await launch('project', name, op);
+  if (!r.ok || /already running|isn't running/.test(r.why || '')) delete pendingOp[name];
   b.disabled = false;
 });
 

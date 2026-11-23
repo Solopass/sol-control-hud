@@ -304,7 +304,7 @@ def open_project(reg: dict, name: str, how: str, popen=subprocess.Popen, opener=
               stderr=subprocess.DEVNULL, close_fds=True)
         return {"ok": True, "why": f"opening {name} in VS Code"}
     if how == "file":
-        rel = (reg["projects"].get(name) or {}).get("open_file")
+        rel = projects_mod.open_file_for(folder, reg["projects"].get(name) or {})
         if not rel:
             return {"ok": False, "why": f"{name} has no file to open"}
         target = (folder / rel).resolve()
