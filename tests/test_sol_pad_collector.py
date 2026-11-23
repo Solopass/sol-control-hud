@@ -30,14 +30,38 @@ def test_open_popos_rdp(monkeypatch):
         calls.append((cmd, kwargs))
 
     monkeypatch.setattr(sol_pad.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=3389, timeout=0.35: True)
     res = sol_pad.open_popos_rdp()
     assert res["ok"] is True
-    assert "popos.lan" in res["why"]
+    assert "opened Remote Desktop" in res["why"]
     assert calls[0][0] == ["mstsc.exe", "/v:popos.lan"]
+
+    # When sleeping, sends WoL and starts background waiter thread
+    wols = []
+    threads = []
+
+    class FakeThread:
+        def __init__(self, target=None, args=(), daemon=False):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            threads.append((self.target, self.args, self.daemon))
+
+    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=3389, timeout=0.35: False)
+    monkeypatch.setattr(sol_pad, "send_wol", lambda mac=sol_pad.POPOS_MAC: wols.append(mac))
+    monkeypatch.setattr(sol_pad.threading, "Thread", FakeThread)
+    res_wake = sol_pad.open_popos_rdp()
+    assert res_wake["ok"] is True
+    assert "waking" in res_wake["why"]
+    assert wols == [sol_pad.POPOS_MAC]
+    assert len(threads) == 1 and threads[0][2] is True
 
     def fail_popen(cmd, **kwargs):
         raise OSError("not found")
 
+    monkeypatch.setattr(sol_pad, "_tcp_up", lambda host, port=3389, timeout=0.35: True)
     monkeypatch.setattr(sol_pad.subprocess, "Popen", fail_popen)
     err = sol_pad.open_popos_rdp()
     assert err["ok"] is False

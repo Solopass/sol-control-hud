@@ -7,6 +7,7 @@ import plistlib
 import socket
 import struct
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -130,11 +131,58 @@ def restart_pad() -> dict:
     return start_pad()
 
 
-def open_popos_rdp(host: str = "popos.lan") -> dict:
-    """Launch Windows Remote Desktop (mstsc.exe) connected to the local Pop!_OS PC."""
+POPOS_HOST = "popos.lan"
+POPOS_MAC = "00:00:00:00:00:00"
+
+
+def _tcp_up(host: str, port: int = 3389, timeout: float = 0.35) -> bool:
     try:
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        subprocess.Popen(["mstsc.exe", f"/v:{host}"], creationflags=flags)
-        return {"ok": True, "why": f"opened Remote Desktop -> {host}"}
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def send_wol(mac: str = POPOS_MAC, broadcast: str = "192.168.0.255") -> None:
+    """Broadcast a Wake-on-LAN magic packet for the target MAC address."""
+    hw = bytes.fromhex(mac.replace(":", "").replace("-", ""))
+    pkt = b"\xff" * 6 + hw * 16
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        for target in ("255.255.255.255", broadcast):
+            try:
+                s.sendto(pkt, (target, 9))
+            except OSError:
+                pass
+
+
+def _launch_mstsc(host: str) -> None:
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+    subprocess.Popen(["mstsc.exe", f"/v:{host}"], creationflags=flags)
+
+
+def _wake_and_open(host: str, mac: str, wait_sec: float = 20.0) -> None:
+    deadline = time.monotonic() + wait_sec
+    while time.monotonic() < deadline:
+        if _tcp_up(host, 3389, timeout=0.5):
+            _launch_mstsc(host)
+            return
+        time.sleep(0.5)
+    # Fallback: launch anyway so the user sees the RDP dialog if host just came up
+    try:
+        _launch_mstsc(host)
+    except OSError:
+        pass
+
+
+def open_popos_rdp(host: str = POPOS_HOST, mac: str = POPOS_MAC) -> dict:
+    """Wake Pop!_OS via WoL if sleeping, then launch Windows Remote Desktop."""
+    try:
+        if _tcp_up(host, 3389, timeout=0.35):
+            _launch_mstsc(host)
+            return {"ok": True, "why": f"opened Remote Desktop -> {host}"}
+        send_wol(mac)
+        threading.Thread(target=_wake_and_open, args=(host, mac), daemon=True).start()
+        return {"ok": True, "why": f"waking {host} (WoL) — Remote Desktop will open when ready"}
     except OSError as exc:
         return {"ok": False, "why": f"failed to open mstsc.exe: {exc}"}
