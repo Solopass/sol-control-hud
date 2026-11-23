@@ -2,10 +2,13 @@
 
 Most of it is discovered from the folder (README, git, `.claude/launch.json`); `launchpad.yaml` only adds what can't
 be (live sites, start commands for projects without a launch config, what to hide). A folder that isn't in the
-registry still shows up.
+registry still shows up (a folder that isn't a git repo is listed under "hidden").
 
-Cost: git is three short processes per repo, so it only runs when the repo changed (data/gitcache.py; GIT_TTL_S at most); whether something runs comes from
-the Localhost card's listener sample (no extra port scan) plus the media card's WSL probe for things that run in WSL.
+Cost (measured with py-spy, 2026-11-22): git is one `git log` per repo plus a `git status` shared with the ticker
+(remote URL read from .git/config), run only when the repo changed or every GIT_TTL_S in the background
+(data/gitcache.py); the results are kept in data/gitcache.json across restarts. README / launch.json / launchpad.yaml
+are parsed again only when the file changes. Whether something runs comes from the Localhost card's listener sample
+plus ONE shared process scan for portless watchers (2 s), and the media card's WSL probe for things in WSL.
 """
 from __future__ import annotations
 
