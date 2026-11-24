@@ -65,6 +65,11 @@ def get_ai_usage() -> dict:
             "antigravity": {
                 "turns": ag_today.get("turn_count", 0),
                 "estimated_tokens": ag_today.get("input_tokens", 0) + ag_today.get("output_tokens", 0),
+                # exact since tracker schema 3 (2026-11-24): Antigravity's own per-call counts
+                "output_tokens": ag_today.get("output_tokens", 0),
+                "input_tokens": ag_today.get("input_tokens", 0),
+                "cache_read_tokens": ag_today.get("cache_read_tokens", 0),
+                "is_estimated": bool(ag_today.get("is_estimated", True)),
                 "tool_calls": ag_today.get("tool_calls", 0),
             },
             "models": today_data.get("models", []),

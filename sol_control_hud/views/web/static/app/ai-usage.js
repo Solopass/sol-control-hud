@@ -46,7 +46,7 @@ async function loadAiUsage() {
     stat(fmtTokens(c.cache_read_tokens || 0), 'Claude cache reads', c.cache_read_tokens ? 'var(--green)' : 'var(--dim)'),
     stat(win ? `${win.replies}` : '–', win ? `5-h window: ${fmtTokens(win.output_tokens)} out · ${Math.floor(win.minutes_left / 60)}h${String(win.minutes_left % 60).padStart(2, '0')} left` : '5-h window: none open', win ? 'var(--cyan)' : 'var(--dim)'),
     stat(fmtTokens(thisWeek), `Week Claude output${vsAvg == null ? '' : ` · ${vsAvg >= 0 ? '+' : ''}${vsAvg}% vs 4-wk avg`}`, vsAvg != null && vsAvg > 25 ? 'var(--amber, #f5a524)' : 'var(--text)'),
-    stat(fmtTokens(agTok), `Today Antigravity (${ag.turns || 0} steps, est.)`, 'var(--cyan)'),
+    stat(fmtTokens(ag.is_estimated ? agTok : (ag.output_tokens || 0)), ag.is_estimated ? `Today Antigravity (${ag.turns || 0} steps, est.)` : `Today Antigravity output (${ag.turns || 0} calls · ${fmtTokens(ag.input_tokens || 0)} fresh in)`, 'var(--cyan)'),
   ].join(''));
 
   // 12-week bars: Claude output per week (the newest is the week so far)
