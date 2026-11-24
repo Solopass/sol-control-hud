@@ -142,7 +142,7 @@ def test_popos_status_wake_and_sleep(monkeypatch, tmp_path):
     assert s["ok"] is True
     assert "sleep" in s["why"]
     assert sleep_calls[0][:2] == ["taskkill", "/IM"] and "Moonlight.exe" in sleep_calls[0]
-    assert sleep_calls[1][0] == "ssh" and "systemctl suspend" in sleep_calls[1][-1]
+    assert sleep_calls[1][0] == "ssh" and "rtcwake -m no -s 43200" in sleep_calls[1][-1] and "systemctl suspend" in sleep_calls[1][-1]
 
     monkeypatch.setattr(sol_pad.subprocess, "run", lambda *a, **kw: FakeProc(0, "4\n", ""))
     st_srv = sol_pad.stop_popos_servers()

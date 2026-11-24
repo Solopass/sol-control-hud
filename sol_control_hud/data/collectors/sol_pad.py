@@ -271,7 +271,7 @@ def wake_popos(mac: str = POPOS_MAC) -> dict:
         return {"ok": False, "why": f"WoL failed: {exc}"}
 
 
-def _popos_power(action: str, verb: str) -> dict:
+def _popos_power(action: str, verb: str, pre_cmd: str = "") -> dict:
     """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, and run power action."""
     subprocess.run(
         ["taskkill", "/IM", "Moonlight.exe", "/T", "/F"],
@@ -284,7 +284,7 @@ def _popos_power(action: str, verb: str) -> dict:
         "steam -shutdown >/dev/null 2>&1 || true; "
         "for _ in $(seq 1 10); do pgrep -u jake -x steam >/dev/null 2>&1 || break; sleep 0.3; done; "
         "fi; "
-        f"sudo -n systemctl {action}"
+        f"{pre_cmd}sudo -n systemctl {action}"
     )
     try:
         r = subprocess.run(
@@ -305,8 +305,12 @@ def _popos_power(action: str, verb: str) -> dict:
 
 
 def sleep_popos() -> dict:
-    """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, and suspend."""
-    return _popos_power("suspend", "put to sleep")
+    """Close local Moonlight stream, cleanly shut down Steam on Pop!_OS, arm 12h RTC wake, and suspend."""
+    return _popos_power(
+        "suspend",
+        "put to sleep (auto-wakes in 12h)",
+        pre_cmd="sudo -n /usr/sbin/rtcwake -m no -s 43200 >/dev/null 2>&1 || true; ",
+    )
 
 
 def poweroff_popos() -> dict:
