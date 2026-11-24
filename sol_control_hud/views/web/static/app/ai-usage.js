@@ -33,7 +33,11 @@ async function loadAiUsage() {
   // a fair comparison: this week so far against the same number of days of an average week
   const dayOfWeek = ((new Date().getDay() + 6) % 7) + 1;
   const vsAvg = avg ? Math.round((thisWeek / (avg * dayOfWeek / 7) - 1) * 100) : null;
-  const win = (res.windows || {}).current;
+  // time left from the window's end, not the tracker's stored minutes (the summary is written hourly)
+  let win = (res.windows || {}).current;
+  const left = win ? Math.floor((Date.parse(win.end) - Date.now()) / 60000) : -1;
+  if (!(left > 0)) win = null;
+  else win = { ...win, minutes_left: left };
 
   $('aiUsageWeek').textContent = res.week_id ? `· ${res.week_id}` : '';
   setHTML($('aiUsageStats'), [
