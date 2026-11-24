@@ -53,7 +53,8 @@ DENY_FILES = ["*.env", ".env*", "*.pem", "*.key", "*.pfx", "*.p12", "id_rsa*", "
               "*token*", "*.sqlite", "*.sqlite-*", "*.db", "*.kdbx"]
 TEXT_EXT = {".md", ".txt", ".py", ".ps1", ".psm1", ".js", ".jsx", ".ts", ".tsx", ".json", ".yaml", ".yml", ".toml", ".ini",
             ".cfg", ".html", ".css", ".scss", ".sh", ".bat", ".cmd", ".rs", ".go", ".java", ".c", ".h", ".cpp", ".cs", ".sql",
-            ".csv", ".xml", ".base", ".canvas", ".srt", ".vtt", ".log"}
+            ".csv", ".xml", ".base", ".canvas", ".srt", ".vtt", ".log",
+            ".jsonl"}   # JSON Lines: the Claude Code session logs the Daily work summary reads (2026-11-24)
 # code review skip rules (plan pre-flight change 3): vendored / generated / lock files aren't reviewed
 LOCK_FILES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "bun.lock", "poetry.lock", "uv.lock",
               "Cargo.lock", "composer.lock", "Gemfile.lock"}

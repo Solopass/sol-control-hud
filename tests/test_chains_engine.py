@@ -637,3 +637,12 @@ def test_default_policy_reads_claude_log_but_never_writes_it():
     assert ft._under(Path(r"D:\AI\Cache\claude-log\2026-11-23.jsonl"), pol.read_roots)
     assert not ft._under(Path(r"D:\AI\Cache\other\x.txt"), pol.read_roots)
     assert not ft._under(Path(r"D:\AI\Cache\claude-log\x.md"), pol.write_roots)
+
+
+def test_jsonl_reads_as_text(tmp_path):
+    """The Daily work summary gathers Claude Code's .jsonl session logs; they were refused as 'not text' (2026-11-24)."""
+    from sol_control_hud.chains import file_tools as ft
+    f = tmp_path / "2026-11-24.jsonl"
+    f.write_text('{"a": 1}\n{"b": 2}\n')
+    out = ft.read_file(f, ft.Policy(read_roots=[str(tmp_path)], write_roots=[str(tmp_path)]))
+    assert '{"b": 2}' in str(out)
