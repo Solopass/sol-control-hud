@@ -396,6 +396,9 @@ dialog.hud-dialog::backdrop { background:rgba(5,8,15,.65); overflow:hidden; over
 .stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
 .stats div { background:var(--badge); border-radius:9px; padding:8px 10px; }
 .stats b { display:block; font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; }
+.ai-trend { display:flex; align-items:flex-end; gap:3px; height:38px; margin:8px 0 2px; }
+.ai-trend i { flex:1; background:var(--cyan); opacity:.45; border-radius:2px 2px 0 0; min-width:4px; }
+.ai-trend i.cur { opacity:1; }
 .stats span { color:var(--dim); font-size:11px; }
 
 /* model controls (Local AI card) */

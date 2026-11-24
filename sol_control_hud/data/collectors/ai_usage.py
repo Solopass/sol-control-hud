@@ -58,6 +58,7 @@ def get_ai_usage() -> dict:
                 "input_tokens": claude_today.get("input_tokens", 0),
                 "output_tokens": claude_today.get("output_tokens", 0),
                 "cache_read_tokens": claude_today.get("cache_read_tokens", 0),
+                "cache_write_tokens": claude_today.get("cache_write_tokens", 0),
                 "thinking_tokens": claude_today.get("thinking_tokens", 0),
                 "tool_calls": claude_today.get("tool_calls", 0),
             },
@@ -69,4 +70,7 @@ def get_ai_usage() -> dict:
             "models": today_data.get("models", []),
             "projects": today_data.get("projects", []),
         },
+        # long-term (tracker 2026-11-23): weekly / monthly totals and Claude's 5-hour usage windows
+        "history": data.get("history") or {"weeks": [], "months": []},
+        "windows": data.get("windows") or {},
     }
