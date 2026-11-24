@@ -78,4 +78,6 @@ def get_ai_usage() -> dict:
         # long-term (tracker 2026-11-23): weekly / monthly totals and Claude's 5-hour usage windows
         "history": data.get("history") or {"weeks": [], "months": []},
         "windows": data.get("windows") or {},
+        # pace vs your own peaks, a year of days, projects vs commits, costliest sessions (tracker 2026-11-24)
+        "insights": data.get("insights") or {},
     }

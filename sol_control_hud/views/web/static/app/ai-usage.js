@@ -57,6 +57,42 @@ async function loadAiUsage() {
     return `<i style="height:${h}%" class="${cur ? 'cur' : ''}" title="Week of ${esc(wk.period)}: ${fmtTokens(v)} Claude output, ${((wk.claude || {}).turns) || 0} replies${cur ? ' (so far)' : ''}"></i>`;
   }).join('') : '');
 
+  const ins = res.insights || {};
+  // pace: a heads-up when this 5-hour window or this week runs past your own usual peak
+  const pw = (ins.pace || {}).window, pk = (ins.pace || {}).week;
+  const high = (pw && pw.level === 'high') || (pk && pk.level === 'high');
+  const pill = $('aiUsagePill');
+  if (pill) {
+    pill.className = 'pill ' + (high ? 'warn' : 'ok');
+    pill.textContent = high ? 'Pace: high' : 'Pace: normal';
+    pill.title = [pw ? `This 5-h window: ${fmtTokens(pw.output_tokens)} out, ${Math.round(pw.share_of_p90 * 100)}% of your usual peak (${fmtTokens(pw.p90)})` : 'No 5-h window open',
+      pk ? `This week: ${fmtTokens(pk.so_far)} so far, heading for ${fmtTokens(pk.projected)} (your biggest of the last 8 weeks: ${fmtTokens(pk.biggest_of_8)})` : ''].filter(Boolean).join('\n');
+  }
+
+  // a year of days, GitHub-style: columns are weeks (Monday on top), colour = output that day
+  const days = ins.days || [];
+  if (days.length) {
+    const tot = (d) => (d.claude || 0) + (d.antigravity || 0);
+    const nz = days.map(tot).filter((v) => v > 0).sort((a, b) => a - b);
+    const q = (f) => nz.length ? nz[Math.min(nz.length - 1, Math.floor(f * nz.length))] : 1;
+    const cuts = [q(0.25), q(0.5), q(0.75)];
+    const lead = (new Date(days[0].day + 'T12:00:00').getDay() + 6) % 7;   // blanks so rows are weekdays
+    const cells = Array(lead).fill('<i style="visibility:hidden"></i>');
+    for (const d of days) {
+      const v = tot(d);
+      const lvl = !v ? '' : v <= cuts[0] ? 'l1' : v <= cuts[1] ? 'l2' : v <= cuts[2] ? 'l3' : 'l4';
+      cells.push(`<i class="${lvl}" title="${esc(d.day)}: ${fmtTokens(d.claude)} Claude + ${fmtTokens(d.antigravity)} Antigravity output, ${d.calls} calls"></i>`);
+    }
+    setHTML($('aiUsageHeat'), cells.join(''));
+  }
+
+  const row = (a, b, title) => `<div class="row" title="${esc(title || a)}"><span>${esc(a)}</span><span class="dim">${esc(b)}</span></div>`;
+  setHTML($('aiUsageSessions'), (ins.sessions || []).slice(0, 5).map((x) =>
+    row(x.title, `${fmtTokens(x.output_tokens)} · ${x.calls}`, `${x.title} (${x.project}, ${x.provider}): ${x.calls} calls, ${x.subagent_calls} by subagents, ${fmtTokens(x.output_tokens)} output`)).join('') || '<div class="dim">nothing yet</div>');
+  setHTML($('aiUsageProjects'), (ins.projects || []).slice(0, 5).map((x) =>
+    row(x.project, x.commits == null ? `${fmtTokens(x.output_tokens)} · no git` : `${fmtTokens(x.output_tokens)} · ${x.commits} commits`,
+        `${x.project}: ${x.calls} calls, ${fmtTokens(x.output_tokens)} output, ${x.commits == null ? 'no git repo found' : x.commits + ' commits'}${x.tokens_per_commit ? ', ' + fmtTokens(x.tokens_per_commit) + ' output per commit' : ''}`)).join('') || '<div class="dim">nothing yet</div>');
+
   const models = (t.models || []).map(m => esc(m.model)).join(' · ');
   const projs = (t.projects || []).map(p => esc(p)).join(', ');
   const noteParts = [];

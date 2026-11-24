@@ -399,6 +399,14 @@ dialog.hud-dialog::backdrop { background:rgba(5,8,15,.65); overflow:hidden; over
 .ai-trend { display:flex; align-items:flex-end; gap:3px; height:38px; margin:8px 0 2px; }
 .ai-trend i { flex:1; background:var(--cyan); opacity:.45; border-radius:2px 2px 0 0; min-width:4px; }
 .ai-trend i.cur { opacity:1; }
+.ai-heat { display:grid; grid-auto-flow:column; grid-template-rows:repeat(7, 9px); gap:2px; margin:8px 0; overflow-x:auto; }
+.ai-heat i { width:9px; height:9px; border-radius:2px; background:var(--badge); }
+.ai-heat i.l1 { background:rgba(56,189,248,.25); } .ai-heat i.l2 { background:rgba(56,189,248,.5); }
+.ai-heat i.l3 { background:rgba(56,189,248,.75); } .ai-heat i.l4 { background:var(--cyan); }
+.ai-lists { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:6px 0; font-size:12px; }
+.ai-lists .row { display:flex; justify-content:space-between; gap:8px; padding:2px 0; border-bottom:1px solid var(--badge); }
+.ai-lists .row span:first-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width: 700px) { .ai-lists { grid-template-columns:1fr; } }
 .stats span { color:var(--dim); font-size:11px; }
 
 /* model controls (Local AI card) */
