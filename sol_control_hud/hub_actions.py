@@ -236,6 +236,17 @@ def do_action(self, action: str, target: str = "", body: dict | None = None) -> 
         from .views.crash_dialog import ACK_FILE
         from .views.ticker import write_crash_ack
         write_crash_ack(ACK_FILE)
+        cw_script = _hub.Path(r"D:\OBVLT\tools\crash-watch.ps1")
+        if cw_script.is_file():
+            try:
+                subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(cw_script)],
+                    capture_output=True, timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except Exception:
+                pass
+        if getattr(self, "collector", None) is not None:
+            self.collector._last_stability = 0.0
         _hub.log("crashes acknowledged via web dashboard")
         return {"ok": True, "why": "Crash events acknowledged and cleared"}
     if action == "setting":                   # the dashboard's Settings panel (settings_api.py checks every value)

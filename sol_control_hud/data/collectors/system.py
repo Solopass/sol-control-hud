@@ -71,8 +71,14 @@ def stability(since: datetime | None = None) -> dict:
         whea, kp41, tdr = (int(x) for x in _run(["powershell", "-NoProfile", "-Command", ps], 20).split())
     except (ValueError, subprocess.SubprocessError, OSError):
         return {"available": False}
+    cw_new = 0
+    try:
+        from ...views.crash_dialog import parse_unacknowledged_crashes
+        cw_new = len(parse_unacknowledged_crashes())
+    except Exception:
+        pass
     return {"available": True, "since": since.isoformat(), "acknowledged": note if ack and since == ack else "",
-            "whea": whea, "unexpected_reboots": kp41, "gpu_driver_resets": tdr}
+            "whea": whea, "unexpected_reboots": kp41, "gpu_driver_resets": tdr, "crash_watch_new": cw_new}
 
 
 def wsl(distro: str = "Ubuntu-24.04") -> dict:

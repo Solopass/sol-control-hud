@@ -108,10 +108,17 @@ function render(p) {
 
   // stability
   const sys = slide(p, 'SYS'); setHTML($('sysSeg'), sys ? segHtml(sys.segments) : '');
-  const crashes = s.unexpected_reboots + s.gpu_resets, cc = $('crashCount');
-  cc.textContent = crashes ? `${crashes}: Away blocked` : '0: Away allowed'; cc.style.color = crashes ? 'var(--red)' : 'var(--green)';
-  if ($('ackCrashBtn')) $('ackCrashBtn').hidden = crashes === 0;
   const st = p.stability || {};
+  const crashes = s.unexpected_reboots + s.gpu_resets;
+  const totalCrashes = Math.max(crashes, st.crash_watch_new || 0);
+  const cc = $('crashCount');
+  cc.textContent = totalCrashes ? `${totalCrashes}: Away blocked` : '0: Away allowed';
+  cc.style.color = totalCrashes ? 'var(--red)' : 'var(--green)';
+  const ackBtn = $('ackCrashBtn');
+  if (ackBtn) {
+    ackBtn.hidden = false;
+    ackBtn.className = totalCrashes ? 'mini danger' : 'mini ghost';
+  }
   $('ackUntil').textContent = st.since ? st.since.replace('T', ' ') : '–';
   $('ackNote').textContent = st.acknowledged || '';
   const w = p.wsl || {};
