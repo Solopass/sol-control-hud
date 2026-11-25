@@ -102,7 +102,8 @@ def _folder(reg: dict, name: str) -> Path:
     ws = Path(reg["workspace"])
     if not name or "/" in name or "\\" in name or name.startswith("."):
         raise LaunchError("not a project folder")
-    folder = (ws / name)
+    spec = (reg.get("projects") or {}).get(name) or {}
+    folder = Path(spec["path"]) if spec.get("path") else (ws / name)      # `path:` = a project outside the workspace
     if not folder.is_dir():
         raise LaunchError(f"no project called {name!r}")
     return folder

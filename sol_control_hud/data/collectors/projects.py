@@ -54,6 +54,17 @@ def load_registry(path: Path | str = REGISTRY_FILE, user_file: Path | str | None
     return data
 
 
+def outside_folders(reg: dict) -> dict[str, Path]:
+    """Projects that live outside the workspace: a registry entry with `path:` (e.g. D:/Meta Scrub, 2026-11-25).
+    Only folders that exist; the path comes from launchpad.yaml, never from the page."""
+    out = {}
+    for name, spec in reg.get("projects", {}).items():
+        p = (spec or {}).get("path")
+        if p and not str(name).startswith(".") and Path(p).is_dir():
+            out[str(name)] = Path(p)
+    return out
+
+
 def _parse_yaml(path: Path) -> dict:
     try:
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -93,8 +104,10 @@ def save_user(projects_: dict, path: Path | str | None = None) -> None:
 def set_user(name: str, op: str, tag: str = "", path: Path | str | None = None,
              workspace: Path | str | None = None) -> dict:
     """The card's ⋯ menu: hide / show / tag / untag one project. `name` must be a folder in the workspace."""
-    ws = Path(workspace or load_registry()["workspace"])
-    if not name or name.startswith(".") or "/" in name or "\\" in name or not (ws / name).is_dir():
+    reg = load_registry()
+    ws = Path(workspace or reg["workspace"])
+    if not name or name.startswith(".") or "/" in name or "\\" in name or not (
+            (ws / name).is_dir() or name in outside_folders(reg)):
         return {"ok": False, "why": f"no project called {name!r}"}
     users = load_user(path)
     entry = dict(users.get(name) or {})
@@ -482,6 +495,8 @@ def project_rows(reg: dict, listening: list[dict] | None = None, wsl_ports: dict
         folders = {d.name: d for d in ws.iterdir() if d.is_dir() and not d.name.startswith(".")}
     except OSError:
         return []
+    for name, folder in outside_folders(reg).items():
+        folders.setdefault(name, folder)
     listening = listening or []
     wsl_ports = wsl_ports or {}
     running = match_listeners(folders, listening, paths)

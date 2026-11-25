@@ -779,3 +779,20 @@ def test_a_plain_web_page_gets_an_open_file(tmp_path):
     assert projects.open_file_for(app, {}) is None
     assert projects.open_file_for(both, {"start": {"cmd": ["x"]}}) is None    # it has a Start: that opens it
     assert projects.open_file_for(app, {"open_file": "docs/a.html"}) == "docs/a.html"
+
+
+def test_a_project_outside_the_workspace_is_listed_by_path(tmp_path):
+    """`path:` in launchpad.yaml lists a folder that lives elsewhere (D:\Meta Scrub, 2026-11-25)."""
+    ws = tmp_path / "ws"
+    (ws / "alpha").mkdir(parents=True)
+    elsewhere = tmp_path / "Meta Scrub"
+    elsewhere.mkdir()
+    reg = {"workspace": str(ws), "hidden": {}, "media": {}, "user": {},
+           "projects": {"Meta Scrub": {"path": str(elsewhere), "title": "Meta Scrub"},
+                        "Gone": {"path": str(tmp_path / "missing")}}}
+    assert projects.outside_folders(reg) == {"Meta Scrub": elsewhere}
+    names = {r["name"] for r in projects.project_rows(reg, [], {}, git=no_git, paths=lambda pid: [], find_proc=None)}
+    assert {"alpha", "Meta Scrub"} <= names and "Gone" not in names
+    assert launcher._folder(reg, "Meta Scrub") == elsewhere
+    with pytest.raises(launcher.LaunchError):
+        launcher._folder(reg, "Gone")

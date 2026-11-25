@@ -4,6 +4,7 @@
 # (deprecated / retired / finished / paused), the git remote (GitHub link), the last commit, uncommitted changes, and the
 # dev-server command + port from `.claude/launch.json`. A new folder in the workspace shows up without an entry here.
 #
+# Optional per project: `path:` = a project folder outside the workspace (listed even though the scan doesn't see it).
 # Optional per project: `autostart: true` = the HUD starts it once, ~15 s after the HUD itself starts, unless it
 # already runs or its port is taken by something else.
 #
@@ -109,6 +110,14 @@ projects:
     stop: {wsl: 'pkill -f /mnt/d/Workspace/omni-tools/node_modules'}
     port: 8082
     runs_in: wsl
+  Meta Scrub:
+    # lives outside the workspace (D:\Meta Scrub): `path:` lists it anyway
+    path: 'D:\Meta Scrub'
+    title: Meta Scrub
+    description: Inspect, compare and strip hidden metadata from photos and PDFs (desktop app, no server).
+    media: meta-scrub
+    # the project's own venv, so it always runs the current code; a desktop window, no port
+    start: {cmd: ['D:\Meta Scrub\.venv\Scripts\pythonw.exe', -m, meta_scrub.gui.app]}
   media-api: {media: media-api}
   speedman: {media: speedman}
   voice-savior: {media: voice-savior}
@@ -172,6 +181,11 @@ media:
     runs_in: windows
     start: {shortcut: 'D:\Workspace\lossless-cut\LosslessCut.lnk'}
     folder: 'D:\Output'
+  meta-scrub:
+    title: Meta Scrub
+    what: strip GPS, camera and author metadata from photos and PDFs
+    project: Meta Scrub            # started as the project (a desktop window, no port)
+    runs_in: windows
   kiiy2k:
     title: KIIY2k Video FX
     what: 2000s WebGL cyber aesthetic video editor
