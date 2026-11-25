@@ -111,13 +111,13 @@ projects:
     port: 8082
     runs_in: wsl
   Meta Scrub:
-    # lives outside the workspace (D:\Meta Scrub): `path:` lists it anyway
-    path: 'D:\Meta Scrub'
     title: Meta Scrub
     description: Inspect, compare and strip hidden metadata from photos and PDFs (desktop app, no server).
     media: meta-scrub
     # the project's own venv, so it always runs the current code; a desktop window, no port
-    start: {cmd: ['D:\Meta Scrub\.venv\Scripts\pythonw.exe', -m, meta_scrub.gui.app]}
+    # (its launch.json's :5181 is a dev mode: `watcher` finds the window's process instead of waiting for that port)
+    start: {cmd: ['D:\Workspace\Meta Scrub\.venv\Scripts\pythonw.exe', -m, meta_scrub.gui.app]}
+    watcher: true
   media-api: {media: media-api}
   speedman: {media: speedman}
   voice-savior: {media: voice-savior}
