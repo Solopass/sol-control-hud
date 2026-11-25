@@ -425,6 +425,9 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 
 /* Obsidian Notes widget */
 .notes-controls { display:flex; gap:6px; align-items:center; }
+/* the Chains header has 7 controls: wrap them under the title instead of pushing the last ones off the card */
+#c-chains > h2 { flex-wrap:wrap; row-gap:6px; }
+#c-chains > h2 > .notes-controls { flex:1 1 auto; flex-wrap:wrap; justify-content:flex-end; }
 .mini-search { background:var(--badge); border:1px solid var(--line); border-radius:9px; padding:3px 9px; font-size:11px; color:var(--text); width:130px; transition:border-color .2s, width .2s; }
 .mini-search:focus { outline:none; border-color:var(--cyan); width:170px; }
 .mini-select { background:var(--badge); border:1px solid var(--line); border-radius:6px; padding:3px 6px; font-size:11px; color:var(--text); max-width:160px; }
