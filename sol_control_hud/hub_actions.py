@@ -7,6 +7,66 @@ from __future__ import annotations
 from . import hub as _hub
 
 
+def chain_runners() -> list:
+    """The running chain daemons (pythonw -m sol_control_hud.chains daemon)."""
+    import psutil
+    out = []
+    for p in psutil.process_iter(["name", "cmdline"]):
+        if is_chain_runner(p.info.get("name"), p.info.get("cmdline")):
+            out.append(p)
+    return out
+
+
+def is_chain_runner(name, cmdline) -> bool:
+    """Python started as `-m sol_control_hud.chains daemon`: exact arguments, so a shell or editor whose command
+    text merely mentions the daemon is never matched."""
+    if (name or "").lower() not in ("pythonw.exe", "python.exe"):
+        return False
+    args = list(cmdline or [])
+    for i in range(len(args) - 2):
+        if args[i] == "-m" and args[i + 1] == "sol_control_hud.chains" and args[i + 2] == "daemon":
+            return True
+    return False
+
+
+def start_chain_runner() -> None:
+    """Start the chain daemon detached (WMI create: not a child of the HUD, so a HUD restart doesn't take it down).
+    A second copy exits by itself: the daemon holds chains.lock (chain_daemon.single_instance)."""
+    import subprocess
+    from .paths import ROOT
+    py = ROOT / ".venv" / "Scripts" / "pythonw.exe"
+    cmd = f'"{py}" -m sol_control_hud.chains daemon'
+    ps = (f"$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{CommandLine='{cmd}';"
+          f" CurrentDirectory='{ROOT}'}}; exit $r.ReturnValue")
+    subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                     creationflags=0x08000000)
+
+
+def restart_chain_runner(find=chain_runners, start=start_chain_runner, wait_s: float = 10.0) -> dict:
+    """The chain card's Restart button (2026-11-24): load new chain code without hunting for the process.
+    Stops every runner, waits for it to exit (releasing chains.lock), then starts one. A chain that was running
+    picks up again: the new runner resumes chains left 'running' (chain_daemon, 'left running by a crash')."""
+    import psutil
+    procs = find()
+    for p in procs:
+        try:
+            p.terminate()
+        except psutil.Error:
+            pass
+    _gone, alive = psutil.wait_procs(procs, timeout=wait_s) if procs else ([], [])
+    for p in alive:
+        try:
+            p.kill()
+        except psutil.Error:
+            pass
+    if alive:
+        psutil.wait_procs(alive, timeout=3)
+    start()
+    _hub.log(f"chain runner restart from dashboard: stopped {len(procs)}, started a new one")
+    return {"ok": True, "stopped": len(procs),
+            "why": "Chain runner restarted" if procs else "Chain runner wasn't running: started it"}
+
+
 def do_action(self, action: str, target: str = "", body: dict | None = None) -> dict:
     """The dashboard's buttons. Machine changes go through the same safe paths as the ticker and the Away panel."""
     import subprocess
@@ -21,6 +81,10 @@ def do_action(self, action: str, target: str = "", body: dict | None = None) -> 
         subprocess.Popen(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
                          creationflags=0x08000000)
         return {"ok": True, "why": "Restarting HUD… reconnecting shortly"}
+    if action == "restart_chains":
+        import threading
+        threading.Thread(target=restart_chain_runner, name="restart-chains", daemon=True).start()
+        return {"ok": True, "why": "Restarting the chain runner… (a running chain picks up where it stopped)"}
     if action == "stop_ai":
         state = _hub.json.loads((llm / "state.json").read_text(encoding="utf-8")) if (llm / "state.json").exists() else {}
         if state.get("mode") != "away":

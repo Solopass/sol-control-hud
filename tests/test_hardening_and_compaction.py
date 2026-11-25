@@ -145,3 +145,40 @@ def test_ticker_release_instance_lock(tmp_path: Path):
         f2 = ticker.acquire_instance_lock()
         assert f2 is not None
         ticker.release_instance_lock(f2)
+
+
+def test_restart_chain_runner_stops_then_starts():
+    """The chain card's Restart button: every runner is stopped before the new one starts."""
+    import psutil
+    from sol_control_hud import hub_actions
+    events = []
+
+    class P:
+        def __init__(self, n): self.n = n
+        def terminate(self): events.append(("terminate", self.n))
+        def kill(self): events.append(("kill", self.n))
+
+    procs = [P(1), P(2)]
+    orig = psutil.wait_procs
+    psutil.wait_procs = lambda ps, timeout=None: (events.append(("wait", len(ps))) or (ps[:1], ps[1:]))
+    try:
+        r = hub_actions.restart_chain_runner(find=lambda: procs, start=lambda: events.append(("start",)), wait_s=0)
+    finally:
+        psutil.wait_procs = orig
+    assert r["ok"] and r["stopped"] == 2
+    assert events[0] == ("terminate", 1) and ("kill", 2) in events and events[-1] == ("start",)
+
+
+def test_restart_chain_runner_starts_when_none_running():
+    from sol_control_hud import hub_actions
+    started = []
+    r = hub_actions.restart_chain_runner(find=lambda: [], start=lambda: started.append(1))
+    assert r["ok"] and r["stopped"] == 0 and started == [1]
+
+
+def test_is_chain_runner_matches_exact_args_only():
+    from sol_control_hud.hub_actions import is_chain_runner
+    assert is_chain_runner("pythonw.exe", [r"D:\x\pythonw.exe", "-m", "sol_control_hud.chains", "daemon"])
+    assert not is_chain_runner("pythonw.exe", ["pythonw.exe", "-m", "sol_control_hud.chains", "run", "daemon"])
+    assert not is_chain_runner("bash.exe", ["bash", "-c", "pythonw -m sol_control_hud.chains daemon"])
+    assert not is_chain_runner("python.exe", ["python", "-c", "x = 'sol_control_hud.chains daemon'"])

@@ -18,7 +18,7 @@ land in the middle of a save. On 2026-10-10 three restarts by killing, one after
 `python -m sol_control_hud.chains daemon` runs the chains (schedules, watches, lanes) in its own process, kept alive by
 sol-net's watcher (`bin\sol-watch.exe`). Restarting the HUD does **not** reload chain code (`chains/*.py`, including
 `file_tools.Policy`): the daemon has to restart too. When it exits, the watcher starts it again within seconds, and a run it
-interrupted is recovered. Agents: ask Jake before stopping it, and check `python -m sol_control_hud.chains runs` first
+interrupted is recovered. Jake can restart it from the Chains card (↻ Restart runner, since 2026-11-24). Agents: ask Jake before stopping it, and check `python -m sol_control_hud.chains runs` first
 so nothing is mid-run.
 
 ## Before you commit
